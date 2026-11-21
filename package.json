@@ -1,0 +1,26 @@
+{
+  "name": "apex-pursuit",
+  "version": "0.4.3",
+  "description": "Apex Pursuit — browser street racer with police pursuits, weather, AI rivals and online play for 4",
+  "scripts": {
+    "dev": "node build.mjs --serve",
+    "build": "node build.mjs",
+    "build:cdn": "node build.mjs --cdn",
+    "typecheck": "tsc --noEmit -p .",
+    "test:physics": "esbuild tools/physics-test.ts --bundle --platform=node --outfile=dist/physics-test.cjs --log-level=warning && node dist/physics-test.cjs",
+    "serve": "node server/relay.mjs",
+    "play:online": "node build.mjs && node server/relay.mjs",
+    "build:play": "node build.mjs --play"
+  },
+  "dependencies": {
+    "three": "^0.170.0",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "private": true,
+  "type": "module"
+}

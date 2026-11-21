@@ -1,0 +1,10 @@
+# dependencies and builds (the playable game ships prebuilt in play/)
+node_modules/
+dist/
+# logs and local files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.env
+.env.*

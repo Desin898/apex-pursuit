@@ -1,0 +1,44 @@
+// Dev-only turntable: renders the Phantom X1 on a neutral studio floor from a few angles.
+import * as THREE from 'three';
+import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { PhantomX1 } from '../src/vehicle/PhantomX1';
+import { VehicleState } from '../src/vehicle/VehiclePhysics';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(1280, 720);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.75;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.style.margin = '0';
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const sky = new Sky();
+sky.scale.setScalar(4000);
+const sun = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(74), THREE.MathUtils.degToRad(-50));
+const u = sky.material.uniforms;
+u.sunPosition.value.copy(sun); u.turbidity.value = 6; u.rayleigh.value = 1.6; u.mieCoefficient.value = 0.006; u.mieDirectionalG.value = 0.85;
+const envScene = new THREE.Scene(); envScene.add(sky);
+const g0 = new THREE.Mesh(new THREE.CircleGeometry(3000, 32), new THREE.MeshBasicMaterial({ color: 0x2a2b2e })); g0.rotation.x = -Math.PI / 2; g0.position.y = -2; envScene.add(g0);
+const pm = new THREE.PMREMGenerator(renderer);
+scene.environment = pm.fromScene(envScene, 0, 1, 5000).texture;
+scene.background = new THREE.Color(0x8a8f96);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x55585c, roughness: 0.85 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const dl = new THREE.DirectionalLight(0xfff0dd, 3); dl.position.copy(sun).multiplyScalar(30); dl.castShadow = true;
+dl.shadow.mapSize.set(2048, 2048); const sc = dl.shadow.camera; sc.left = -6; sc.right = 6; sc.top = 6; sc.bottom = -6; sc.far = 80; dl.shadow.bias = -0.0004; dl.shadow.normalBias = 0.02;
+scene.add(dl); scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x554433, 0.5));
+const car = new PhantomX1();
+scene.add(car.root);
+const st = new VehicleState();
+const cam = new THREE.PerspectiveCamera(32, 1280 / 720, 0.1, 500);
+(window as any).shot = (az: number, el: number, dist: number, paint = 0, steer = 0, ty = 0.55) => {
+  car.setPaint(paint);
+  st.steerAngle = steer;
+  car.update(st, { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0 }, 1, 0.016);
+  const a = THREE.MathUtils.degToRad(az), e = THREE.MathUtils.degToRad(el);
+  cam.position.set(Math.sin(a) * Math.cos(e) * dist, Math.sin(e) * dist + ty, Math.cos(a) * Math.cos(e) * dist);
+  cam.lookAt(0, ty, 0);
+  renderer.render(scene, cam);
+};
+(window as any).ready = true;

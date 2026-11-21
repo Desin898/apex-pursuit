@@ -1,0 +1,95 @@
+ROLE
+You are continuing APEX PURSUIT, an arcade street racer in TypeScript + Three.js. The current project is attached (apex-pursuit-phase4a-source.zip, or later). Extend it. Do not rebuild anything that already works. These all stay and must keep working:
+- the Phantom X1 and its editions, menus, the 3B HUD and the 4A HUD layout and cameras, including the cockpit
+- AI rivals, pursuit races, weather and time of day, the 3D graphics, audio, DualShock 4 and rumble
+- online play for up to 4 friends
+
+READ FIRST
+Read README.md, src/config.ts, src/main.ts, src/fx/Rain.ts, src/fx/PostFX.ts (lens-drop pass), src/fx/Particles.ts (spray), src/fx/Reflections.ts (wet-road mirror), src/world/Environment.ts and src/vehicle/Cockpit.ts (windscreen rain).
+
+Keep the conventions:
+- Every tunable lives in config.ts.
+- Quality presets scale the cost honestly.
+- `npm run test:physics` keeps passing.
+- No real brands, logos or number plates anywhere. All reference images are mood only.
+
+REFERENCE IMAGES (mood and lighting only)
+- Image 1, a screenshot of the current build, is the BUG REPORT. In the chase camera:
+  - The lens is covered in round water bubbles that sit over everything and distract from the driving.
+  - The rain streaks fan out from the centre like a hyperspace effect.
+  - The cars throw almost no spray.
+- Image 2: two cars racing at night in heavy rain.
+  - Huge white spray (rooster tails) behind every car, lit by tail lights and street lamps.
+  - Rain shows as short bright flecks near the lights and is almost invisible in the dark.
+  - Long vertical streaks of light reflected in the wet road.
+  - A soft haze of mist hanging over the track.
+- Image 3: the view from a driver's seat in the rain at night. Water belongs on the windscreen in the cockpit view:
+  - a mix of small beads and a few larger drops
+  - city lights blurred and bokeh'd through the wet glass
+  - drops gathering near the edges of the glass
+- Image 4: a race car on a wet track at night.
+  - Fine mist spray off the rear tyres.
+  - Red tail-light glow spilling into the spray.
+  - Deep, mirror-like red reflections stretched down the road.
+- Image 5: a car standing in the rain on a city street.
+  - Rain streaks show where they cross a light source.
+  - Splashes on the ground.
+  - Warm, hazy street lights.
+
+GOAL
+Rain that looks like the reference photos instead of a particle effect. Water lives in the world (in the air, on the road, thrown up by the tyres), not as bubbles stuck to the camera.
+
+1. NO BUBBLES ON THE CAMERA
+- Lens drops in the chase, hood and bumper views are OFF by default.
+- Add a "Lens drops" setting: Off / Light.
+  - Light means a handful of small, short-lived drops.
+  - No sideways running.
+  - Only a gentle refraction, with no visible rim.
+- Remove the "run sideways at speed" behaviour completely.
+- In the cockpit, water stays on the windscreen (see 6), never on the camera.
+
+2. RAIN IN THE AIR
+- Short, thin streaks (about 15–40 cm), not long lines.
+- Cap the streak length at speed so they never fan out from the centre of the screen.
+- Fade streaks within about 2.5 m of the camera.
+- Light the rain:
+  - A drop is nearly invisible in the dark and bright where it passes through a street lamp, headlight or police light.
+  - Use the same light list the smoke uses.
+- Give the falling rain a little wind drift, and vary the density in gusts.
+- Add a distant rain haze: a faint, light-catching mist that thickens the fog with distance in the rain and glows around lamps.
+
+3. SPRAY FROM EVERY CAR
+- Each car on a wet road throws a rooster tail behind each rear tyre:
+  - It grows with speed and hangs in the air for 1–2 s.
+  - It is lit by that car's tail lights (red glow inside the spray) and by any nearby lamps.
+- Thinner mist off the front tyres.
+- This applies to rivals and police, not just the player.
+- Driving into another car's spray briefly cuts how far you can see.
+- Budget the particle count per quality preset.
+
+4. THE WET ROAD
+- Stretch the reflections of lights vertically (anisotropic streaks down the road), the way wet tarmac smears light.
+- Red tail lights and police strobes reflect as long glowing streaks.
+- Add puddles that ripple, and small splashes where drops hit the road near the camera.
+- Keep the Phase 3D planar mirror, with roughness so it isn't perfectly sharp.
+
+5. LIGHTS IN THE RAIN
+- Street lamps, headlights and police lights get a soft glow halo in the rain, and their beams show in the mist on High and Ultra.
+
+6. COCKPIT WINDSCREEN (Image 3)
+- Small beads plus a few larger drops that slide up the glass at speed.
+- The wiper clears an arc and the water builds back up behind it.
+- Lights seen through the wet glass blur into soft blobs.
+
+7. QUALITY BAR
+- Rain costs:
+  - at most about 1 ms on High on an RTX 3050 laptop
+  - at most 0.5 ms on Medium
+  - on Low, only the streaks and simple spray
+- Compare before and after at the same spots:
+  - the chase camera on the start straight in rain at night
+  - behind a rival at speed
+  - the cockpit in rain
+- Update README with the new settings and tunables.
+
+Start with sections 1 to 3. Then do 4 to 6, publish a playable build, and tell me what changed and what is not done.

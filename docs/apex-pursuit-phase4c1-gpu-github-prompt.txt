@@ -1,0 +1,65 @@
+APEX PURSUIT — PHASE 4C.1 PROMPT: RUN ON THE RTX 3050, AND SHARE THE GAME ON GITHUB
+==================================================================================
+
+Context
+-------
+Phase 4C (the big visual upgrade) is done. Two problems remain before Phase 4D:
+
+1. The game still draws on the built-in AMD Radeon chip, not the NVIDIA RTX 3050, even after
+   setting Claude (claude.exe) to "High Performance (NVIDIA GeForce RTX 3050 Laptop GPU)" in
+   Windows Settings → System → Display → Graphics and in the NVIDIA Control Panel.
+   F4 benchmark, night rain, High, 1099×643, on the AMD chip:
+     average 43.3 fps · 1% low 30.6 fps · CPU 10.1 ms · GPU 13.7 ms · 709 frames
+   The GPU time (13.7 ms) is now the limit, so getting onto the RTX 3050 is the fix.
+
+2. I want the game in a new public repository on my GitHub account (github.com/Desin898), with
+   the current code committed, so friends can click Code → Download ZIP and run it on their own
+   PCs without any build tools.
+
+Part A — Graphics card
+----------------------
+A1. Explain plainly why a web page can't pick the GPU itself. The game already asks the browser
+    for the high-performance GPU (WebGL powerPreference "high-performance"). Windows, the
+    browser or the Claude app decide which chip actually draws.
+A2. Give the checklist that actually moves it to the RTX 3050, in order of how likely it is to
+    be the cause on an ASUS laptop:
+    - fully quit Claude from the system tray (not just close the window), then reopen it
+    - Armoury Crate → GPU Mode: Standard or Ultimate, not Eco (Eco switches the NVIDIA card off)
+    - play in Chrome instead: chrome://flags → "Force high performance GPU" → Enabled, plus
+      chrome.exe set to High performance in Windows Graphics settings, then fully restart Chrome
+    - the Windows Graphics entry for the Claude Store app points at one version folder
+      (Claude_6.28899.2.0…); after an app update it must be added again
+A3. In the game: the Settings → Graphics chip line should say clearly whether the game is on
+    the NVIDIA card, and when it's on a built-in chip, list the short version of A2.
+A4. Don't promise an in-game switch that can't work. If one isn't possible, say so.
+
+Part B — GitHub repository for friends
+--------------------------------------
+B1. Repository: Desin898/apex-pursuit, public. (Creating the empty repository is done by me
+    on github.com if the build machine can't; then the code is pushed to it.)
+B2. Commit the full source (src, server, tools, art, docs, build files, README) with a sensible
+    .gitignore (node_modules, dist builds, local logs). No secrets, no personal email
+    addresses in files or commit metadata.
+B3. Friends must be able to play from the ZIP with no build step:
+    - a prebuilt single-file game, play/ApexPursuit.html: double-click to play solo in Chrome
+      or Edge (works offline; everything is inside the one file)
+    - Windows: "Host online race.bat": needs Node.js; installs the one runtime dependency
+      the first time, starts the relay, opens the browser, and shows the address friends on
+      the same Wi-Fi type in
+    - macOS / Linux: host-online.sh, the same
+    - the relay serves the prebuilt file, so hosting needs no build either
+B4. A short "How to play" section at the very top of the README for friends: download ZIP,
+    unzip, double-click; online with friends; controls; graphics tips (High performance GPU,
+    quality presets); what to do if it's slow.
+B5. Developer notes stay in the README below that (build, tests, tools).
+B6. After the push, check the repository page shows the files and the README, and that the
+    downloaded ZIP runs (open play/ApexPursuit.html).
+
+Constraints
+-----------
+- No real brands, logos, names or plates (unchanged).
+- My email stays private: use a GitHub no-reply address for commits.
+- Don't change the gameplay or the look in this phase.
+
+Then: Phase 4D — background detail around the circuit, and a venue system ready for the
+mountain pass.

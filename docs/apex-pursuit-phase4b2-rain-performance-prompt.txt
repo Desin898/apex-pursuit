@@ -1,0 +1,111 @@
+ROLE
+You are continuing APEX PURSUIT, an arcade street racer in TypeScript + Three.js. The current project is attached (apex-pursuit-phase4b-source.zip). Extend it. Do not rebuild anything that already works. These all stay and must keep working:
+- the Phantom X1 and its editions, the menus, the HUD, every camera including the cockpit
+- the 4B police cars, sirens and helicopter
+- the 4B rain: lit streaks, tyre spray, splashes and wet-road streaks
+- AI rivals, pursuit races, weather and time of day, audio, DualShock 4 and rumble
+- online play for up to 4 friends
+
+READ FIRST
+- README.md, src/config.ts, src/main.ts
+- src/fx/PostFX.ts (the lens-drop pass, uDrops / drops())
+- src/fx/Rain.ts, src/fx/Particles.ts
+- src/world/Environment.ts (weather presets)
+- src/vehicle/Cockpit.ts (windscreen rain and mirrors)
+- src/fx/GpuTimer.ts and the F3 overlay code
+
+Keep the conventions:
+- Every tunable lives in config.ts.
+- `npm run test:physics` keeps passing.
+- No real brands anywhere.
+
+REFERENCE IMAGES
+- Image 1: the cockpit in rain at dusk. The water on the windscreen, the wiper and the drops look right. KEEP this. The F3 overlay shows 45 fps, frame 22 ms, GPU 16.7 ms, 1257 draw calls (High, 1570×918).
+- Image 2: the chase camera in heavy rain, an earlier build. This is the LOOK TO GO BACK TO, and the player likes it:
+  - dense, long rain streaks
+  - plenty of water drops on the lens
+  The only thing that was wrong: at speed the drops ran off sideways across the screen, which looked fake and distracting.
+- Image 3: the chase camera in the current build (4B). The rain is now too soft and too light, and the lens is dry. F3 shows 43 fps, frame 23 ms, GPU 12.2 ms, 675 draw calls (High).
+
+PART 1: HEAVY RAIN WITH REALISTIC LENS DROPS
+1. Rain intensity
+- Add a rain intensity from 0 to 1 to the weather. Light rain is about 0.3, rain about 0.6 and a downpour 1.0.
+- In a race it changes on its own, slowly, over minutes: showers build into downpours and ease off again.
+  - The host decides it, and online guests get the same value.
+  - A setting gives "Rain strength: Changing / Light / Heavy / Downpour".
+- Intensity drives everything together: streak count and brightness, splash count, spray amount, road wetness and puddle shine, fog density, how fast lens drops gather, and the windscreen rain in the cockpit.
+- At 0.8 and above the chase camera must look as heavy as Image 2:
+  - dense streaks across the whole view, still lit by lamps and car lights but visible in the ambient light too
+  - longer streaks than now, but still capped so they never become a hyperspace tunnel
+
+2. Lens drops (outside views)
+- Turn them back on by default, and make their amount follow the rain intensity. A dry or light shower gives a few; a downpour gives Image 2 levels. The setting becomes "Lens drops: Auto / Off".
+- What makes them realistic:
+  - Each drop is a small lens. It shows the scene behind it shrunk and flipped, slightly blurred, with a soft bright rim on the side facing the light. No dark outlines and no hollow rings.
+  - Size varies: many small beads, some medium drops, a few large ones.
+  - Drops build up over a few seconds as rain lands, and new drops appear at random places. When two drops overlap they merge into a bigger one.
+  - Gravity: once a drop is big enough it slides DOWN the lens slowly, wobbling. It leaves a thin wet trail that fades, and it collects smaller beads on the way.
+  - NO sideways running at speed. Speed only does two things: drops arrive faster (the car drives into the rain), and the biggest drops on the edges of the lens may tremble or slowly slide outwards, never streak across the screen.
+  - Drops in front of bright lights (lamps, tail lights, police bars) glow, with a soft bokeh bloom.
+  - They dry or blow off slowly once the rain stops, over about 10 s, not instantly.
+- Brief clearing moments add life: a big gust (or nitrous) can flick a few drops off the lens.
+- Keep a hard limit so the centre of the screen (where the road is) never gets more than a light covering. Heavy drops gather more at the edges and corners, like a real camera.
+- Medium: one layer of drops at half resolution. High and Ultra: two layers. Low: no lens drops.
+
+3. Cockpit
+- Keep the windscreen rain from Image 1. Link its amount to the rain intensity too, and speed up the wiper in a downpour (two speeds plus intermittent in light rain).
+
+PART 2: SMOOTH 60 FPS ON AN RTX 3050 LAPTOP
+In Images 1 and 3 the frame takes 22–23 ms while the GPU needs only 12–17 ms. So the main thread (JavaScript work, draw-call submission) is the bottleneck, not just the graphics card. Find the real cost first, then fix it.
+
+1. Measure
+- Extend the F3 overlay with a CPU breakdown, in ms per frame:
+  - physics steps
+  - AI and police
+  - particles
+  - rain and environment update
+  - HUD and canvases
+  - scene update (matrices)
+  - render submission (main, wet-road mirror, paint probe, cockpit mirrors)
+  - post-processing
+- Also show draw calls per pass.
+- Add a benchmark mode (F4) that flies a fixed camera path round the track for 30 s in pursuit, night and heavy rain. It reports average fps, 1% low fps, average CPU ms and GPU ms, and copies the result to the clipboard.
+
+2. Fix what the measurement shows. Likely candidates:
+- Particles: move the smoke, spray and mist simulation onto the GPU, like the rain (spawn data in a ring buffer, motion computed in the vertex shader), so the CPU only writes new particles.
+- Draw calls:
+  - merge each police car into a few meshes (one per material) and instance the identical parts (wheels, light modules)
+  - make sure static batching covers all roadside props
+  - cull small props by distance
+- Extra renders:
+  - the wet-road mirror at a lower resolution and only every second frame on High, skipping props and particles
+  - the paint probe at one face every 2 frames
+  - cockpit mirrors at 30 Hz, low detail (no particles, no small props) and a short far plane
+- Physics: keep 120 Hz, but skip AI-car sub-steps when a car is far from the camera and not in contact, using a simpler integration, while staying deterministic for online.
+- HUD: redraw the canvases only when values change, at most 30 Hz for the minimap.
+- Avoid per-frame garbage (temporary vectors, arrays, closures) in the hot paths.
+
+3. Keep it smooth automatically
+- Dynamic resolution: when the frame time goes over 16.7 ms, lower the render scale in small steps (down to 70%), and raise it again when there is headroom. On by default ("Target 60 fps").
+- A frame-rate setting: 60 / 120 / Unlimited.
+- Choose the GPU properly:
+  - Keep powerPreference: 'high-performance'.
+  - In the graphics settings, show which GPU the browser reports (WEBGL_debug_renderer_info). If it is an integrated GPU, show a tip: set the browser or Claude app to "High performance" in Windows Graphics settings, and plug in the charger.
+
+4. Targets
+- RTX 3050 laptop, 1080p, plugged in:
+  - High: 60 fps average and a 1% low above 50 in the benchmark, in night, heavy rain, Heat 5
+  - Ultra: 45+ fps
+  - Cockpit view on High: 60 fps
+- Report the before and after F3 numbers in the README.
+
+QUALITY BAR
+- No lens drop ever moves sideways across the screen at speed.
+- Heavy rain at intensity 1.0 in the chase camera looks as dense as Image 2.
+- Physics tests, the HUD check and the online sync test all pass.
+- The rain intensity is the same for every player online.
+- Update README: rain intensity, lens drops, performance settings, benchmark, before and after numbers.
+
+DELIVERY
+- Do Part 1 and Part 2 together. Then publish a playable build, give me the source zip, and tell me what changed and what is not done.
+- After that, continue with Phase 4C (the graphics content upgrade).
