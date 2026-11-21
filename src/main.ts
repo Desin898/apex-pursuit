@@ -718,6 +718,9 @@ class Game {
     m.tick();
     const on = s.music && s.musicBalance > 0 && (m.state === 'ready' || m.state === 'playing' || m.state === 'paused');
     box.hidden = !on;
+    // 4D.1: Spotify's player is blocked on this page: offer the playlist in Spotify instead (menus only)
+    const out = document.getElementById('music-out');
+    if (out) out.hidden = !(s.music && m.state === 'unavailable' && this.state === 'menu');
     const race = this.state === 'playing' || this.state === 'paused';
     box.classList.toggle('race', race && this.state === 'playing');
     box.classList.toggle('menu', !(race && this.state === 'playing'));
@@ -1615,12 +1618,14 @@ class Game {
         { label: 'Volume', value: () => pct(s.volume), adjust: (d) => ((s.volume = step(s.volume, d, 0, 1, 0.1)), done()) },
         {
           label: 'Music (your Spotify playlist)',
-          value: () => (!s.music ? 'Off' : this.music.state === 'unavailable' ? 'Blocked on this page' : this.music.current ? `On · ${this.music.current[1]}` : 'On'),
+          value: () => (!s.music ? 'Off' : this.music.state === 'unavailable' ? "Can't play here · ✕ / Enter opens Spotify" : this.music.current ? `On · ${this.music.current[1]}` : 'On'),
           adjust: () => {
             s.music = !s.music;
             if (s.music) this.music.play();
             done();
           },
+          // where Spotify's player is blocked (the claude.ai page), open the playlist in Spotify instead
+          accept: () => (this.music.state === 'unavailable' ? void window.open(this.music.url, '_blank', 'noopener') : undefined),
         },
         { label: 'Next track (M · L3 + R3)', value: () => (this.music.current ? this.music.current[2] : '—'), adjust: () => (s.music ? (this.music.state === 'off' ? this.music.play() : this.music.next()) : undefined) },
         { label: 'Music / game balance', value: () => (s.musicBalance <= 0 ? 'Game only' : pct(s.musicBalance)), adjust: (d) => ((s.musicBalance = step(s.musicBalance, d, 0, 1, 0.1)), done()) },

@@ -413,6 +413,10 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
 #music .tip b { color: var(--ink); font-weight: 600; }
 #music .tip .warn { color: var(--accent); }
 #music.menu { right: var(--gutter); bottom: var(--gutter); }
+#music-out { position: fixed; z-index: 40; right: var(--gutter); bottom: var(--gutter); max-width: 300px; display: grid; gap: 3px; padding: 12px 16px; border-radius: 14px; background: var(--glass); border: 1px solid var(--line-2); color: var(--ink); text-decoration: none; font-size: var(--t-sm); backdrop-filter: blur(8px); }
+#music-out[hidden] { display: none; }
+#music-out span { color: var(--ink-2); font-size: var(--t-xs); line-height: 1.4; }
+#music-out:hover { border-color: var(--accent); }
 #music.race { left: var(--gutter); top: var(--gutter); transform: scale(calc(var(--hud-scale) * 0.82)); transform-origin: top left; }
 #music.race .frame { pointer-events: none; }
 #music.race.quiet { opacity: 0.32; }
@@ -670,6 +674,7 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
 </div>
 <div id="boot-error" hidden><b>Couldn't start</b><span id="boot-msg"></span></div>
 <!--APP-->
+<a id="music-out" hidden target="_blank" rel="noopener" href="https://open.spotify.com/playlist/6YHSmt82WZB2ZlQrX42Njn"><b>Your playlist</b><span>This page can't play Spotify inside the game. Open it in Spotify ↗ and race with it playing.</span></a>
 <div id="music" class="menu" hidden aria-label="Music">
   <div class="frame" id="music-frame"></div>
   <div class="tip"><span id="music-note"></span><span id="music-key"></span></div>
