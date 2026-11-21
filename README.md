@@ -35,7 +35,7 @@ A DualShock 4 or Xbox controller works too (full table below).
   **High performance**, then fully close and reopen the browser. In Chrome you can also turn on
   `chrome://flags` → **Force high performance GPU**. On ASUS laptops, check Armoury Crate's
   GPU Mode isn't **Eco**.
-- Pause → Settings → **Graphics** → Medium or Low. **Graphics chip** in the same menu shows
+- Pause → Settings → **Graphics**: **High** is the best balance on a gaming laptop. On **Ultra**, leave **Ambient occlusion** off unless you have frame rate to spare (it draws the whole scene twice). Medium or Low for built-in graphics chips. **Graphics chip** in the same menu shows
   which chip the game is drawing on.
 - Press **F3** for the frame-rate overlay, **F4** for a 30-second benchmark.
 

@@ -50,6 +50,8 @@ export interface Settings {
   toneMap: 'filmic' | 'natural';
   /** 4C: slight colour fringing at the screen edges, like a real lens */
   lensFx: boolean;
+  /** 4C.1: screen-space ambient occlusion on Ultra (off by default: it draws the scene twice) */
+  ao: boolean;
   /** how hard it rains when it rains: changing over the race, or fixed */
   rainStrength: 'changing' | 'light' | 'heavy' | 'downpour';
   /** dynamic resolution to hold the frame rate */
@@ -99,6 +101,7 @@ export const defaults: Settings = {
   lensDrops: 'auto',
   toneMap: 'filmic',
   lensFx: true,
+  ao: false,
   rainStrength: 'changing',
   target60: true,
   fpsCap: '60',

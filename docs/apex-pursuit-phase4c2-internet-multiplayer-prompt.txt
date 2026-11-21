@@ -1,0 +1,57 @@
+APEX PURSUIT — PHASE 4C.2 PROMPT: ONLINE RACES WITH FRIENDS AT THEIR OWN HOMES
+===========================================================================
+
+Goal
+----
+Me and my friends each play from our own homes, on our own Wi-Fi. They run the game from the
+GitHub ZIP (play/ApexPursuit.html). Example session: me + 2 friends (later 3) join one
+PURSUIT race, rain, dusk, 3 laps. Humans take grid slots; AI rivals fill the rest of the grid
+of 8 as usual; the police chase everyone.
+
+What exists today (Phase 4C)
+----------------------------
+- OnlineSession: up to 4 humans share a grid of 8; AI fills the remaining slots. The first
+  player in is the HOST: runs the AI rivals, the police (pursuit), the grid and the start
+  lights, and sends weather, time of day, rain strength and laps to everyone. A player joining
+  sends everyone back to the grid; if the host leaves, the next player takes over.
+- Transports: "relay" (WebSocket to server/relay.mjs: works only when the page is opened from
+  the relay's own address), "room" (the shared claude.ai page), "tabs" (same browser).
+- The problem: the relay runs on one PC and is only reachable on that PC's local network, and
+  the ZIP's HTML file (file://) has no way to connect to a relay at all.
+
+Plan
+----
+1. JOIN BY ADDRESS. Online menu in the game: "Host" / "Join". Join takes a server address
+   (paste a link like https://xxxx.trycloudflare.com/?room=friends, or a short code) and a
+   room name. The ZIP's HTML file can then connect to any relay over wss://. Remember the last
+   address. Clear errors: can't reach server, room full (4 humans), version mismatch.
+2. HOSTING FROM HOME, NO ROUTER SETUP. "Host online race.bat" (and host-online.sh) gains an
+   internet option: it starts the relay and a free Cloudflare quick tunnel (cloudflared,
+   downloaded once from Cloudflare's official GitHub releases, with the user's OK), then prints
+   and copies a public https link. The host sends that link to friends (WhatsApp etc.).
+   Friends either paste it into Join, or just open the link in Chrome / Edge.
+   Fallbacks, documented: Tailscale / ZeroTier (private network), router port forwarding, or a
+   free always-on host for the relay (e.g. Render / Fly.io) so nobody has to host.
+3. LOBBY. Before the race: player list with names, paint and ping; host picks mode (race /
+   pursuit), weather (incl. rain strength), time of day and laps; "Ready" for each player;
+   host presses Start. Late joiners wait in the lobby instead of resetting a running race
+   (change from today's "joining resets to the grid").
+4. GRID: humans first in join order, AI fills to 8 (Settings → online AI count 0–7). If a
+   human drops mid-race, their car is taken over by an AI driver ("replaced by NPC") instead
+   of vanishing; if they rejoin, they get it back at the next race.
+5. PURSUIT ONLINE: police target every human fairly (heat per player), busted/escaped per
+   player, results screen for all. Police and helicopter stay host-simulated.
+6. NETWORK QUALITY over the internet (100–250 ms between countries): interpolation buffer
+   tuned for higher ping, extrapolation with snap correction, 20 Hz states, message size kept
+   small, ping shown in the lobby and the leaderboard, host migration that keeps the race
+   going if possible.
+7. SECURITY / FAIR PLAY (friendly level): room names, optional room password, rate limits and
+   size limits on the relay (already partly there), validation of every message (already).
+8. TESTS: tools/nettest.py extended: 3 clients through the relay with simulated 150 ms latency
+   and loss, a pursuit race to the finish, a player dropping and AI taking over, a late joiner
+   waiting in the lobby. A real test over the internet through a tunnel.
+9. README "Play online with friends at home" section: step by step for the host and for
+   friends, with screenshots of the lobby.
+
+Constraints: no real brands; my email stays private; don't break solo play or the claude.ai
+page; commit to github.com/Desin898/apex-pursuit and refresh play/ApexPursuit.html.

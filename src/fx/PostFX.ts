@@ -373,6 +373,8 @@ export class PostFX {
   private bloomBase = 0.42;
   /** 0/1: the slight edge fringe (Settings → Lens fringe) */
   lensCA = 1;
+  /** Settings → Ambient occlusion (only used on Ultra) */
+  aoOn = false;
   private grade = { shadow: new THREE.Vector3(0.86, 1.0, 1.1), high: new THREE.Vector3(1.1, 1.0, 0.88), sat: 1.12 };
   private dropAmount = 0;
 
@@ -417,10 +419,10 @@ export class PostFX {
     this.scenePass = new ScenePass(this.scene, this.camera, W, H, cfg.msaa);
     this.scenePass.before = () => this.beforeScene?.();
     composer.addPass(this.scenePass);
-    if (cfg.ao) {
+    if (cfg.ao && this.aoOn) {
       this.gtao = new GTAOPass(this.scene, this.camera as THREE.PerspectiveCamera, W, H);
-      this.gtao.updateGtaoMaterial({ radius: 0.7, distanceExponent: 1.5, thickness: 2, scale: 1.2, samples: 12 });
-      this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+      this.gtao.updateGtaoMaterial({ radius: 0.7, distanceExponent: 1.5, thickness: 2, scale: 1.2, samples: 8 });
+      this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 8 });
       this.gtao.blendIntensity = 0.85;
       composer.addPass(this.gtao);
     } else this.gtao = null;

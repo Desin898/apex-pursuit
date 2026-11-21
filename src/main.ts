@@ -363,6 +363,7 @@ class Game {
       const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
       if (m) for (const mm of Array.isArray(m) ? m : [m]) mm.needsUpdate = true;
     });
+    this.post.aoOn = this.settings.ao; // 4C.1: GTAO is opt-in (it re-renders the whole scene)
     this.post.configure(q, window.innerWidth, window.innerHeight);
     this.post.beforeScene = () => this.beforeScene();
     this.resize();
@@ -701,6 +702,8 @@ class Game {
     const b = this.bench;
     if (!b) return;
     b.t += dt;
+    // 4C.1: the first 1.5 s compile shaders for the forced night rain: not part of the result
+    if (b.t < 1.5) return;
     b.ms.push(dt * 1000);
     b.cpu.push(prof.cpu);
     if (this.gpu.supported && this.gpu.ms >= 0) b.gpu.push(this.gpu.ms);
@@ -710,7 +713,7 @@ class Game {
     const sorted = b.ms.slice().sort((x, y) => x - y);
     const p99 = sorted[Math.min(n - 1, Math.floor(n * 0.99))];
     const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : -1);
-    const fps = n / b.t;
+    const fps = n / Math.max(0.1, b.t - 1.5);
     const text =
       `Apex Pursuit benchmark · ${this.settings.quality.toUpperCase()} · ${this.renderer.domElement.width}×${this.renderer.domElement.height} · ${this.gpuName}\n` +
       `average ${fps.toFixed(1)} fps · 1% low ${(1000 / p99).toFixed(1)} fps · CPU ${avg(b.cpu).toFixed(1)} ms · GPU ${b.gpu.length ? avg(b.gpu).toFixed(1) + ' ms' : 'n/a'} · ${n} frames`;
@@ -1376,6 +1379,15 @@ class Game {
           },
         },
         { label: 'Rear-view mirror', value: () => (s.mirror ? 'On (hood and bumper cams)' : 'Off'), adjust: () => ((s.mirror = !s.mirror), done()) },
+        {
+          label: 'Ambient occlusion (Ultra only, heavy)',
+          value: () => (s.quality !== 'ultra' ? 'Ultra only' : s.ao ? 'On' : 'Off'),
+          adjust: () => {
+            s.ao = !s.ao;
+            this.applyQuality(s.quality);
+            done();
+          },
+        },
         { label: 'Tone mapping', value: () => (s.toneMap === 'natural' ? 'Natural (AgX)' : 'Filmic (ACES)'), adjust: () => ((s.toneMap = s.toneMap === 'natural' ? 'filmic' : 'natural'), done()) },
         { label: 'Lens fringe (edges)', value: () => (s.lensFx ? 'On' : 'Off'), adjust: () => ((s.lensFx = !s.lensFx), done()) },
         { label: 'Lens drops (outside views)', value: () => (s.lensDrops === 'auto' ? 'Auto (follow the rain)' : 'Off'), adjust: () => ((s.lensDrops = s.lensDrops === 'auto' ? 'off' : 'auto'), done()) },
