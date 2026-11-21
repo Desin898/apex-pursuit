@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { bakeMaterials } from './MaterialBaker';
 import { HILL_FOG, buildTerrain } from './Terrain';
 import { buildVegetation, VegetationVisuals } from './Vegetation';
+import { DRESSINGS, Dressing } from './dressing';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WORLD } from '../config';
@@ -32,8 +33,12 @@ export interface WorldVisuals {
     ridges: THREE.MeshBasicMaterial[];
     trees: THREE.MeshStandardMaterial;
     terrain: THREE.MeshStandardMaterial;
+    /** 4D: floodlight panels (they follow the lamps' brightness) */
+    floods: THREE.MeshStandardMaterial[];
   };
   veg: VegetationVisuals;
+  /** 4D: the venue's dressing (crowd, flags, traffic, birds…), or null */
+  dressing: Dressing | null;
   /** call once per frame so the shadow frustum follows the player */
   follow(x: number, y: number, z: number): void;
   setShadowQuality(size: number): void;
@@ -414,6 +419,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     let seed = 31;
     for (const b of world.buildings) {
       const st = styles[b.kind];
+      if (!st) continue; // 4D: grandstands and huts are drawn by the venue's dressing
       const t = tex.buildingTextures(seed++, st.base, st.doors);
       const mat = new THREE.MeshStandardMaterial({ map: withAniso(t.map), emissiveMap: t.emissive, emissive: 0xffffff, emissiveIntensity: 1.6, roughness: 0.75, metalness: 0.15 });
       mats.buildings.push(mat);
@@ -523,6 +529,10 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     }
   }
 
+  // ── 4D: the venue's dressing ─────────────────────────────────────────────────
+  mats.floods = [];
+  const dressing = DRESSINGS[world.venue.id]?.({ scene, world, baked, signs: mats.signs, windows: mats.buildings, floods: mats.floods }) ?? null;
+
   // ── 4C: trees, hillside forests and grass (see Vegetation) ─────────────────
   const veg = buildVegetation(scene, renderer, world);
   mats.trees = veg.treeMat;
@@ -602,6 +612,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
 
   return {
     veg,
+    dressing,
     sunDir,
     sun,
     clouds,

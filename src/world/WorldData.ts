@@ -3,6 +3,7 @@
 // Pure TypeScript with no rendering imports, so the physics (and, from Stage 6, the
 // authoritative server) can query it. WorldBuilder turns the same data into meshes.
 // ─────────────────────────────────────────────────────────────────────────────
+import { PROVING_GROUNDS, VenueDef } from './venues';
 import { WORLD } from '../config';
 import { rng } from '../core/math';
 
@@ -62,7 +63,7 @@ export interface Building {
   d: number;
   h: number;
   yaw: number;
-  kind: 'pit' | 'hangar' | 'tower' | 'stand' | 'block';
+  kind: 'pit' | 'hangar' | 'tower' | 'stand' | 'block' | 'grand' | 'hut';
 }
 export interface PropSpawn {
   x: number;
@@ -87,32 +88,6 @@ export interface TrackHit {
   /** distance along the lap */
   s: number;
 }
-
-// Control points of the circuit (x, z), driven in list order.
-const CONTROL: [number, number][] = [
-  [-300, -220],
-  [-20, -220],
-  [250, -220],
-  [362, -178],
-  [404, -80],
-  [366, 22],
-  [262, 62],
-  [182, 2],
-  [100, -62],
-  [2, -22],
-  [-62, 80],
-  [18, 182],
-  [160, 222],
-  [300, 258],
-  [334, 340],
-  [244, 402],
-  [60, 384],
-  [-140, 332],
-  [-322, 250],
-  [-424, 100],
-  [-442, -60],
-  [-398, -176],
-];
 
 const CELL = 24;
 const COL_CELL = 16;
@@ -145,12 +120,18 @@ export class WorldData {
   /** where every lamp head is (for night lighting) */
   readonly lampHeads: { x: number; y: number; z: number; pad: boolean }[] = [];
   readonly trees: { x: number; z: number; s: number }[] = [];
-  /** Paved areas that are not part of the circuit. */
-  readonly pad = { x: -220, z: 60, r: 82 };
-  readonly aprons: { x0: number; z0: number; x1: number; z1: number }[] = [
-    { x0: -262, z0: -214, x1: -178, z1: 0 }, // link road: main straight → skid pad
-    { x0: -330, z0: -292, x1: 210, z1: -228 }, // pit lane / paddock strip behind the pit wall
-  ];
+  /** Paved areas that are not part of the circuit (from the venue). */
+  readonly pad: { x: number; z: number; r: number };
+  readonly aprons: { x0: number; z0: number; x1: number; z1: number }[];
+  /** 4D: grandstands (front edge faces the track), for the crowd and the dressing */
+  readonly stands: { x: number; z: number; w: number; d: number; yaw: number; rows: number }[] = [];
+  /** 4D: marshal posts, tyre walls, gravel traps, catch fences, flags, the car park */
+  readonly marshals: { x: number; z: number; yaw: number }[] = [];
+  readonly tyreWalls: { x: number; z: number; yaw: number; len: number }[] = [];
+  readonly gravel: { pts: { x: number; z: number }[]; inner: number; outer: number; side: number; i0: number; i1: number }[] = [];
+  readonly flags: { x: number; z: number; h: number; kind: number; yaw: number }[] = [];
+  readonly parked: { x: number; z: number; yaw: number; kind: number }[] = [];
+  readonly floodlights: { x: number; z: number; yaw: number; h: number }[] = [];
   /** Start/finish line sits at this sample index. */
   startIndex = 0;
 
@@ -159,7 +140,9 @@ export class WorldData {
   private circGrid = new Map<number, number[]>();
   private _hit: TrackHit = { index: 0, offset: 0, s: 0 };
 
-  constructor() {
+  constructor(readonly venue: VenueDef = PROVING_GROUNDS) {
+    this.pad = { ...venue.pad };
+    this.aprons = venue.aprons.map((a) => ({ ...a }));
     this.buildTrack();
     this.buildFacility();
     this.buildColliderGrid();
@@ -168,6 +151,7 @@ export class WorldData {
   // ── Track ────────────────────────────────────────────────────────────────
   private buildTrack(): void {
     // 1. Dense closed Catmull-Rom evaluation
+    const CONTROL = this.venue.control;
     const n = CONTROL.length;
     const dense: [number, number][] = [];
     const SUB = 48;
@@ -349,7 +333,8 @@ export class WorldData {
   }
 
   // ── Facility: ramps, buildings, barriers, props ──────────────────────────
-  private addBox(b: Building): void {
+  /** a solid box (collider walls + a building entry); used by venue facility builders */
+  addBox(b: Building): void {
     this.buildings.push(b);
     const sn = Math.sin(b.yaw);
     const cs = Math.cos(b.yaw);
@@ -368,7 +353,7 @@ export class WorldData {
     }
   }
 
-  private addRamp(r: Ramp): void {
+  addRamp(r: Ramp): void {
     const ramp = this.ramps.length;
     this.ramps.push(r);
     const sn = Math.sin(r.yaw);
@@ -410,274 +395,7 @@ export class WorldData {
   }
 
   private buildFacility(): void {
-    const rand = rng(20261);
-    const S = this.samples;
-    const N = S.length;
-
-    // Ramps: a small kicker on the link road and a big one on the skid pad.
-    this.addRamp({ x: -220, z: -150, yaw: 0, length: 12, width: 9, height: 1.45 });
-    this.addRamp({ x: -288, z: 60, yaw: Math.PI / 2, length: 18, width: 11, height: 2.0 });
-
-    // Barriers on the outside of real corners, set back behind a strip of run-off.
-    const off = this.halfWidth + 8;
-    let run: { x: number; z: number }[] | null = null;
-    let side = 0;
-    const flush = () => {
-      if (run && run.length > 6) {
-        this.barrierRuns.push({ pts: run });
-        for (let i = 0; i < run.length - 1; i++) {
-          this.segments.push({ x1: run[i].x, z1: run[i].z, x2: run[i + 1].x, z2: run[i + 1].z, top1: 1.0, top2: 1.0 });
-        }
-      }
-      run = null;
-    };
-    for (let i = 0; i <= N; i += 2) {
-      const s = S[i % N];
-      const want = Math.abs(s.curv) > 1 / 140 ? (s.curv > 0 ? -1 : 1) : 0; // outside = opposite the turn
-      if (want !== side) {
-        flush();
-        side = want;
-      }
-      if (want !== 0) {
-        if (!run) run = [];
-        run.push({ x: s.x + s.nx * off * want, z: s.z + s.nz * off * want });
-      }
-    }
-    flush();
-
-    // Pit wall along the outside (north) of the main straight.
-    const wall: { x: number; z: number }[] = [];
-    for (let x = -330; x <= 210; x += 12) wall.push({ x, z: -220 - this.halfWidth - 1.2 });
-    this.barrierRuns.push({ pts: wall });
-    this.segments.push({ x1: -330, z1: wall[0].z, x2: 210, z2: wall[0].z, top1: 1.0, top2: 1.0 });
-
-    // Buildings
-    this.addBox({ x: -60, z: -306, w: 230, d: 16, h: 9, yaw: 0, kind: 'pit' });
-    this.addBox({ x: 120, z: -310, w: 70, d: 18, h: 14, yaw: 0, kind: 'stand' });
-    this.addBox({ x: -205, z: -312, w: 14, d: 14, h: 30, yaw: 0, kind: 'tower' });
-    this.addBox({ x: -345, z: -70, w: 46, d: 60, h: 15, yaw: 0, kind: 'hangar' });
-    this.addBox({ x: -345, z: 10, w: 46, d: 60, h: 15, yaw: 0, kind: 'hangar' });
-    this.addBox({ x: -120, z: 190, w: 30, d: 20, h: 7, yaw: 0.5, kind: 'block' });
-    this.addBox({ x: 210, z: 140, w: 26, d: 40, h: 8, yaw: -0.4, kind: 'block' });
-
-    // Light poles: along the main straight and around the skid pad.
-    for (let x = -300; x <= 200; x += 50) this.poles.push({ x, z: -234.5, h: 13 });
-    for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2 + 0.3;
-      this.poles.push({ x: this.pad.x + Math.cos(a) * (this.pad.r + 6), z: this.pad.z + Math.sin(a) * (this.pad.r + 6), h: 13 });
-    }
-    for (const p of this.poles) this.circles.push({ x: p.x, z: p.z, r: 0.28, top: p.h });
-
-    // Start/finish gantry posts
-    {
-      const g = S[this.startIndex];
-      for (const e of [-this.halfWidth - 2.6, this.halfWidth + 2.6]) this.circles.push({ x: g.x + g.nx * e, z: g.z + g.nz * e, r: 0.4, top: 8 });
-    }
-
-    // Billboards (original, fictional sponsors) set back from the outside of the lap.
-    const boards: [number, string, string, number][] = [
-      [0.1, 'APEX PURSUIT', 'PROVING GROUNDS', 0.58],
-      [0.22, 'NITROVOLT', 'ENERGY SYSTEMS', 0.12],
-      [0.36, 'PHANTOM X1', 'BUILT TO DISAPPEAR', 0.0],
-      [0.5, 'KORSA TYRES', 'GRIP IS EVERYTHING', 0.33],
-      [0.64, 'HALCYON OIL', 'SINCE NEVER', 0.08],
-      [0.78, 'VELOCE RADIO', '108.8 FM', 0.78],
-      [0.9, 'APEX PURSUIT', 'STAGE ONE BUILD', 0.58],
-    ];
-    for (const [f, text, sub, hue] of boards) {
-      const s = S[Math.floor(f * N) % N];
-      const sd = s.curv > 0 ? -1 : 1;
-      const d = this.halfWidth + 22;
-      const x = s.x + s.nx * d * sd;
-      const z = s.z + s.nz * d * sd;
-      const yaw = Math.atan2(-s.nx * sd, -s.nz * sd); // face the track
-      this.billboards.push({ x, z, yaw, text, sub, hue });
-      const cs = Math.cos(yaw);
-      const sn = Math.sin(yaw);
-      for (const e of [-5.2, 5.2]) this.circles.push({ x: x + e * cs, z: z - e * sn, r: 0.3, top: 9 });
-    }
-
-    // ── Pursuit features ──
-    {
-      // straightness of each sample: the sharpest bend within ±60 m
-      const W = 30;
-      const sharp = new Float32Array(N);
-      for (let i = 0; i < N; i++) {
-        let m = 0;
-        for (let k = -W; k <= W; k++) m = Math.max(m, Math.abs(S[(i + k + N) % N].curv));
-        sharp[i] = m;
-      }
-      const lapDist = (a: number, b: number) => {
-        const d = Math.abs(a - b);
-        return Math.min(d, N - d);
-      };
-      // speed traps: the two straightest places away from the start line and from each other
-      const order = Array.from({ length: N }, (_, i) => i).sort((a, b) => sharp[a] - sharp[b]);
-      for (const i of order) {
-        if (this.speedTraps.length >= 2) break;
-        if (lapDist(i, this.startIndex) < 120) continue;
-        if (this.speedTraps.some((t) => lapDist(t.index, i) < N / 4)) continue;
-        const smp = S[i];
-        this.speedTraps.push({ index: i, x: smp.x, z: smp.z, yaw: Math.atan2(smp.tx, smp.tz) });
-        for (const e of [-this.halfWidth - 2.6, this.halfWidth + 2.6]) this.circles.push({ x: smp.x + smp.nx * e, z: smp.z + smp.nz * e, r: 0.35, top: 7 });
-      }
-      this.pitExitIndex = (this.startIndex + Math.round(70 / WORLD.sampleSpacing)) % N;
-      // work zones: three stretches, the narrowing on the outside of the bend that follows
-      const zoneAt = [0.27, 0.52, 0.8];
-      for (const f of zoneAt) {
-        const i0 = Math.floor(f * N) % N;
-        const len = Math.round(56 / WORLD.sampleSpacing);
-        let curvSum = 0;
-        for (let k = 0; k < len + 20; k++) curvSum += S[(i0 + k) % N].curv;
-        const side: 1 | -1 = curvSum > 0 ? -1 : 1; // outside of the bend (curv > 0 bends towards +n)
-        const pieces: { kind: 'cone' | 'water' | 'saw'; x: number; z: number; yaw: number }[] = [];
-        const hw = this.halfWidth;
-        for (let k = 0; k <= len; k += 1) {
-          const smp = S[(i0 + k) % N];
-          const yaw = Math.atan2(smp.tx, smp.tz);
-          // taper in over the first 10 m with cones, hold a closed lane, taper out with cones
-          const t = k / len;
-          const lane = t < 0.18 ? (t / 0.18) * 3.6 : t > 0.86 ? ((1 - t) / 0.14) * 3.6 : 3.6;
-          const off = side * (hw - lane);
-          const px = smp.x + smp.nx * off;
-          const pz = smp.z + smp.nz * off;
-          if (t < 0.18 || t > 0.86) {
-            if (k % 2 === 0) pieces.push({ kind: 'cone', x: px, z: pz, yaw });
-          } else {
-            pieces.push({ kind: k % 4 === 2 ? 'saw' : 'water', x: px, z: pz, yaw });
-          }
-        }
-        this.workZones.push({ index: i0, length: len, side, pieces });
-      }
-      // pursuit breakers: scaffolding by the pit straight, a stack of containers, a timing tower
-      const kinds: ['scaffold', 'containers', 'tower'] = ['scaffold', 'containers', 'tower'];
-      const at = [this.startIndex + Math.round(170 / WORLD.sampleSpacing), Math.floor(0.4 * N), Math.floor(0.68 * N)];
-      at.forEach((i, k) => {
-        i %= N;
-        // move along a little if it would sit on a work zone or a speed trap
-        for (let tries = 0; tries < 30; tries++) {
-          const busy = this.workZones.some((z) => lapDist(z.index + z.length / 2, i) < z.length / 2 + 25) || this.speedTraps.some((t) => lapDist(t.index, i) < 25);
-          if (!busy) break;
-          i = (i + 6) % N;
-        }
-        const smp = S[i];
-        const side: 1 | -1 = smp.curv > 0 ? -1 : 1;
-        const d = this.halfWidth + WORLD.kerbWidth + WORLD.runoffWidth + 4.5;
-        this.breakers.push({ index: i, side, kind: kinds[k], x: smp.x + smp.nx * d * side, z: smp.z + smp.nz * d * side, yaw: Math.atan2(smp.tx, smp.tz) });
-      });
-    }
-
-    // Street lamps all the way round the lap (Phase 3C-2: they light the circuit at night).
-    // Set well back beyond the run-off, on the inside of each bend, with the head hanging out over
-    // the edge of the track. Skipped where something else is already standing.
-    {
-      const back = this.halfWidth + WORLD.kerbWidth + WORLD.runoffWidth + 3.5;
-      const clear = (x: number, z: number) => {
-        for (const q of this.poles) if (Math.hypot(q.x - x, q.z - z) < 34) return false;
-        for (const b of this.billboards) if (Math.hypot(b.x - x, b.z - z) < 16) return false;
-        for (const b of this.buildings) if (Math.abs(b.x - x) < b.w / 2 + 10 && Math.abs(b.z - z) < b.d / 2 + 10) return false;
-        for (const r of this.ramps) if (Math.hypot(r.x - x, r.z - z) < 30) return false;
-        for (const b of this.breakers) if (Math.hypot(b.x - x, b.z - z) < 22) return false;
-        for (const t of this.speedTraps) if (Math.hypot(t.x - x, t.z - z) < 14) return false;
-        if (Math.hypot(this.pad.x - x, this.pad.z - z) < this.pad.r + 10) return false;
-        if (Math.hypot(WORLD.boundsCenterX - x, WORLD.boundsCenterZ - z) > WORLD.boundsRadius - 12) return false;
-        if (z < -226 && z > -246 && x > -340 && x < 230) return false; // the main-straight pit wall has its own row
-        // nowhere near another part of the circuit
-        for (let k = 0; k < N; k += 3) {
-          const o = S[k];
-          if (Math.hypot(o.x - x, o.z - z) < back - 0.5) return false;
-        }
-        return true;
-      };
-      const step = Math.round(62 / WORLD.sampleSpacing);
-      for (let i = 0; i < N; i += step) {
-        const smp = S[i];
-        const sd0 = smp.curv > 0.0015 ? 1 : smp.curv < -0.0015 ? -1 : (i / step) % 2 === 0 ? 1 : -1;
-        for (const sd of [sd0, -sd0]) {
-          const x = smp.x + smp.nx * back * sd;
-          const z = smp.z + smp.nz * back * sd;
-          if (!clear(x, z)) continue;
-          const yaw = Math.atan2(-smp.nx * sd, -smp.nz * sd); // the arm points at the track
-          this.poles.push({ x, z, h: 11, yaw, arm: 4.5 });
-          this.circles.push({ x, z, r: 0.28, top: 11 });
-          break;
-        }
-      }
-    }
-    for (const p of this.poles) {
-      const pad = p.arm === undefined && Math.hypot(p.x - this.pad.x, p.z - this.pad.z) < this.pad.r + 12;
-      const yaw = p.yaw ?? (pad ? Math.atan2(this.pad.x - p.x, this.pad.z - p.z) : 0);
-      const arm = p.arm ?? 0.9;
-      this.lampHeads.push({ x: p.x + Math.sin(yaw) * arm, y: p.h, z: p.z + Math.cos(yaw) * arm, pad });
-    }
-
-    // Cones: a slalom down the link road, a ring on the skid pad, markers at the ramps.
-    for (let i = 0; i < 9; i++) this.props.push({ x: -240 + (i % 2) * 6, z: -110 + i * 12, kind: 'cone' });
-    for (let i = 0; i < 28; i++) {
-      const a = (i / 28) * Math.PI * 2;
-      this.props.push({ x: this.pad.x + Math.cos(a) * 34, z: this.pad.z + Math.sin(a) * 34, kind: 'cone' });
-    }
-    for (let i = 0; i < 7; i++) {
-      this.props.push({ x: -180 + i * 9, z: 22 + (i % 2) * 5, kind: 'cone' });
-    }
-    for (const r of this.ramps) {
-      const sn = Math.sin(r.yaw);
-      const cs = Math.cos(r.yaw);
-      for (const w of [-r.width / 2 - 0.8, r.width / 2 + 0.8]) {
-        for (const u of [-6, -1]) this.props.push({ x: r.x + u * sn + w * cs, z: r.z + u * cs - w * sn, kind: 'cone' });
-      }
-    }
-    // Barrels: little stacks to plough through.
-    const clusters: [number, number][] = [
-      [-196, 104],
-      [-250, 112],
-      [-170, 40],
-      [-205, -40],
-    ];
-    for (const [cx, cz] of clusters) {
-      for (let i = 0; i < 6; i++) {
-        this.props.push({ x: cx + (i % 3) * 1.0 - 1.0, z: cz + Math.floor(i / 3) * 1.0, kind: 'barrel' });
-      }
-    }
-
-    // Trees: scattered outside the lap, never on tarmac or run-off.
-    let guard = 0;
-    while (this.trees.length < 520 && guard++ < 20000) {
-      const a = rand() * Math.PI * 2;
-      const r = 120 + rand() * (WORLD.boundsRadius + 240);
-      const x = WORLD.boundsCenterX + Math.cos(a) * r;
-      const z = WORLD.boundsCenterZ + Math.sin(a) * r;
-      const hit = this.nearestTrack(x, z);
-      if (hit && Math.abs(hit.offset) < 34) continue;
-      if (this.surfaceAt(x, z) !== Surface.Grass) continue;
-      if (Math.hypot(x - this.pad.x, z - this.pad.z) < this.pad.r + 30) continue;
-      if (x > -400 && x < 260 && z > -340 && z < -190) continue; // pit complex
-      if (x > -420 && x < -150 && z > -230 && z < 160) continue; // hangars + link road
-      let nearBuilding = false;
-      for (const b of this.buildings) if (Math.hypot(x - b.x, z - b.z) < Math.max(b.w, b.d) * 0.75 + 8) nearBuilding = true;
-      if (nearBuilding) continue;
-      // keep the infield mostly open so jumps and drifts have room
-      const inside = r < WORLD.boundsRadius - 60;
-      if (inside && rand() < 0.72) continue;
-      this.trees.push({ x, z, s: 0.8 + rand() * 0.9 });
-      if (r < WORLD.boundsRadius) this.circles.push({ x, z, r: 0.45, top: 6 });
-    }
-
-    // Perimeter fence
-    const R = WORLD.boundsRadius;
-    const K = 120;
-    for (let i = 0; i < K; i++) {
-      const a0 = (i / K) * Math.PI * 2;
-      const a1 = ((i + 1) / K) * Math.PI * 2;
-      this.segments.push({
-        x1: WORLD.boundsCenterX + Math.cos(a0) * R,
-        z1: WORLD.boundsCenterZ + Math.sin(a0) * R,
-        x2: WORLD.boundsCenterX + Math.cos(a1) * R,
-        z2: WORLD.boundsCenterZ + Math.sin(a1) * R,
-        top1: 50,
-        top2: 50,
-      });
-    }
+    this.venue.facility(this);
   }
 
   // ── Collision queries ────────────────────────────────────────────────────

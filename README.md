@@ -111,6 +111,44 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
 
+## New in Phase 4D: background detail around the circuit, and venues
+
+**The Proving Grounds, dressed** (`src/world/dressing/provingGrounds.ts`; placement data in
+`src/world/venues.ts`). Pictures: `docs/4d/`.
+- **Three grandstands** (start straight, right-hand hairpin, far corner) with stepped seating,
+  roofs on columns, light strips under the roof edge, and a **crowd of about 2,700** drawn
+  people (shirts, skin and hair vary per person). They **jump up and wave when cars pass**.
+- **Pit garages lit from inside** (six invented teams), a door header, the control tower.
+- **Marshal posts** at the six sharpest corners, with yellow flags.
+- **Catch fences** behind the barriers and on the pit wall, **tyre walls** at the six sharpest
+  apexes, **gravel traps** through the corners, **banners** on fences, stands and the pit wall
+  (eight invented brands).
+- **Flags in the wind** (start line, pit roof, grandstands, marshal posts); the wind picks up in rain.
+- **Six floodlight towers** that light up at dusk and night.
+- **A car park** behind the paddock with about 125 parked cars (you can bump into them).
+- **Power lines** on lattice pylons across the hills behind the pits.
+- **A town in the lowest valley**: thousands of window lights and a glow over it at night.
+- **A highway** on the hills with moving traffic: headlights and tail lights at night.
+- **Birds** circling over the circuit by day (not at night or in rain).
+
+Cost: about +45 draw calls on High at the start grid (499 → 542 at dusk, 734 → 794 in night
+rain). The small moving things (crowd, flags, birds, traffic, lights, wires, parked cars) are
+drawn by the main camera only, not in the wet-road reflection or the mirrors. Low quality
+thins the crowd and the town and drops the birds.
+
+Not physical: the gravel traps look like gravel but behave like the grass under them (cars slow
+down there anyway). The floodlights glow but don't cast extra light (that would cost too much).
+
+**Venues.** A venue is now a definition (`VenueDef` in `src/world/venues.ts`): the circuit's
+control points, its paved areas, and a facility builder (barriers, buildings, ramps, poles,
+trees, pursuit features, 4D dressing data), plus a dressing builder registered in
+`src/world/dressing/index.ts`. `WorldData` takes a venue; race logic doesn't know which one.
+The event card has a **Venue** row: *Proving Grounds*, and *Hanagiri Pass*, shown as coming
+in Phase 5. Choosing another venue reloads the game into it (`?venue=` in the address works too).
+Online: everyone reports the venue they have loaded; only players on the host's venue go on the
+grid, the rest wait and are told which venue to choose. (A venue is loaded before you can join,
+so there is no loading race to wait for at the lights.)
+
 ## New in Phase 4C.2: music and online races with friends at home
 
 **Music.** The owner's Spotify playlist (67 tracks, `src/audio/playlist.ts`) plays shuffled on
@@ -691,7 +729,8 @@ src/
   world/                  WorldData.ts (track, surfaces, colliders: logic only),
                           WorldBuilder.ts (meshes), Props.ts, textures.ts,
                           MaterialBaker.ts (GPU-painted PBR textures), Terrain.ts (hills),
-                          Vegetation.ts (trees, forests, grass)
+                          Vegetation.ts (trees, forests, grass), venues.ts (track + facility
+                          per venue), dressing/ (each venue's background detail)
   input/                  InputManager.ts (keyboard + Gamepad API), Haptics.ts (rumble mixer)
   camera/ fx/ audio/ ui/
 tools/physics-test.ts     headless regression checks
@@ -765,5 +804,8 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
    - **4C.2. Your Spotify playlist in the game with a sound mixer; online races with friends at
      their own homes: join by link, one-click hosting, lobby, late joiners, AI takes over
      drop-outs, passwords (this build)**
-   - 4D. Background detail around the circuit; venue system for the mountain pass
+   - **4D. Background detail around the circuit (grandstands with a reacting crowd, lit
+     garages, marshals, catch fences, tyre walls, gravel, flags, floodlights, car park, power
+     lines, a town and a highway at night, birds) and the venue system (this build)**
+   - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

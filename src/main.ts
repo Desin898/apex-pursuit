@@ -40,6 +40,7 @@ import { DETAIL_LAYER, mainOnly } from './core/layers';
 import { Ghost } from './game/Ghost';
 import { vegUniforms } from './world/Vegetation';
 import { MusicPlayer } from './audio/MusicPlayer';
+import { venueById } from './world/venues';
 import { cleanRoom, relaySocketUrl, servedByRelay, TransportOptions } from './net/Transport';
 import { FarShadow, PaintProbe, PlanarReflection, groundUniforms, patchGround, setGroundFeatures } from './fx/Reflections';
 import type { MapIcon } from './ui/HUD';
@@ -56,7 +57,8 @@ class Game {
   private settings: Settings = loadSettings();
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private world = new WorldData();
+  // 4D: the venue comes from ?venue= or the saved setting; switching venue reloads the page
+  private world = new WorldData(venueById(new URLSearchParams(location.search).get('venue') ?? loadSettings().venue));
   private visuals: WorldVisuals;
   private env!: Environment;
   private photo!: PhotoMode;
@@ -188,6 +190,15 @@ class Game {
         this.menu.open(this.settingsPage());
       },
       onlineInfo: () => ({ status: this.online.status, players: this.online.players.length, host: this.online.isHost }),
+      venueId: () => this.world.venue.id,
+      switchVenue: (id) => {
+        if (id === this.world.venue.id) return;
+        this.settings.venue = id;
+        saveSettings(this.settings);
+        const u = new URL(location.href);
+        u.searchParams.set('venue', id);
+        location.href = u.toString(); // a new venue is a new world: load it fresh
+      },
       cardImages: () => this.cardShots,
     });
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -309,6 +320,7 @@ class Game {
       this.hud.toast(`Host set ${c.weather === 'clear' ? 'clear skies' : c.weather}, ${c.time}`);
     };
     this.online.onStatus = () => this.refreshOnlineUi();
+    this.online.venueId = this.world.venue.id;
     // 4C.2: a friend dropped out mid-race — the AI drives their car
     this.online.onTakeOver = (netId, slot, name, host) => {
       const c = this.race.cars.find((x) => x.netId === netId);
@@ -385,6 +397,7 @@ class Game {
     this.renderer.shadowMap.enabled = cfg.shadows > 0;
     this.visuals.setShadowQuality(cfg.shadows);
     this.visuals.veg.setQuality(q);
+    this.visuals.dressing?.setQuality(q);
     this.scene.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
       if (m) for (const mm of Array.isArray(m) ? m : [m]) mm.needsUpdate = true;
@@ -690,6 +703,7 @@ class Game {
 
   // ── F4 benchmark (4B.2): a fixed 30 s fly-round in night, heavy rain and (in a pursuit) Heat 5 ──
   // ── 4C.2: playlist music ──
+  private carDots: { x: number; z: number; speed: number }[] = [];
   readonly music = new MusicPlayer();
   private musicShownAt = 0;
   private updateMusic(a: { musicNext: boolean }): void {
@@ -870,7 +884,8 @@ class Game {
     const cond = `${this.race.pursuit ? 'Pursuit race' : 'Clean race'} · ${c.weather} · ${c.time} · ${this.race.targetLaps || s.laps} laps · ${ai} AI`;
     const pad = this.input.device === 'playstation' ? '✕' : this.input.device === 'keyboard' ? 'Enter' : 'A';
     let say: string;
-    if (o.waiting) say = 'A race is running. You join at the next start.';
+    if (o.venueMismatch) say = `The host is racing at <b>${esc(venueById(o.venueMismatch).id === o.venueMismatch ? venueById(o.venueMismatch).name : o.venueMismatch)}</b>. Choose it under Venue on the event card to join.`;
+    else if (o.waiting) say = 'A race is running. You join at the next start.';
     else if (o.autoStart >= 0) say = `Everyone's ready: starting in <b>${Math.max(0, Math.ceil(o.autoStart))}</b>`;
     else if (o.isHost) say = o.lobby.length > 1 ? `Press <b>${pad}</b> to start · Esc: race, weather, laps` : `Waiting for friends · <b>${pad}</b> to start anyway`;
     else say = o.ready ? `Ready ✓ · waiting for the host (<b>${pad}</b> to undo)` : `Press <b>${pad}</b> when you're ready`;
@@ -1904,6 +1919,13 @@ class Game {
     this.time += dt;
     vegUniforms.uTime.value = this.time;
     vegUniforms.uWind.value = 0.45 + 0.9 * (this.env.p.rain > 0 ? this.env.rainK : 0);
+    // 4D: crowd, flags, traffic and birds
+    if (this.visuals.dressing) {
+      const cars = this.carDots;
+      cars.length = 0;
+      for (const c of this.race.cars) if (!c.gone) cars.push({ x: c.s.x, z: c.s.z, speed: c.s.speed });
+      this.visuals.dressing.update(dt, this.time, cars, this.env.p.carLights, this.env.p.rain > 0 ? this.env.rainK : 0);
+    }
     const a = this.input.poll(dt);
     const s = this.physics.s;
     this.updateMusic(a);

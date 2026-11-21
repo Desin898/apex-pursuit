@@ -486,6 +486,7 @@ export class Environment {
     v.mats.glass.emissiveIntensity = p.glass;
     for (const m of v.mats.signs) m.emissiveIntensity = p.signs;
     v.mats.lamps.emissiveIntensity = p.lamps;
+    for (const m of v.mats.floods) m.emissiveIntensity = p.lamps * 1.15;
     this.pools.visible = p.pools > 0.01;
     this.poolMat.color.setRGB(1.0 * p.pools * 0.5, 0.8 * p.pools * 0.5, 0.55 * p.pools * 0.5);
     this.renderer.toneMappingExposure = p.exposure * this.exposureK;

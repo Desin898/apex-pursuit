@@ -3,6 +3,7 @@
 // Pages slide and fade between each other; each page owns a Nav for mouse / keyboard /
 // DualShock 4 focus. main.ts owns the game; it hands this class a small set of callbacks.
 // ─────────────────────────────────────────────────────────────────────────────
+import { VENUES } from '../world/venues';
 import { PAINTS } from '../config';
 import { Settings } from '../core/Settings';
 import { formatLap } from '../game/LapTimer';
@@ -33,6 +34,9 @@ export interface ScreenHooks {
   online(): void;
   openSettings(): void;
   onlineInfo(): { status: string; players: number; host: boolean };
+  /** 4D: the venue loaded now, and switching (reloads the world) */
+  venueId(): string;
+  switchVenue(id: string): void;
   /** rendered studio pictures, one per edition (may be empty strings until ready) */
   cardImages(): string[];
   /** the event card's Start race */
@@ -278,6 +282,8 @@ export class Screens {
       }
       opts.appendChild(o);
     };
+    // 4D: venues — the mountain pass arrives in Phase 5
+    row('Venue', VENUES.map((v): Item => [`venue-${v.id}`, v.name, this.h.venueId() === v.id, v.available, () => this.h.switchVenue(v.id), v.available ? undefined : 'Phase 5']));
     row('Laps', [3, 5, 8].map((n): Item => [`laps-${n}`, String(n), s.laps === n, true, () => (s.laps = n)]));
     row('Rivals', (['easy', 'medium', 'hard'] as const).map((d): Item => [`diff-${d}`, d[0].toUpperCase() + d.slice(1), s.difficulty === d, true, () => (s.difficulty = d)]));
     row('Race', [
@@ -312,7 +318,7 @@ export class Screens {
     $('event-title').textContent = this.h.eventName();
     $('event-mode').textContent = `${s.raceType === 'pursuit' ? 'Pursuit race' : 'Circuit race'} · ${s.laps} laps · ${wxLabel} · ${s.timeOfDay === 'night' ? 'Night' : s.timeOfDay === 'dynamic' ? 'Dusk to night' : 'Dusk'}`;
     const joinLap = Math.floor(0.4 * s.laps) + 1;
-    $('event-sub').textContent = s.raceType === 'pursuit' ? `Lap 1 clean · cameras and work zones from lap 2 · police from lap ${joinLap}` : 'Apex test circuit · clockwise';
+    $('event-sub').textContent = s.raceType === 'pursuit' ? `Lap 1 clean · cameras and work zones from lap 2 · police from lap ${joinLap}` : (VENUES.find((v) => v.id === this.h.venueId())?.blurb ?? 'Apex test circuit · clockwise');
     this.drawTrack();
     this.renderBoard($('event-grid'), this.h.gridRows(), false);
     const again = focusedKey ? (opts.querySelector(`[data-key="${focusedKey}"]`) as HTMLElement | null) : null;

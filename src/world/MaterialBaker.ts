@@ -162,6 +162,25 @@ const SURFACES: Record<string, Surface> = {
       h = 0.45 + 0.25 * plate + 0.25 * rough + 0.08 * strata - 0.5 * seam;
     `,
   },
+  gravel: {
+    bump: 2.4,
+    body: /* glsl */ `
+      // 4D gravel trap: rounded stones in two sizes over a sandy bed (tiles every ~6 m)
+      vec3 c1 = cells(uv * vec2(60.0), vec2(60.0));
+      vec3 c2 = cells(uv * vec2(140.0) + 0.37, vec2(140.0));
+      float stone = smoothstep(0.42, 0.16, c1.x);
+      float small = smoothstep(0.4, 0.18, c2.x);
+      float tone = fbm(uv * 8.0, vec2(8.0), 3);
+      vec3 sa = vec3(0.50, 0.45, 0.37);
+      vec3 sb = vec3(0.36, 0.32, 0.27);
+      vec3 sc = vec3(0.64, 0.60, 0.52);
+      col = mix(sb, sa, tone);
+      col = mix(col, mix(sa, sc, c1.z), stone * 0.85);
+      col = mix(col, mix(sb, sc, c2.z), small * 0.5);
+      col *= 0.82 + 0.28 * c1.z * stone;
+      h = 0.3 + 0.5 * stone * (0.6 + 0.4 * c1.z) + 0.2 * small;
+    `,
+  },
   concrete: {
     bump: 1.4,
     body: /* glsl */ `
@@ -229,7 +248,7 @@ export function bakeMaterials(renderer: THREE.WebGLRenderer, big: number, aniso:
   renderer.toneMapping = THREE.NoToneMapping;
   const out: Record<string, BakedSet> = {};
   for (const [name, s] of Object.entries(SURFACES)) {
-    const size = name === 'asphalt' ? big : name === 'rock' ? 512 : 1024;
+    const size = name === 'asphalt' ? big : name === 'rock' || name === 'gravel' ? 512 : 1024;
     const make = (mode: 'albedo' | 'normal'): THREE.Texture => {
       const colorSpace = mode === 'albedo' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
       const rt = new THREE.WebGLRenderTarget(size, size, { generateMipmaps: false, colorSpace });

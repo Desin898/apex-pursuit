@@ -42,6 +42,8 @@ interface PeerView {
   ready: boolean;
   /** 4C.2: their round trip to the server, ms (−1 unknown) */
   ping: number;
+  /** 4D: the venue they have loaded */
+  vn: string;
 }
 
 /** 4C.2: one row of the lobby panel */
@@ -65,6 +67,7 @@ interface HostBlock {
   ph: number; // 4C.2: 0 = lobby (waiting before the lights), 1 = racing
   q: string[]; // 4C.2: players waiting for the next race
   st?: number; // 4C.2: lobby auto-start seconds left (−1 = not counting)
+  vn?: string; // 4D: the venue the host is racing at
   ai: number[][]; // AI states, same order as `a`: NetCar + race distance
   l: number; // laps to race (0 = endless)
   w: number; // weather index (WEATHERS)
@@ -96,7 +99,7 @@ function parseHost(h: unknown): HostBlock | null {
     a.push(e[2] === -1 ? [e[0], e[1], -1, `${cleanName(e[3])}`] : [e[0], e[1], e[2]]);
   }
   const q = Array.isArray(o.q) ? (o.q.filter((x) => typeof x === 'string').slice(0, 8) as string[]) : [];
-  return { ph: o.ph === 0 ? 0 : 1, q, st: typeof o.st === 'number' && Number.isFinite(o.st) ? o.st : -1, id: o.id, cd: Math.max(0, Math.min(10, o.cd)), r, a, ai: o.ai as number[][], pz: o.pz, l: isInt(o.l, 0, 20) ? (o.l as number) : 3, w: isInt(o.w, 0, WEATHERS.length - 1) ? (o.w as number) : 0, t: isInt(o.t, 0, TIMES.length - 1) ? (o.t as number) : 0 };
+  return { vn: typeof o.vn === 'string' ? o.vn.slice(0, 32) : undefined, ph: o.ph === 0 ? 0 : 1, q, st: typeof o.st === 'number' && Number.isFinite(o.st) ? o.st : -1, id: o.id, cd: Math.max(0, Math.min(10, o.cd)), r, a, ai: o.ai as number[][], pz: o.pz, l: isInt(o.l, 0, 20) ? (o.l as number) : 3, w: isInt(o.w, 0, WEATHERS.length - 1) ? (o.w as number) : 0, t: isInt(o.t, 0, TIMES.length - 1) ? (o.t as number) : 0 };
 }
 
 export class OnlineSession {
@@ -114,6 +117,10 @@ export class OnlineSession {
   ready = false;
   /** 4C.2: lobby auto-start countdown (−1 = not counting) */
   autoStart = -1;
+  /** 4D: the venue this copy has loaded (main sets it) */
+  venueId = 'proving-grounds';
+  /** 4D: set when the host races at a venue this copy hasn't loaded */
+  venueMismatch = '';
   /** 4C.2: the last reason the connection failed, for the Online panel */
   failReason = '';
   /** called when the grid changes and the game must rebuild its cars */
@@ -267,11 +274,12 @@ export class OnlineSession {
         heat: typeof d.hr === 'number' && Number.isFinite(d.hr) ? Math.max(0, Math.min(1e4, d.hr)) : 0,
         ready: d.rd === 1,
         ping: typeof d.pg === 'number' && Number.isFinite(d.pg) ? Math.max(-1, Math.min(9999, Math.round(d.pg))) : -1,
+        vn: typeof d.vn === 'string' ? d.vn.slice(0, 32) : 'proving-grounds',
       });
     }
     const myLook = lookOf(this.settings.loadout);
     const myEdition = Math.max(0, EDITIONS.findIndex((e) => e.id === this.settings.loadout.edition));
-    const me: PeerView = { id: myId, name: cleanName(this.settings.name), paint: myLook.paintIndex, joined: this.joined, car: null, dist: 0, host: null, edition: myEdition, heat: 0, ready: this.ready, ping: Math.round(this.ping) };
+    const me: PeerView = { id: myId, name: cleanName(this.settings.name), paint: myLook.paintIndex, joined: this.joined, car: null, dist: 0, host: null, edition: myEdition, heat: 0, ready: this.ready, ping: Math.round(this.ping), vn: this.venueId };
     const all = [me, ...peers.values()].sort((a, b) => a.joined - b.joined || (a.id < b.id ? -1 : 1));
     const hostId = all[0].id;
     const amHost = hostId === myId;
@@ -327,6 +335,7 @@ export class OnlineSession {
         e: me.edition,
         j: this.joined,
         rd: this.ready ? 1 : 0,
+        vn: this.venueId,
         pg: Math.round(this.ping),
         c: this.waiting ? undefined : packCar(r.player.s),
         d: Math.round(r.player.lap.distance * 10000) / 10000,
@@ -349,6 +358,7 @@ export class OnlineSession {
           pz: pursuit && !pursuit.mirror ? pursuit.pack(packCar) : undefined,
           id: this.raceId,
           ph: this.phase === 'lobby' ? 0 : 1,
+          vn: this.venueId,
           q: this.queue,
           st: Math.round(this.autoStart * 10) / 10,
           cd: Math.round(Math.max(0, r.countdown) * 100) / 100,
@@ -368,22 +378,28 @@ export class OnlineSession {
 
   private hostUpdate(dt: number, all: PeerView[], peers: Map<string, PeerView>, myId: string, r: Race): void {
     const present = new Set(all.map((p) => p.id));
-    const newcomers = all.filter((h) => !this.roster.some((e) => e[0] === h.id));
+    const newcomers = all.filter((h) => h.vn === this.venueId && !this.roster.some((e) => e[0] === h.id));
     const racingFriends = this.roster.filter((e) => e[0] !== myId && present.has(e[0])).length;
     const becameHost = !this.isHost;
     if (becameHost && this.raceKey !== '') this.onToast('You are now the host');
     this.isHost = true;
     this.waiting = false;
 
+    // 4D: only players who have this venue loaded go on the grid; the others wait (and are told)
+    const loaded = all.filter((p) => p.vn === this.venueId);
+    for (const p of all) if (p.vn !== this.venueId && !this.queue.includes(p.id)) {
+      this.queue.push(p.id);
+      this.onToast(`${p.name} is on another venue: they join when they switch to this one`);
+    }
     if (becameHost || this.restartWanted) {
       this.restartWanted = false;
-      this.newRace(all.slice(0, MAX_HUMANS), myId);
+      this.newRace(loaded.slice(0, MAX_HUMANS), myId);
       return;
     }
     if (newcomers.length) {
       // in the lobby, or nobody else racing: put them on the grid now; otherwise they wait
       if (this.phase === 'lobby' || racingFriends === 0) {
-        this.newRace(all.slice(0, MAX_HUMANS), myId);
+        this.newRace(all.filter((p) => p.vn === this.venueId).slice(0, MAX_HUMANS), myId);
         return;
       }
       for (const h of newcomers) if (!this.queue.includes(h.id)) {
@@ -405,7 +421,7 @@ export class OnlineSession {
       if (gone < 4) continue;
       this.missing.delete(`drop:${id}`);
       if (this.phase === 'lobby') {
-        this.newRace(all.slice(0, MAX_HUMANS), myId);
+        this.newRace(all.filter((p) => p.vn === this.venueId).slice(0, MAX_HUMANS), myId);
         return;
       }
       this.roster = this.roster.filter((x) => x[0] !== id);
@@ -437,7 +453,7 @@ export class OnlineSession {
     else this.overT = 0;
     if (this.overT > (this.queue.length ? 6 : 20)) {
       this.overT = 0;
-      this.newRace(all.slice(0, MAX_HUMANS), myId);
+      this.newRace(all.filter((p) => p.vn === this.venueId).slice(0, MAX_HUMANS), myId);
     }
   }
 
@@ -447,6 +463,7 @@ export class OnlineSession {
     if (!hb) return;
     const onGrid = hb.r.some((e) => e[0] === myId);
     this.waiting = !onGrid;
+    this.venueMismatch = hb.vn && hb.vn !== this.venueId ? hb.vn : '';
     this.phase = hb.ph === 0 ? 'lobby' : 'race';
     this.autoStart = hb.st ?? -1;
     if (!onGrid) return;

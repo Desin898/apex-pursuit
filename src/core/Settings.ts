@@ -63,6 +63,8 @@ export interface Settings {
   /** 4C.2: the last race link joined, and room */
   onlineServer: string;
   onlineRoom: string;
+  /** 4D: which venue to race at (switching reloads the world) */
+  venue: string;
   /** how hard it rains when it rains: changing over the race, or fixed */
   rainStrength: 'changing' | 'light' | 'heavy' | 'downpour';
   /** dynamic resolution to hold the frame rate */
@@ -120,6 +122,7 @@ export const defaults: Settings = {
   mixSiren: 1,
   onlineServer: '',
   onlineRoom: 'friends',
+  venue: 'proving-grounds',
   rainStrength: 'changing',
   target60: true,
   fpsCap: '60',
