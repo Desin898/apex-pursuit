@@ -33,6 +33,8 @@ export interface Actions {
   paintNext: boolean;
   paintPrev: boolean;
   fullscreen: boolean;
+  /** next music track (M, or L3 + R3) */
+  musicNext: boolean;
   // menu navigation (with key-repeat)
   up: boolean;
   down: boolean;
@@ -73,6 +75,7 @@ const KEYS = {
   pause: ['Escape', 'KeyP'],
   paintNext: ['KeyV'],
   fullscreen: ['KeyF'],
+  musicNext: ['KeyM'],
   accept: ['Enter', 'Space'],
   back: ['Escape', 'Backspace'],
 };
@@ -90,7 +93,7 @@ function classify(id: string): DeviceKind {
 export class InputManager {
   readonly actions: Actions = {
     throttle: 0, brake: 0, steer: 0, analogSteer: false, handbrake: false, nitro: false, lookBack: false, horn: false, lookX: 0, lookY: 0, lookSide: 0, mouseLook: null,
-    shiftUp: false, shiftDown: false, camera: false, reset: false, pause: false, paintNext: false, paintPrev: false, fullscreen: false,
+    shiftUp: false, shiftDown: false, camera: false, reset: false, pause: false, paintNext: false, paintPrev: false, fullscreen: false, musicNext: false,
     up: false, down: false, left: false, right: false, accept: false, back: false, any: false,
   };
   settings: InputSettings = { deadzone: 0.08, steerCurve: 1.6, triggerCurve: 1.0 };
@@ -222,6 +225,7 @@ export class InputManager {
     let paintNext = this.pressed(KEYS.paintNext);
     let paintPrev = false;
     const fullscreen = this.pressed(KEYS.fullscreen);
+    let musicNext = this.pressed(KEYS.musicNext);
     let accept = this.pressed(KEYS.accept);
     let back = this.pressed(KEYS.back);
     // menus also count a tap that began and ended between two frames
@@ -315,7 +319,10 @@ export class InputManager {
         }
         handbrake = handbrake || btn(M.cross);
         nitro = nitro || btn(M.square);
-        lookBack = lookBack || btn(M.circle) || btn(M.r3);
+        // L3 + R3 together: next music track (like FC); R3 alone still looks back
+        const both = btn(M.l3) && btn(M.r3);
+        if (both && (edge(M.l3) || edge(M.r3))) musicNext = true;
+        lookBack = lookBack || btn(M.circle) || (btn(M.r3) && !btn(M.l3));
         horn = horn || btn(M.circle);
         lookX = rx;
         lookY = ry;
@@ -359,6 +366,7 @@ export class InputManager {
     a.paintNext = paintNext;
     a.paintPrev = paintPrev;
     a.fullscreen = fullscreen;
+    a.musicNext = musicNext;
     a.accept = accept;
     a.back = back;
     a.any = any;

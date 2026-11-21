@@ -39,6 +39,7 @@ import { prof } from './core/Profiler';
 import { DETAIL_LAYER, mainOnly } from './core/layers';
 import { Ghost } from './game/Ghost';
 import { vegUniforms } from './world/Vegetation';
+import { MusicPlayer } from './audio/MusicPlayer';
 import { FarShadow, PaintProbe, PlanarReflection, groundUniforms, patchGround, setGroundFeatures } from './fx/Reflections';
 import type { MapIcon } from './ui/HUD';
 import type { PursuitEvent } from './game/Pursuit';
@@ -242,10 +243,12 @@ class Game {
 
   // ── Setup helpers ────────────────────────────────────────────────────────
   private bindEvents(): void {
+    this.music.onTrack = () => (this.musicShownAt = performance.now());
     // Browsers only allow audio and fullscreen from inside a real key/click handler.
     const gesture = () => {
       this.audio.start();
       this.audio.setVolume(this.settings.volume);
+      if (this.settings.music && this.settings.musicBalance > 0 && this.music.state === 'off') this.music.play();
     };
     window.addEventListener('keydown', (e) => {
       gesture();
@@ -332,6 +335,9 @@ class Game {
     this.race.steerAssist = STEER_ASSIST[s.steerAssist] ?? 0;
     this.rig.shakeScale = s.cameraShake;
     this.audio.setVolume(s.volume);
+    this.audio.setMix(s.mixEngine, s.mixFx, s.mixSiren);
+    if ((!s.music || s.musicBalance <= 0) && (this.music.state === 'playing' || this.music.state === 'ready')) this.music.pause();
+    else if (s.music && s.musicBalance > 0 && this.music.state === 'paused') this.music.play();
     this.hud.setUserScale(s.hudScale);
     document.documentElement.classList.toggle('colour-safe', s.colourSafe);
     this.hud.colourSafe = s.colourSafe;
@@ -663,6 +669,39 @@ class Game {
   }
 
   // ── F4 benchmark (4B.2): a fixed 30 s fly-round in night, heavy rain and (in a pursuit) Heat 5 ──
+  // ── 4C.2: playlist music ──
+  readonly music = new MusicPlayer();
+  private musicShownAt = 0;
+  private updateMusic(a: { musicNext: boolean }): void {
+    const m = this.music;
+    const s = this.settings;
+    const box = document.getElementById('music');
+    if (!box) return;
+    if (a.musicNext && s.music) {
+      if (m.state === 'off') m.play();
+      else m.next();
+    }
+    m.tick();
+    const on = s.music && s.musicBalance > 0 && (m.state === 'ready' || m.state === 'playing' || m.state === 'paused');
+    box.hidden = !on;
+    const race = this.state === 'playing' || this.state === 'paused';
+    box.classList.toggle('race', race && this.state === 'playing');
+    box.classList.toggle('menu', !(race && this.state === 'playing'));
+    box.classList.toggle('quiet', performance.now() - this.musicShownAt > 10000);
+    // music up front turns the game down (Spotify's player has no volume control of its own)
+    this.audio.setDuck(m.state === 'playing' ? 1 - 0.75 * s.musicBalance : 1);
+    const key = document.getElementById('music-key');
+    if (key) {
+      const d = this.input.device;
+      key.innerHTML = d === 'playstation' ? '<b>L3 + R3</b> next track' : d === 'xbox' || d === 'generic' ? '<b>LS + RS</b> next track' : '<b>M</b> next track';
+    }
+    const note = document.getElementById('music-note');
+    if (note) {
+      note.className = m.preview ? 'warn' : '';
+      note.textContent = m.preview ? 'Previews: sign in at open.spotify.com in this browser for full tracks' : '';
+    }
+  }
+
   /** fixed camera for screenshots: [x, y, z, lookX, lookY, lookZ, fov?] */
   shotCam: number[] | null = null;
   private bench: { t: number; ms: number[]; cpu: number[]; gpu: number[]; prev: Conditions; prevRain: number; dist: number; start: number } | null = null;
@@ -1370,6 +1409,20 @@ class Game {
         },
         { label: 'Volume', value: () => pct(s.volume), adjust: (d) => ((s.volume = step(s.volume, d, 0, 1, 0.1)), done()) },
         {
+          label: 'Music (your Spotify playlist)',
+          value: () => (!s.music ? 'Off' : this.music.state === 'unavailable' ? 'Blocked on this page' : this.music.current ? `On · ${this.music.current[1]}` : 'On'),
+          adjust: () => {
+            s.music = !s.music;
+            if (s.music) this.music.play();
+            done();
+          },
+        },
+        { label: 'Next track (M · L3 + R3)', value: () => (this.music.current ? this.music.current[2] : '—'), adjust: () => (s.music ? (this.music.state === 'off' ? this.music.play() : this.music.next()) : undefined) },
+        { label: 'Music / game balance', value: () => (s.musicBalance <= 0 ? 'Game only' : pct(s.musicBalance)), adjust: (d) => ((s.musicBalance = step(s.musicBalance, d, 0, 1, 0.1)), done()) },
+        { label: 'Engine volume', value: () => pct(s.mixEngine), adjust: (d) => ((s.mixEngine = step(s.mixEngine, d, 0, 1, 0.1)), done()) },
+        { label: 'Effects volume (tyres, rain, crashes)', value: () => pct(s.mixFx), adjust: (d) => ((s.mixFx = step(s.mixFx, d, 0, 1, 0.1)), done()) },
+        { label: 'Sirens volume', value: () => pct(s.mixSiren), adjust: (d) => ((s.mixSiren = step(s.mixSiren, d, 0, 1, 0.1)), done()) },
+        {
           label: 'Camera',
           value: () => CAMERA_MODES[s.camera] ?? CAMERA_MODES[0],
           adjust: (d) => {
@@ -1663,6 +1716,7 @@ class Game {
     vegUniforms.uWind.value = 0.45 + 0.9 * (this.env.p.rain > 0 ? this.env.rainK : 0);
     const a = this.input.poll(dt);
     const s = this.physics.s;
+    this.updateMusic(a);
 
     if (this.state === 'menu') {
       if (this.menu.isOpen) this.menu.handle(a);

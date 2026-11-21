@@ -11,6 +11,12 @@ import { VehicleState } from '../vehicle/VehiclePhysics';
 export class AudioEngine {
   ctx: AudioContext | null = null;
   private master!: GainNode;
+  private duck!: GainNode;
+  private engineBus!: GainNode;
+  private fxBus!: GainNode;
+  private sirenBus!: GainNode;
+  private duckLevel = 1;
+  private mixLevels = { engine: 1, fx: 1, siren: 1 };
   /** 0 = outside the car, 1 = in the cockpit (eased by the caller) */
   cabin = 0;
   private noise!: AudioBuffer;
@@ -62,6 +68,22 @@ export class AudioEngine {
     return !!this.ctx && this.ctx.state === 'running';
   }
 
+  /** 4C.2: per-category levels (Settings → Sound) */
+  setMix(engine: number, fx: number, siren: number): void {
+    this.mixLevels = { engine, fx, siren };
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.engineBus.gain.setTargetAtTime(engine, t, 0.05);
+    this.fxBus.gain.setTargetAtTime(fx, t, 0.05);
+    this.sirenBus.gain.setTargetAtTime(siren, t, 0.05);
+  }
+
+  /** 4C.2: how loud the game is while music plays (1 = no ducking) */
+  setDuck(k: number): void {
+    this.duckLevel = k;
+    if (this.ctx) this.duck.gain.setTargetAtTime(k, this.ctx.currentTime, 0.4);
+  }
+
   setVolume(v: number): void {
     this.volume = v;
     if (this.ctx) this.master.gain.setTargetAtTime(this.muted ? 0 : v, this.ctx.currentTime, 0.05);
@@ -87,7 +109,17 @@ export class AudioEngine {
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14;
     comp.ratio.value = 5;
-    this.master.connect(comp).connect(ctx.destination);
+    // 4C.2: mixer — engine, effects and sirens buses into master, then the music duck
+    this.duck = ctx.createGain();
+    this.duck.gain.value = this.duckLevel;
+    this.master.connect(this.duck).connect(comp).connect(ctx.destination);
+    this.engineBus = ctx.createGain();
+    this.fxBus = ctx.createGain();
+    this.sirenBus = ctx.createGain();
+    for (const [bus, v] of [[this.engineBus, this.mixLevels.engine], [this.fxBus, this.mixLevels.fx], [this.sirenBus, this.mixLevels.siren]] as const) {
+      bus.gain.value = v;
+      bus.connect(this.master);
+    }
 
     // shared white-noise buffer
     this.noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
@@ -134,7 +166,7 @@ export class AudioEngine {
     this.engFilter.Q.value = 1.2;
     this.engGain = ctx.createGain();
     this.engGain.gain.value = 0;
-    mix.connect(shaper).connect(this.engFilter).connect(this.engGain).connect(this.master);
+    mix.connect(shaper).connect(this.engFilter).connect(this.engGain).connect(this.engineBus);
     for (const o of [this.oscA, this.oscB, this.oscSub, this.lump]) o.start();
     // intake / exhaust roar: band-passed noise that opens up with throttle
     this.roarFilter = ctx.createBiquadFilter();
@@ -142,7 +174,7 @@ export class AudioEngine {
     this.roarFilter.Q.value = 0.9;
     this.roarGain = ctx.createGain();
     this.roarGain.gain.value = 0;
-    this.noiseSource().connect(this.roarFilter).connect(this.roarGain).connect(this.master);
+    this.noiseSource().connect(this.roarFilter).connect(this.roarGain).connect(this.engineBus);
 
     // ── Tyres ──
     this.squealFilter = ctx.createBiquadFilter();
@@ -151,13 +183,13 @@ export class AudioEngine {
     this.squealFilter.Q.value = 6;
     this.squealGain = ctx.createGain();
     this.squealGain.gain.value = 0;
-    this.noiseSource().connect(this.squealFilter).connect(this.squealGain).connect(this.master);
+    this.noiseSource().connect(this.squealFilter).connect(this.squealGain).connect(this.fxBus);
     const rumbleF = ctx.createBiquadFilter();
     rumbleF.type = 'lowpass';
     rumbleF.frequency.value = 220;
     this.rumbleGain = ctx.createGain();
     this.rumbleGain.gain.value = 0;
-    this.noiseSource().connect(rumbleF).connect(this.rumbleGain).connect(this.master);
+    this.noiseSource().connect(rumbleF).connect(this.rumbleGain).connect(this.fxBus);
 
     // ── Wind ──
     this.windFilter = ctx.createBiquadFilter();
@@ -165,7 +197,7 @@ export class AudioEngine {
     this.windFilter.frequency.value = 400;
     this.windGain = ctx.createGain();
     this.windGain.gain.value = 0;
-    this.noiseSource().connect(this.windFilter).connect(this.windGain).connect(this.master);
+    this.noiseSource().connect(this.windFilter).connect(this.windGain).connect(this.fxBus);
 
     // ── Nitrous hiss ──
     const nf = ctx.createBiquadFilter();
@@ -173,7 +205,7 @@ export class AudioEngine {
     nf.frequency.value = 2600;
     this.nitroGain = ctx.createGain();
     this.nitroGain.gain.value = 0;
-    this.noiseSource().connect(nf).connect(this.nitroGain).connect(this.master);
+    this.noiseSource().connect(nf).connect(this.nitroGain).connect(this.engineBus);
 
     // ── Horn (two-tone) ──
     this.hornGain = ctx.createGain();
@@ -188,7 +220,7 @@ export class AudioEngine {
     const hf = ctx.createBiquadFilter();
     hf.type = 'lowpass';
     hf.frequency.value = 2400;
-    this.hornGain.connect(hf).connect(this.master);
+    this.hornGain.connect(hf).connect(this.fxBus);
 
     // ── Rain: a soft wash of filtered noise, plus a patter layer; tyre hiss on a wet road ──
     const rainHp = ctx.createBiquadFilter();
@@ -199,14 +231,14 @@ export class AudioEngine {
     rainLp.frequency.value = 5200;
     this.rainGain = ctx.createGain();
     this.rainGain.gain.value = 0;
-    this.noiseSource().connect(rainHp).connect(rainLp).connect(this.rainGain).connect(this.master);
+    this.noiseSource().connect(rainHp).connect(rainLp).connect(this.rainGain).connect(this.fxBus);
     const hissBp = ctx.createBiquadFilter();
     hissBp.type = 'bandpass';
     hissBp.frequency.value = 2600;
     hissBp.Q.value = 0.7;
     this.hissGain = ctx.createGain();
     this.hissGain.gain.value = 0;
-    this.noiseSource().connect(hissBp).connect(this.hissGain).connect(this.master);
+    this.noiseSource().connect(hissBp).connect(this.hissGain).connect(this.fxBus);
     this.setRain(this.rainLevel);
   }
 
@@ -240,7 +272,7 @@ export class AudioEngine {
         g2.gain.value = 0.35;
         osc.connect(filter);
         osc2.connect(g2).connect(filter);
-        filter.connect(gain).connect(this.master);
+        filter.connect(gain).connect(this.sirenBus);
         osc.start();
         osc2.start();
         this.sirens.push({ osc, osc2, gain, filter });
@@ -285,7 +317,7 @@ export class AudioEngine {
     const f = ctx.createBiquadFilter();
     f.type = 'lowpass';
     f.frequency.value = 1800;
-    g.connect(f).connect(this.master);
+    g.connect(f).connect(this.sirenBus);
     for (const hz of [330, 415]) {
       const o = ctx.createOscillator();
       o.type = 'square';
@@ -374,7 +406,7 @@ export class AudioEngine {
     const g = ctx.createGain();
     g.gain.setValueAtTime(gain, t);
     g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
-    src.connect(f).connect(g).connect(this.master);
+    src.connect(f).connect(g).connect(this.fxBus);
     src.start(t, Math.random() * 1.5);
     src.stop(t + dur + 0.05);
   }
@@ -389,7 +421,7 @@ export class AudioEngine {
     const g = ctx.createGain();
     g.gain.setValueAtTime(gain, t);
     g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
-    o.connect(g).connect(this.master);
+    o.connect(g).connect(this.fxBus);
     o.start(t);
     o.stop(t + dur + 0.05);
   }

@@ -52,6 +52,14 @@ export interface Settings {
   lensFx: boolean;
   /** 4C.1: screen-space ambient occlusion on Ultra (off by default: it draws the scene twice) */
   ao: boolean;
+  /** 4C.2: playlist music (Spotify) on the menus and in races */
+  music: boolean;
+  /** 4C.2: 0 = game only (music paused) … 1 = music up front (game turned well down) */
+  musicBalance: number;
+  /** 4C.2: sound mixer, 0..1 each */
+  mixEngine: number;
+  mixFx: number;
+  mixSiren: number;
   /** how hard it rains when it rains: changing over the race, or fixed */
   rainStrength: 'changing' | 'light' | 'heavy' | 'downpour';
   /** dynamic resolution to hold the frame rate */
@@ -102,6 +110,11 @@ export const defaults: Settings = {
   toneMap: 'filmic',
   lensFx: true,
   ao: false,
+  music: true,
+  musicBalance: 0.5,
+  mixEngine: 1,
+  mixFx: 1,
+  mixSiren: 1,
   rainStrength: 'changing',
   target60: true,
   fpsCap: '60',

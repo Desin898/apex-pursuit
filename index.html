@@ -403,6 +403,21 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
   .card { width: min(82vw, 340px); }
 }
 @media (prefers-reduced-motion: reduce) { .toast { animation-duration: 2.6s; } #hud-hints, #pop { transition: none; } .track-cards, .card { transition: none; } }
+
+/* 4C.2: music — Spotify's own compact player, with our next-track hint */
+#music { position: fixed; z-index: 40; display: flex; flex-direction: column; gap: 4px; transition: opacity .6s var(--ease), transform .6s var(--ease); }
+#music[hidden] { display: none; }
+#music .frame { width: 300px; height: 80px; border-radius: 12px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); }
+#music .frame iframe { display: block; border: 0; }
+#music .tip { font-size: var(--t-xs); color: var(--ink-2); letter-spacing: .04em; display: flex; gap: 10px; justify-content: space-between; padding: 0 4px; }
+#music .tip b { color: var(--ink); font-weight: 600; }
+#music .tip .warn { color: var(--accent); }
+#music.menu { right: var(--gutter); bottom: var(--gutter); }
+#music.race { left: var(--gutter); top: var(--gutter); transform: scale(calc(var(--hud-scale) * 0.82)); transform-origin: top left; }
+#music.race .frame { pointer-events: none; }
+#music.race.quiet { opacity: 0.32; }
+#music.race.quiet:hover { opacity: 1; }
+@media (max-height: 520px) { #music.race { transform: scale(0.62); } }
 </style>
 </head>
 <body>
@@ -621,5 +636,9 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
 </div>
 <div id="boot-error" hidden><b>Couldn't start</b><span id="boot-msg"></span></div>
 <!--APP-->
+<div id="music" class="menu" hidden aria-label="Music">
+  <div class="frame" id="music-frame"></div>
+  <div class="tip"><span id="music-note"></span><span id="music-key"></span></div>
+</div>
 </body>
 </html>
