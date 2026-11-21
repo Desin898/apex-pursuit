@@ -7,6 +7,7 @@ if errorlevel 1 (
   echo  Node.js is needed to host an online race.
   echo  Install the LTS version from https://nodejs.org , then double-click this file again.
   echo  ^(Playing solo needs nothing: just open play\ApexPursuit.html^)
+  echo  ^(Joining a friend's race needs nothing either: open the link they send you^)
   echo.
   pause
   exit /b 1
@@ -20,11 +21,5 @@ if not exist "node_modules\ws" (
     exit /b 1
   )
 )
-echo.
-echo  Starting the race server. Keep this window open while you play.
-echo  Friends on the same Wi-Fi: open the "Same network" address below in Chrome or Edge.
-echo  If Windows asks about the firewall, allow access on private networks.
-echo.
-start "" "http://localhost:8080/?room=friends"
-node server\relay.mjs
+node server\host.mjs %*
 pause

@@ -221,6 +221,25 @@ export class Race {
     return 0.5;
   }
 
+  /** 4C.2 online lobby: keep the grid waiting before the lights (call every frame while waiting). */
+  lobbyHold(): void {
+    if (this.cars.length > 1 || this.clockExternal) this.countdown = Math.max(this.countdown, COUNTDOWN + this.hold);
+    else this.countdown = Math.max(this.countdown, 0.01);
+  }
+
+  /** 4C.2 online: a friend dropped out mid-race — an AI driver takes their car where it is. */
+  takeOver(c: RaceCar, difficulty: Difficulty, seed: number): void {
+    c.remote = false;
+    c.net = null;
+    c.gone = false;
+    c.netId = `ai:${c.grid}`;
+    c.driver = new AIDriver(this.world, this.line, 'clean', AI.levels[difficulty], seed);
+    c.driver.wetK = 1 - this.wet * (1 - WEATHER.wetGripAsphalt * WEATHER.aiWetMargin);
+    if (c.s.y < -10) c.s.y = 0; // it was parked out of sight
+    // the lap counter carries on from the distance the friend had reached
+    c.lap.resumeFrom(c.netDistance);
+  }
+
   /** Put everyone back on the grid and restart the countdown. */
   toGrid(): void {
     for (const c of this.cars) {
@@ -459,7 +478,8 @@ export class Race {
       }
       return;
     }
-    const age = Math.min(0.35, this.clock - c.netTime);
+    // 4C.2: friends at home can be 100–250 ms away: allow older snapshots before giving up on them
+    const age = Math.min(0.6, this.clock - c.netTime);
     const tx = n[0] + n[4] * age;
     const tz = n[2] + n[5] * age;
     const tyaw = n[3] + n[6] * age;
@@ -467,7 +487,9 @@ export class Race {
     s.x += n[4] * dt;
     s.z += n[5] * dt;
     const err = Math.hypot(tx - s.x, tz - s.z);
-    const k = err > 9 ? 1 : Math.min(1, dt * 10);
+    // big errors snap (a respawn, a crash); small ones bleed off gently so a laggy friend doesn't jitter
+    const snap = Math.max(9, Math.hypot(n[4], n[5]) * 0.4);
+    const k = err > snap ? 1 : Math.min(1, dt * (err > 2 ? 8 : 5));
     s.x += (tx - s.x) * k;
     s.z += (tz - s.z) * k;
     let dy = tyaw - s.yaw;

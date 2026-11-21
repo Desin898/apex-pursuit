@@ -18,6 +18,8 @@ import { WebSocketServer } from 'ws';
 const PORT = Number(process.env.PORT) || 8080;
 const MAX_PER_ROOM = 8;
 const MAX_MESSAGE = 8 * 1024;
+/** must match the game's online protocol (4C.2 = 2): older copies are told to update */
+const PROTOCOL = '2';
 // the fresh build if there is one, otherwise the prebuilt copy that ships in the repository
 // (so friends can host from the downloaded ZIP without building anything)
 const here = dirname(fileURLToPath(import.meta.url));
@@ -58,22 +60,45 @@ const rooms = new Map();
 let nextId = 1;
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_MESSAGE });
 
+/** room name → password key set by the first player in (4C.2) */
+const roomKeys = new Map();
+
 wss.on('connection', (ws, req) => {
-  const name = (new URL(req.url, 'http://x').searchParams.get('room') || 'main').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'main';
+  const q = new URL(req.url, 'http://x').searchParams;
+  const name = (q.get('room') || 'main').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'main';
+  const key = (q.get('k') || '').replace(/[^a-f0-9]/g, '').slice(0, 32);
+  const ver = q.get('v') || '1';
+  if (ver !== PROTOCOL) {
+    ws.close(4005, 'version');
+    return;
+  }
   let room = rooms.get(name);
   if (!room) rooms.set(name, (room = new Map()));
+  if (room.size === 0) roomKeys.set(name, key); // the first one in sets the password (or none)
+  else if ((roomKeys.get(name) || '') !== key) {
+    ws.close(4003, 'password');
+    return;
+  }
   if (room.size >= MAX_PER_ROOM) {
-    ws.close(1013, 'room full');
+    ws.close(4004, 'room full');
     return;
   }
   const id = 'p' + (nextId++).toString(36) + Math.random().toString(36).slice(2, 6);
   room.set(id, ws);
   ws.send(JSON.stringify({ t: 'hi', id }));
+  // rate limit: a game sends 20 states a second; anything far above that is dropped
+  let budget = 60;
+  const refill = setInterval(() => (budget = 60), 1000);
   ws.on('message', (raw) => {
+    if (--budget < 0) return;
     let m;
     try {
       m = JSON.parse(String(raw));
     } catch {
+      return;
+    }
+    if (m && m.t === 'ping' && typeof m.ts === 'number') {
+      ws.send(JSON.stringify({ t: 'pong', ts: m.ts }));
       return;
     }
     if (!m || m.t !== 's' || typeof m.d !== 'object' || m.d === null) return;
@@ -81,10 +106,14 @@ wss.on('connection', (ws, req) => {
     for (const [other, sock] of room) if (other !== id && sock.readyState === 1) sock.send(out);
   });
   ws.on('close', () => {
+    clearInterval(refill);
     room.delete(id);
     const out = JSON.stringify({ t: 'bye', id });
     for (const sock of room.values()) if (sock.readyState === 1) sock.send(out);
-    if (room.size === 0) rooms.delete(name);
+    if (room.size === 0) {
+      rooms.delete(name);
+      roomKeys.delete(name);
+    }
   });
   ws.on('error', () => {});
 });

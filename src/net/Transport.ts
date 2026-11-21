@@ -3,7 +3,9 @@
 // "here is my current state object" out, "here is everyone's latest state" in. Three ways:
 //
 //   room   the hosting page's live room (when the game runs as a shared claude.ai page)
-//   relay  a WebSocket to the small Node relay in server/relay.mjs (self-hosted, LAN or internet)
+//   relay  a WebSocket to the small Node relay in server/relay.mjs (self-hosted, LAN or internet).
+//          4C.2: any copy of the game can join any relay by address (a link a friend sends,
+//          e.g. https://xxxx.trycloudflare.com/?room=friends), with an optional room password.
 //   tabs   BroadcastChannel between tabs of one browser (handy for trying it out alone)
 //
 // Everything received is untrusted data from another player; OnlineSession validates it.
@@ -26,6 +28,58 @@ export interface Transport {
   /** everyone else currently present (may include this client, flagged isMe) */
   peers(): NetPeer[];
   close(): void;
+  /** 4C.2: round trip to the server in ms (−1 = unknown) */
+  rtt?(): number;
+  /** 4C.2: why failed() is true, in words for the player */
+  failReason?(): string;
+  /** 4C.2: where we're connected, for the lobby (e.g. "xxxx.trycloudflare.com · friends") */
+  label?(): string;
+}
+
+/** 4C.2: a room password is never sent as typed (a friendly-game guard, not real security) */
+export function passKey(room: string, pass: string): string {
+  if (!pass) return '';
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  const str = `apex|${room}|${pass}`;
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 16777619);
+    h2 = Math.imul(h2 + c, 2654435761);
+  }
+  return ((h1 >>> 0).toString(16) + (h2 >>> 0).toString(16)).slice(0, 16);
+}
+
+export const cleanRoom = (r: string | null | undefined): string => (r || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'friends';
+
+/**
+ * 4C.2: turn whatever a friend pasted (a link, a host name, "192.168.1.20:8080") into the relay's
+ * WebSocket address. Returns null if it can't be an address.
+ */
+export function relaySocketUrl(input: string, room: string, pass: string): { url: string; label: string } | null {
+  let s = input.trim();
+  if (!s) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = (/^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?(\/|$)/i.test(s) ? 'http://' : 'https://') + s;
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  if (!/^(https?|wss?):$/.test(u.protocol) || !u.host) return null;
+  const secure = u.protocol === 'https:' || u.protocol === 'wss:';
+  const r = cleanRoom(u.searchParams.get('room') || room);
+  const key = passKey(r, u.searchParams.get('pw') || pass);
+  return { url: `${secure ? 'wss' : 'ws'}://${u.host}/ws?room=${r}&v=2${key ? `&k=${key}` : ''}`, label: `${u.host} · ${r}` };
+}
+
+export interface TransportOptions {
+  /** relay address to join (anything relaySocketUrl understands) */
+  server?: string;
+  room?: string;
+  pass?: string;
+  /** 'tabs' = same-browser test mode */
+  force?: 'tabs';
 }
 
 const STALE_MS = 3500;
@@ -97,8 +151,26 @@ class RelayTransport implements Transport {
   private others = new Map<string, { data: Record<string, unknown>; t: number }>();
   private closed = false;
   private fails = 0;
-  constructor(private url: string) {
+  private reason = '';
+  private rttMs = -1;
+  private pingTimer = 0;
+  constructor(
+    private url: string,
+    private where = '',
+  ) {
     this.connect();
+    this.pingTimer = window.setInterval(() => {
+      if (this.ready()) this.ws!.send(JSON.stringify({ t: 'ping', ts: performance.now() }));
+    }, 2000);
+  }
+  rtt(): number {
+    return this.rttMs;
+  }
+  failReason(): string {
+    return this.reason || "Couldn't reach the race server. Check the link, and that the host's window is still open.";
+  }
+  label(): string {
+    return this.where;
   }
   private connect(): void {
     if (this.closed) return;
@@ -115,12 +187,31 @@ class RelayTransport implements Transport {
       if (m.t === 'hi' && typeof m.id === 'string') {
         this.id = m.id;
         this.fails = 0;
+      } else if (m.t === 'pong' && typeof m.ts === 'number') {
+        const r = performance.now() - m.ts;
+        this.rttMs = this.rttMs < 0 ? r : this.rttMs * 0.7 + r * 0.3;
       } else if (m.t === 's' && typeof m.id === 'string' && isObj(m.d)) this.others.set(m.id, { data: m.d, t: performance.now() });
       else if (m.t === 'bye' && typeof m.id === 'string') this.others.delete(m.id);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       this.id = '';
       this.others.clear();
+      // the server's reasons are final: don't keep knocking
+      if (ev.code === 4003) {
+        this.reason = 'Wrong or missing room password.';
+        this.fails = 8;
+        return;
+      }
+      if (ev.code === 1013 || ev.code === 4004) {
+        this.reason = 'That room is full.';
+        this.fails = 8;
+        return;
+      }
+      if (ev.code === 4005) {
+        this.reason = 'The host is running a different version of the game. Download the latest ZIP.';
+        this.fails = 8;
+        return;
+      }
       this.fails++;
       if (!this.closed && this.fails < 8) setTimeout(() => this.connect(), 800 + this.fails * 400); // quietly reconnect
     };
@@ -149,6 +240,7 @@ class RelayTransport implements Transport {
   }
   close(): void {
     this.closed = true;
+    clearInterval(this.pingTimer);
     this.ws?.close();
   }
 }
@@ -196,13 +288,25 @@ class TabsTransport implements Transport {
   }
 }
 
+/** true when this page was opened from a relay's own address (the host's link) */
+export function servedByRelay(): boolean {
+  const w = window as unknown as { __APEX_RELAY__?: boolean };
+  return !!w.__APEX_RELAY__ && location.protocol.startsWith('http');
+}
+
 /** Pick the best way to reach other players from wherever this page is running. */
-export async function openTransport(): Promise<Transport | null> {
-  const w = window as unknown as { __APEX_RELAY__?: boolean; claude?: { use?: (name: string) => Promise<unknown> } };
+export async function openTransport(opts: TransportOptions = {}): Promise<Transport | null> {
+  const w = window as unknown as { claude?: { use?: (name: string) => Promise<unknown> } };
   try {
-    if (w.__APEX_RELAY__ && location.protocol.startsWith('http')) {
-      const room = (new URLSearchParams(location.search).get('room') || 'main').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'main';
-      return new RelayTransport(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=${room}`);
+    if (opts.force === 'tabs' && typeof BroadcastChannel !== 'undefined') return new TabsTransport();
+    if (opts.server) {
+      const r = relaySocketUrl(opts.server, opts.room ?? '', opts.pass ?? '');
+      return r ? new RelayTransport(r.url, r.label) : null;
+    }
+    if (servedByRelay()) {
+      const room = cleanRoom(new URLSearchParams(location.search).get('room') || opts.room);
+      const key = passKey(room, opts.pass ?? '');
+      return new RelayTransport(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=${room}&v=2${key ? `&k=${key}` : ''}`, `${location.host} · ${room}`);
     }
     if (w.claude && typeof w.claude.use === 'function') {
       const room = (await Promise.race([w.claude.use('room'), new Promise((r) => setTimeout(() => r(null), 11000))])) as RoomApi | null;

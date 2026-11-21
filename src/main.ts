@@ -40,6 +40,7 @@ import { DETAIL_LAYER, mainOnly } from './core/layers';
 import { Ghost } from './game/Ghost';
 import { vegUniforms } from './world/Vegetation';
 import { MusicPlayer } from './audio/MusicPlayer';
+import { cleanRoom, relaySocketUrl, servedByRelay, TransportOptions } from './net/Transport';
 import { FarShadow, PaintProbe, PlanarReflection, groundUniforms, patchGround, setGroundFeatures } from './fx/Reflections';
 import type { MapIcon } from './ui/HUD';
 import type { PursuitEvent } from './game/Pursuit';
@@ -151,11 +152,7 @@ class Game {
         this.mode = 'free';
         this.beginRace(false);
       },
-      online: () => {
-        this.mode = 'race';
-        this.setOnline(true);
-        this.beginRace(this.settings.rivals);
-      },
+      online: () => this.openOnlinePanel(),
       startRace: () => {
         this.mode = 'race';
         this.beginRace(true);
@@ -244,6 +241,17 @@ class Game {
   // ── Setup helpers ────────────────────────────────────────────────────────
   private bindEvents(): void {
     this.music.onTrack = () => (this.musicShownAt = performance.now());
+    // 4C.2: a friend opened the host's race link: offer to join as soon as the home screen is up
+    if (servedByRelay()) {
+      let tries = 0;
+      const t = window.setInterval(() => {
+        if (++tries > 120) clearInterval(t);
+        if (this.state === 'menu' && document.getElementById('home')?.classList.contains('on') !== false) {
+          clearInterval(t);
+          this.openOnlinePanel();
+        }
+      }, 500);
+    }
     // Browsers only allow audio and fullscreen from inside a real key/click handler.
     const gesture = () => {
       this.audio.start();
@@ -252,6 +260,8 @@ class Game {
     };
     window.addEventListener('keydown', (e) => {
       gesture();
+      const typing = (e.target as HTMLElement | null)?.tagName === 'INPUT';
+      if (typing) return;
       if (e.code === 'KeyF' && !e.repeat) this.toggleFullscreen();
       if (e.code === 'Backquote' || e.code === 'F3') {
         e.preventDefault();
@@ -299,6 +309,16 @@ class Game {
       this.hud.toast(`Host set ${c.weather === 'clear' ? 'clear skies' : c.weather}, ${c.time}`);
     };
     this.online.onStatus = () => this.refreshOnlineUi();
+    // 4C.2: a friend dropped out mid-race — the AI drives their car
+    this.online.onTakeOver = (netId, slot, name, host) => {
+      const c = this.race.cars.find((x) => x.netId === netId);
+      if (!c) return;
+      if (host) this.race.takeOver(c, this.settings.difficulty, 4000 + slot * 31);
+      else c.netId = `ai:${slot}`;
+      c.name = name;
+      c.gone = false;
+      this.buildCarVisuals();
+    };
     this.online.onRoster = (specs, host) => {
       this.rebuildRace(specs);
       this.race.clockExternal = !host;
@@ -702,6 +722,166 @@ class Game {
     }
   }
 
+  // ── 4C.2: Online panel (join / host) ──
+  private olWired = false;
+  private openOnlinePanel(): void {
+    const dlg = document.getElementById('online-dlg');
+    if (!dlg) return;
+    const $ = (id: string) => document.getElementById(id) as HTMLInputElement;
+    if (!this.olWired) {
+      this.olWired = true;
+      $('ol-link').value = this.settings.onlineServer;
+      $('ol-room').value = this.settings.onlineRoom;
+      const join = () => {
+        const link = $('ol-link').value.trim();
+        if (!link) {
+          this.olStatus('Paste the link your friend sent first.', 'err');
+          return;
+        }
+        if (!relaySocketUrl(link, $('ol-room').value, '')) {
+          this.olStatus("That doesn't look like a race link. Paste the whole link your friend sent.", 'err');
+          return;
+        }
+        this.settings.onlineServer = link;
+        this.settings.onlineRoom = cleanRoom($('ol-room').value);
+        saveSettings(this.settings);
+        this.joinOnline({ server: link, room: this.settings.onlineRoom, pass: $('ol-pass').value });
+      };
+      $('ol-join').addEventListener('click', join);
+      for (const id of ['ol-link', 'ol-room', 'ol-pass']) $(id).addEventListener('keydown', (e) => e.key === 'Enter' && join());
+      $('ol-joinhere').addEventListener('click', () => this.joinOnline({ pass: $('ol-pass2').value }));
+      $('ol-tabs').addEventListener('click', () => this.joinOnline({ force: 'tabs' }));
+      $('ol-leave').addEventListener('click', () => {
+        this.setOnline(false);
+        this.refreshOnlinePanel();
+      });
+      $('ol-close').addEventListener('click', () => this.closeOnlinePanel());
+      dlg.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') this.closeOnlinePanel();
+      });
+    }
+    document.getElementById('ol-served')!.hidden = !servedByRelay();
+    dlg.hidden = false;
+    this.refreshOnlinePanel();
+    (servedByRelay() ? $('ol-joinhere') : $('ol-link')).focus();
+  }
+
+  private closeOnlinePanel(): void {
+    const dlg = document.getElementById('online-dlg');
+    if (dlg) dlg.hidden = true;
+    (document.getElementById('game') as HTMLCanvasElement | null)?.focus();
+  }
+
+  private olStatus(text: string, kind: '' | 'err' | 'ok' = ''): void {
+    const el = document.getElementById('ol-status');
+    if (!el) return;
+    el.textContent = text;
+    el.className = `sub${kind ? ' ' + kind : ''}`;
+  }
+
+  private refreshOnlinePanel(): void {
+    const dlg = document.getElementById('online-dlg');
+    if (!dlg || dlg.hidden) return;
+    const o = this.online;
+    if (o.status === 'online') this.olStatus(`Connected: ${o.where} · ${o.players.length} player${o.players.length === 1 ? '' : 's'}`, 'ok');
+    else if (o.status === 'connecting') this.olStatus('Connecting…');
+    else if (o.status === 'unavailable') this.olStatus(o.failReason || 'Could not connect.', 'err');
+    else this.olStatus('Not connected. Join a friend with their link, or host a race.');
+    document.getElementById('ol-leave')!.hidden = o.status === 'off';
+  }
+
+  private joinOnline(opts: TransportOptions): void {
+    if (this.online.status !== 'off') this.online.disable();
+    this.closeOnlinePanel();
+    this.mode = 'race';
+    this.setOnline(true, opts);
+    if (this.state === 'menu' || this.state === 'results') this.beginRace(this.settings.rivals);
+    else if (this.state === 'paused') this.resume();
+  }
+
+  /** 4C.2: the online host changes the event from the pause menu (guests see it read-only) */
+  private hostRows(): { label: string; value?: () => string; adjust?: (d: number) => void }[] {
+    if (this.online.status !== 'online') return [];
+    const s = this.settings;
+    const host = this.online.isHost;
+    const restart = () => {
+      saveSettings(s);
+      this.online.requestRestart();
+      this.menu.render();
+    };
+    const W: Settings['weather'][] = ['clear', 'cloudy', 'rain', 'random'];
+    const T: Settings['timeOfDay'][] = ['dusk', 'night', 'dynamic'];
+    const cyc = <X,>(list: X[], cur: X, d: number): X => list[(list.indexOf(cur) + d + list.length) % list.length];
+    const cap = (x: string) => x[0].toUpperCase() + x.slice(1);
+    const ro = () => this.hud.toast('Only the host changes the race');
+    return [
+      { label: 'Online: race', value: () => (s.raceType === 'pursuit' ? 'Pursuit' : 'Clean race'), adjust: () => (host ? ((s.raceType = s.raceType === 'pursuit' ? 'clean' : 'pursuit'), restart()) : ro()) },
+      {
+        label: 'Online: weather',
+        value: () => cap(this.env.conditions.weather),
+        adjust: (d) => {
+          if (!host) return ro();
+          s.weather = cyc(W, s.weather, d);
+          saveSettings(s);
+          this.applyConditions(this.resolveConditions());
+          this.menu.render();
+        },
+      },
+      {
+        label: 'Online: time of day',
+        value: () => cap(this.env.conditions.time),
+        adjust: (d) => {
+          if (!host) return ro();
+          s.timeOfDay = cyc(T, s.timeOfDay, d);
+          saveSettings(s);
+          this.applyConditions(this.resolveConditions());
+          this.menu.render();
+        },
+      },
+      { label: 'Online: laps', value: () => String(this.race.targetLaps || s.laps), adjust: (d) => (host ? ((s.laps = cyc([3, 5, 8], s.laps, d)), restart()) : ro()) },
+    ];
+  }
+
+  // ── 4C.2: lobby panel, Ready / Start, waiting for the next race ──
+  private lobbyHtml = '';
+  private updateLobby(a: { accept: boolean }): void {
+    const el = document.getElementById('lobby');
+    if (!el) return;
+    const o = this.online;
+    const show = o.status === 'online' && this.state === 'playing' && (o.phase === 'lobby' || o.waiting);
+    if (!show) {
+      if (!el.hidden) el.hidden = true;
+      return;
+    }
+    if (a.accept) o.pressStart();
+    if (o.waiting) this.race.lobbyHold(); // our own copy stays on the grid until we're in
+    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+    const rows = o.lobby
+      .map((r) => {
+        const tag = r.waiting ? '<span class="tag">next race</span>' : r.host ? '<span class="tag ok">host</span>' : r.ready ? '<span class="tag ok">ready ✓</span>' : '<span class="tag">not ready</span>';
+        const ping = r.ping >= 0 ? `<span class="ping${r.ping > 220 ? ' bad' : ''}">${r.ping} ms</span>` : '<span class="ping">–</span>';
+        return `<div class="row${r.me ? ' me' : ''}"><span>${esc(r.name)}${r.me ? ' (you)' : ''}</span>${tag}${ping}</div>`;
+      })
+      .join('');
+    const s = this.settings;
+    const c = this.env.conditions;
+    const ai = this.race.cars.filter((x) => x.driver || x.netId.startsWith('ai:')).length;
+    const cond = `${this.race.pursuit ? 'Pursuit race' : 'Clean race'} · ${c.weather} · ${c.time} · ${this.race.targetLaps || s.laps} laps · ${ai} AI`;
+    const pad = this.input.device === 'playstation' ? '✕' : this.input.device === 'keyboard' ? 'Enter' : 'A';
+    let say: string;
+    if (o.waiting) say = 'A race is running. You join at the next start.';
+    else if (o.autoStart >= 0) say = `Everyone's ready: starting in <b>${Math.max(0, Math.ceil(o.autoStart))}</b>`;
+    else if (o.isHost) say = o.lobby.length > 1 ? `Press <b>${pad}</b> to start · Esc: race, weather, laps` : `Waiting for friends · <b>${pad}</b> to start anyway`;
+    else say = o.ready ? `Ready ✓ · waiting for the host (<b>${pad}</b> to undo)` : `Press <b>${pad}</b> when you're ready`;
+    const html = `<div class="head"><b>Online lobby</b><span>${esc(o.where)}</span></div><div class="rows">${rows}</div><div class="cond">${esc(cond)}</div><div class="say">${say}</div>`;
+    if (html !== this.lobbyHtml) {
+      this.lobbyHtml = html;
+      el.innerHTML = html;
+    }
+    el.hidden = false;
+  }
+
   /** fixed camera for screenshots: [x, y, z, lookX, lookY, lookZ, fov?] */
   shotCam: number[] | null = null;
   private bench: { t: number; ms: number[]; cpu: number[]; gpu: number[]; prev: Conditions; prevRain: number; dist: number; start: number } | null = null;
@@ -792,11 +972,11 @@ class Game {
   }
 
   // ── Online play ──────────────────────────────────────────────────────────
-  private setOnline(on: boolean): void {
+  private setOnline(on: boolean, opts: TransportOptions = {}): void {
     if (on) {
       if (this.online.status === 'off' || this.online.status === 'unavailable') {
         this.hud.toast('Connecting…');
-        void this.online.enable();
+        void this.online.enable(opts);
       }
     } else if (this.online.status !== 'off') {
       this.online.disable();
@@ -821,7 +1001,12 @@ class Game {
     if (label === this.lastOnlineLabel) return;
     this.lastOnlineLabel = label;
     this.hud.setVenue(this.online.status === 'off' ? 'Proving grounds' : `Online · ${label}`);
-    if (this.online.status === 'unavailable') this.hud.toast('Online play could not connect from this page');
+    if (this.online.status === 'unavailable') {
+      this.hud.toast(this.online.failReason || 'Online play could not connect');
+      // back to the Online panel with the reason, so they can fix the link or password
+      if (this.state === 'playing' || this.state === 'menu') this.openOnlinePanel();
+    }
+    this.refreshOnlinePanel();
     if (this.menu.isOpen) this.menu.render();
   }
 
@@ -1281,7 +1466,12 @@ class Game {
         { label: 'Resume', accept: () => this.resume() },
         { label: 'Photo mode', accept: () => this.enterPhoto() },
         { label: 'Restart from the grid', accept: () => (this.resetCar(true), this.resume()) },
-        { label: 'Online race', value: () => this.onlineLabel(), adjust: () => this.setOnline(this.online.status === 'off' || this.online.status === 'unavailable') },
+        {
+          label: 'Online race',
+          value: () => this.onlineLabel(),
+          adjust: () => (this.online.status === 'off' || this.online.status === 'unavailable' ? (this.menu.close(), this.openOnlinePanel()) : this.setOnline(false)),
+        },
+        ...this.hostRows(),
         {
           label: 'Rivals',
           value: () => (this.settings.rivals ? (this.online.status === 'online' ? 'AI fills the grid' : `${AI.gridSize - 1} cars`) : this.online.status === 'online' ? 'Humans only' : 'Off (free run)'),
@@ -1717,6 +1907,7 @@ class Game {
     const a = this.input.poll(dt);
     const s = this.physics.s;
     this.updateMusic(a);
+    this.updateLobby(a);
 
     if (this.state === 'menu') {
       if (this.menu.isOpen) this.menu.handle(a);

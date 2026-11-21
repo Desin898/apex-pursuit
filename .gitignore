@@ -8,3 +8,5 @@ npm-debug.log*
 Thumbs.db
 .env
 .env.*
+# cloudflared, downloaded by server/host.mjs when hosting over the internet
+tools/bin/

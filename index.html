@@ -418,6 +418,40 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
 #music.race.quiet { opacity: 0.32; }
 #music.race.quiet:hover { opacity: 1; }
 @media (max-height: 520px) { #music.race { transform: scale(0.62); } }
+
+/* 4C.2: Online panel (join / host) and the lobby */
+.dlg { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(4, 10, 12, .62); backdrop-filter: blur(6px); }
+.dlg[hidden] { display: none; }
+.dlg-card { width: min(640px, 94vw); max-height: 92vh; overflow: auto; background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-card); padding: 26px 28px; display: grid; gap: 16px; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+.dlg-card h2 { margin: 0; font-size: var(--t-xl); font-weight: 600; }
+.dlg-card h3 { margin: 0 0 8px; font-size: var(--t-md); font-weight: 600; color: var(--accent); letter-spacing: .02em; }
+.dlg-card p { margin: 0; color: var(--ink-2); font-size: var(--t-sm); line-height: 1.5; }
+.dlg-card p b { color: var(--ink); font-weight: 600; }
+.dlg-card .sub { color: var(--ink-2); }
+.dlg-card .sub.err { color: var(--danger); }
+.dlg-card .sub.ok { color: var(--accent); }
+.ol-block { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 10px; }
+.ol-block label { display: grid; gap: 5px; font-size: var(--t-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.ol-block input { font: inherit; font-size: var(--t-md); letter-spacing: 0; text-transform: none; color: var(--ink); background: var(--bg); border: 1px solid var(--line-2); border-radius: 10px; padding: 11px 12px; outline: none; }
+.ol-block input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ol-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ol-foot { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.dlg-card .pill { padding: 11px 22px; font-size: var(--t-sm); }
+#lobby { position: fixed; z-index: 30; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(var(--hud-scale)); width: min(520px, 92vw); background: var(--glass); border: 1px solid var(--line-2); border-radius: var(--r-card); padding: 18px 20px; backdrop-filter: blur(10px); display: grid; gap: 10px; pointer-events: none; }
+#lobby[hidden] { display: none; }
+#lobby .head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+#lobby .head b { font-size: var(--t-lg); font-weight: 600; }
+#lobby .head span { font-size: var(--t-xs); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#lobby .rows { display: grid; gap: 4px; }
+#lobby .row { display: grid; grid-template-columns: 1fr auto 64px; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 10px; background: rgba(255,255,255,.03); font-size: var(--t-sm); }
+#lobby .row.me { background: var(--accent-soft); }
+#lobby .tag { font-size: var(--t-xs); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+#lobby .tag.ok { color: var(--accent); }
+#lobby .ping { text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; font-size: var(--t-xs); }
+#lobby .ping.bad { color: var(--danger); }
+#lobby .cond { font-size: var(--t-sm); color: var(--ink-2); }
+#lobby .say { font-size: var(--t-md); color: var(--ink); text-align: center; padding-top: 4px; }
+#lobby .say b { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -640,5 +674,36 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
   <div class="frame" id="music-frame"></div>
   <div class="tip"><span id="music-note"></span><span id="music-key"></span></div>
 </div>
+<section id="online-dlg" class="dlg" hidden aria-label="Online with friends">
+  <div class="dlg-card">
+    <div><h2>Online with friends</h2><p class="sub" id="ol-status">Not connected</p></div>
+    <div class="ol-block" id="ol-served" hidden>
+      <h3>You opened a race link</h3>
+      <p>This page came from your friend's race server.</p>
+      <label>Room password <input id="ol-pass2" type="password" autocomplete="off" placeholder="only if the host set one"></label>
+      <button class="pill primary" type="button" id="ol-joinhere">Join this race</button>
+    </div>
+    <div class="ol-block">
+      <h3>Join a friend</h3>
+      <label>Race link <input id="ol-link" autocomplete="off" spellcheck="false" placeholder="Paste the link your friend sent you"></label>
+      <div class="ol-two">
+        <label>Room <input id="ol-room" autocomplete="off" spellcheck="false" placeholder="friends"></label>
+        <label>Password <input id="ol-pass" type="password" autocomplete="off" placeholder="optional"></label>
+      </div>
+      <button class="pill primary" type="button" id="ol-join">Join</button>
+    </div>
+    <div class="ol-block">
+      <h3>Host a race</h3>
+      <p>In the game folder, double-click <b>Host online race.bat</b> (Mac / Linux: <b>host-online.sh</b>) and choose <b>Internet</b>. It starts your race server, opens the race, and gives you a link to send your friends. Keep its window open while you play.</p>
+      <p>Same Wi-Fi? Choose <b>Same Wi-Fi</b> there instead: no internet link needed.</p>
+    </div>
+    <div class="ol-foot">
+      <button class="pill" type="button" id="ol-tabs">Try it in two tabs</button>
+      <button class="pill" type="button" id="ol-leave" hidden>Leave online</button>
+      <button class="pill" type="button" id="ol-close">Close</button>
+    </div>
+  </div>
+</section>
+<div id="lobby" hidden aria-live="polite"></div>
 </body>
 </html>

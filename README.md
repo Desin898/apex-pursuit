@@ -17,14 +17,30 @@ the only image files are the four key-art pictures in `art/`.
    (Chrome or Edge work best). That's it: you're racing. Everything is inside that one file,
    so it even works offline.
 
-**Race online with friends (same Wi-Fi / LAN):**
-1. One person hosts: install [Node.js](https://nodejs.org) (the LTS version), then double-click
-   **`Host online race.bat`** (on Mac / Linux run `./host-online.sh`). The first time it downloads
-   one small package. Keep its window open; if Windows asks about the firewall, allow private networks.
-2. It opens the game and shows a **Same network** address like `http://192.168.1.20:8080/?room=friends`.
-3. Everyone else types that address into Chrome or Edge. Up to 4 players, the rest of the grid
-   is filled with AI. (Friends in other places need port 8080 forwarded on the host's router,
-   or a tunnel such as a VPN; the same-Wi-Fi setup is the easy one.)
+**Race online with friends, each at your own home:**
+1. **One person hosts.** Install [Node.js](https://nodejs.org) (the LTS version), then in the game
+   folder double-click **`Host online race.bat`** (Mac / Linux: `./host-online.sh`) and choose
+   **1 Internet**. The first time it sets itself up and asks to download Cloudflare's free
+   `cloudflared` tool (about 40 MB, once). It then shows a link like
+   `https://some-random-words.trycloudflare.com/?room=friends`, copies it for you, and opens the
+   race. Keep that window open while you play.
+2. **Send the link** to your friends (WhatsApp, Discord…).
+3. **Friends** either open the link in Chrome or Edge, or open their own `play/ApexPursuit.html`
+   and go to **Online with friends → Join a friend** and paste it. Nothing to install.
+4. Everyone lands in the **lobby**: names, ping and who's ready. Press **Enter / ✕** when ready.
+   The host sets the race in **Esc → Online: race / weather / time of day / laps** (e.g. Pursuit,
+   rain, dusk, 3 laps) and presses **Enter / ✕** to start; it also starts by itself 3 seconds after
+   everyone is ready.
+
+Up to 4 friends race together; AI rivals fill the rest of the grid of 8 (and the police chase
+everyone in a Pursuit race). Someone who joins mid-race waits for the next start. Someone who
+drops out mid-race is replaced by an AI driver in their car. The link changes each time the host
+starts hosting. Optional room password: everyone types the same one in the Online panel.
+
+On the same Wi-Fi you can choose **2 Same Wi-Fi** instead: friends open the `http://192.168…`
+address it shows. Other ways for friends at home (if `cloudflared` is blocked): Tailscale or
+ZeroTier (a private network between your PCs), forwarding port 8080 on the host's router, or
+running `server/relay.mjs` on a free Node host (Render, Fly.io) so nobody has to host.
 
 **Controls:** W A S D or the arrow keys, Space handbrake, Shift nitrous, C camera, Esc pause.
 A DualShock 4 or Xbox controller works too (full table below).
@@ -94,6 +110,22 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
   hosts block Gamepad access inside frames.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
+
+## New in Phase 4C.2: music and online races with friends at home
+
+**Music.** The owner's Spotify playlist (67 tracks, `src/audio/playlist.ts`) plays shuffled on
+the menus and in races, through Spotify's own compact player: bottom right on the menus, top
+left in a race (it shows for 10 s when a track starts, then fades back).
+- **Next track:** **M**, or **L3 + R3** together on a controller (R3 alone still looks back).
+- **Settings → Music** on/off, **Next track**, **Music / game balance**, and new **Engine**,
+  **Effects** and **Sirens** volumes. Spotify's embedded player has no volume control, so the
+  balance turns the *game* down while music plays (0% pauses the music).
+- Full tracks need the browser to be signed in to open.spotify.com with Spotify Premium;
+  otherwise Spotify plays 30-second previews and the game says so.
+- Some pages block other sites' players (the claude.ai page may): then music is simply off
+  there. The downloaded game is unaffected.
+
+**Online with friends at home**: see "How to play" at the top and "Racing online with friends".
 
 ## New in Phase 4C: the big visual upgrade
 
@@ -574,7 +606,16 @@ starting lights. A new player joining sends everyone back to the grid. If the ho
 next player takes over and restarts. The host's Rivals and Rival difficulty settings apply to all.
 An online race cannot pause: with the menu open, your car just coasts.
 
-Two ways to connect, chosen automatically:
+**Phase 4C.2 (friends at their own homes)**: join by link from any copy of the game, one-click
+internet hosting through a Cloudflare quick tunnel (`server/host.mjs`), a lobby with Ready and
+Start, late joiners wait for the next race, an AI takes over a friend's car when they drop out,
+room passwords, ping in the lobby, smoother remote cars at internet latency, and a version check
+(everyone needs the same version of the game: protocol 2). This replaces "a new player joining
+sends everyone back to the grid". Test: `tools/nettest.py` runs four players through the relay
+(lobby, Ready, a 150 ms laggy player, a drop-out taken over by the AI, a late joiner, a wrong
+password).
+
+Ways to connect:
 
 1. **As a shared claude.ai page.** Share the page with your friends from its Share menu. Friends
    who are signed in and have been given access open the same page and switch Online race on.
@@ -587,6 +628,7 @@ Two ways to connect, chosen automatically:
    ```
 
    The server prints the links. On the same Wi-Fi, friends open `http://<your-ip>:8080/?room=friends`.
+   From home: `node server/host.mjs --internet` (what `Host online race.bat` runs) adds a public link.
    Over the internet, put the project on any Node host (Render, Railway, Fly.io, a VPS): start
    command `npm run play:online`, port from the `PORT` variable. Then share
    `https://<your-app-address>/?room=friends`. Any `?room=` name makes a separate race.
@@ -654,8 +696,10 @@ src/
   camera/ fx/ audio/ ui/
 tools/physics-test.ts     headless regression checks
 tools/hudcheck.py         HUD overlap check at six window sizes (needs dist/ served on :8901)
+tools/nettest.py          four players online through the relay: lobby, lag, drop-out, late joiner, password
 tools/compare.py          before/after pictures at six fixed spots into docs/compare/
-server/relay.mjs          serves the game and relays player states for online play
+server/relay.mjs          serves the game and relays player states for online play (rooms, passwords, ping)
+server/host.mjs           host from home: relay + Cloudflare quick tunnel, prints and copies the link
 play/ApexPursuit.html     prebuilt single-file game (npm run build:play refreshes it)
 Host online race.bat      Windows: start the relay for online play (host-online.sh on macOS / Linux)
 build.mjs                 esbuild bundling
@@ -715,7 +759,11 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
    - 4B.2. Rain intensity (changing showers to downpours), realistic lens drops that slide
      down, and the smooth-60 pass: F3 timing breakdown, F4 benchmark, fewer draw calls,
      dynamic resolution, frame cap (done)
-   - **4C. The big visual upgrade: GPU-painted materials, terrain and mountain ranges, trees,
+   - 4C. The big visual upgrade: GPU-painted materials, terrain and mountain ranges, trees,
      forests and grass with wind, aerial haze, AgX option, SMAA, lens fringe, before/after
-     pictures (this build). Still to do: TAA, lens dirt, new sky, car materials**
+     pictures (done). Still to do: TAA, lens dirt, new sky, car materials
+   - **4C.2. Your Spotify playlist in the game with a sound mixer; online races with friends at
+     their own homes: join by link, one-click hosting, lobby, late joiners, AI takes over
+     drop-outs, passwords (this build)**
+   - 4D. Background detail around the circuit; venue system for the mountain pass
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

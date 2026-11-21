@@ -60,6 +60,9 @@ export interface Settings {
   mixEngine: number;
   mixFx: number;
   mixSiren: number;
+  /** 4C.2: the last race link joined, and room */
+  onlineServer: string;
+  onlineRoom: string;
   /** how hard it rains when it rains: changing over the race, or fixed */
   rainStrength: 'changing' | 'light' | 'heavy' | 'downpour';
   /** dynamic resolution to hold the frame rate */
@@ -115,6 +118,8 @@ export const defaults: Settings = {
   mixEngine: 1,
   mixFx: 1,
   mixSiren: 1,
+  onlineServer: '',
+  onlineRoom: 'friends',
   rainStrength: 'changing',
   target60: true,
   fpsCap: '60',

@@ -61,6 +61,17 @@ export class LapTimer {
     this.progress = p;
   }
 
+  /** 4C.2: carry on from a race distance someone else reported (an AI taking over a friend's car). */
+  resumeFrom(distance: number): void {
+    if (distance < 0) return;
+    this.laps = Math.floor(distance);
+    this.progress = distance - this.laps;
+    this.prevP = this.progress;
+    this.running = true;
+    // sectors: assume the ones before this point were passed
+    this.sector = this.progress > 0.78 ? 2 : this.progress > 0.45 ? 1 : 0;
+  }
+
   /** Laps completed plus fraction of the current one; negative on the grid before the first crossing. */
   get distance(): number {
     return this.running ? this.laps + this.progress : this.progress > 0.5 ? this.progress - 1 : this.progress;
