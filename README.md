@@ -27,6 +27,10 @@ the only image files are the four key-art pictures in `art/`.
 2. **Send the link** to your friends (WhatsApp, Discord…).
 3. **Friends** either open the link in Chrome or Edge, or open their own `play/ApexPursuit.html`
    and go to **Online with friends → Join a friend** and paste it. Nothing to install.
+   **Want your own music in online races?** Use your own `play/ApexPursuit.html` and paste the
+   link. Music you add (Music → Add music) is kept per page address, and the host's link is new
+   every time, so music added on the link page would be gone next time. The host can do the same:
+   close the page the host window opened and paste the link into their own copy.
 4. Everyone lands in the **lobby**: names, ping and who's ready. Press **Enter / ✕** when ready.
    The host sets the race in **Esc → Online: race / weather / time of day / laps** (e.g. Pursuit,
    rain, dusk, 3 laps) and presses **Enter / ✕** to start; it also starts by itself 3 seconds after
