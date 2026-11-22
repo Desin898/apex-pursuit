@@ -52,10 +52,14 @@ export interface Settings {
   lensFx: boolean;
   /** 4C.1: screen-space ambient occlusion on Ultra (off by default: it draws the scene twice) */
   ao: boolean;
-  /** 4C.2: playlist music (Spotify) on the menus and in races */
+  /** 4D.1: music plays (starts on the first click or key) */
   music: boolean;
-  /** 4C.2: 0 = game only (music paused) … 1 = music up front (game turned well down) */
-  musicBalance: number;
+  /** 4D.1: keep the music going during races */
+  musicRaces: boolean;
+  /** 4D.1: music volume 0..1 (its own, separate from the game sound) */
+  musicVolume: number;
+  /** 4D.1: tracks switched off in the music menu (left out of the rotation) */
+  musicOff: string[];
   /** 4C.2: sound mixer, 0..1 each */
   mixEngine: number;
   mixFx: number;
@@ -116,7 +120,9 @@ export const defaults: Settings = {
   lensFx: true,
   ao: false,
   music: true,
-  musicBalance: 0.5,
+  musicRaces: true,
+  musicVolume: 0.6,
+  musicOff: [],
   mixEngine: 1,
   mixFx: 1,
   mixSiren: 1,

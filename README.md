@@ -149,19 +149,48 @@ Online: everyone reports the venue they have loaded; only players on the host's 
 grid, the rest wait and are told which venue to choose. (A venue is loaded before you can join,
 so there is no loading race to wait for at the lights.)
 
-## New in Phase 4C.2: music and online races with friends at home
+## New in Phase 4D.1: your own music, built in
 
-**Music.** The owner's Spotify playlist (67 tracks, `src/audio/playlist.ts`) plays shuffled on
-the menus and in races, through Spotify's own compact player: bottom right on the menus, top
-left in a race (it shows for 10 s when a track starts, then fades back).
-- **Next track:** **M**, or **L3 + R3** together on a controller (R3 alone still looks back).
-- **Settings → Music** on/off, **Next track**, **Music / game balance**, and new **Engine**,
-  **Effects** and **Sirens** volumes. Spotify's embedded player has no volume control, so the
-  balance turns the *game* down while music plays (0% pauses the music).
-- Full tracks need the browser to be signed in to open.spotify.com with Spotify Premium;
-  otherwise Spotify plays 30-second previews and the game says so.
-- Some pages block other sites' players (the claude.ai page may): then music is simply off
-  there. The downloaded game is unaffected.
+Spotify is gone. The game now plays **its own music files**, so nothing streams, nothing lags,
+and nothing covers the menus.
+
+**Where the music comes from**
+- **A music pack next to the game**: a `music/` folder beside `ApexPursuit.html` (or beside
+  `dist/index.html`). It holds `tracks.js` (the list), the audio files and the covers. Make one
+  from any folder of MP3s:
+  ```
+  pip install mutagen
+  python tools/music-pack.py "C:\Music\My racing mix"      (writes play/music/)
+  ```
+  The title, artist, album and cover art come from the files' own tags.
+- **Music → Add music** (or **Add a folder**, or drop files on the window): any MP3, M4A, OGG,
+  WAV or FLAC. These are kept in your browser, so it's a one-time step per browser.
+  **Remove added** clears them again.
+
+**Music packs are personal and never go into this repository** (`play/music/` is in
+`.gitignore`). Songs belong to their artists and labels, and a public repository would hand them
+out to everyone. The public game starts with no music; each friend adds their own.
+
+**On the home screen** a small **Now playing** line sits in the bottom row, between the car and
+the key hints (it fades after a few seconds and lights up again on each new track). Click it,
+press **Tab**, or **△ / Y** on a controller to open the music page. In a race, a new track shows
+as a short note at the top.
+
+**The music page** (Home → Music, or Settings → Music menu), laid out like a football game's
+soundtrack screen:
+- left: every track with its cover and a tick (in the rotation or not); right: the selected
+  track, big, with its buttons; bottom: what's playing now, with a progress bar.
+- **✕ / Enter**: play the selected track now. When it ends, the shuffled rotation carries on.
+- **R1 / X**: tick or untick it. **□ / T**: all on, or all off. **△ / Y**: play or stop.
+- **L3 + R3 / M**: skip (works everywhere, in races too). **○ / Esc / Tab**: back.
+- **Music volume** (its own, separate from the game sound) and **In races** on/off.
+
+**Settings → Sound**: Music (play/stop), Music menu, Skip track, Music volume, Music in races,
+plus the Engine, Effects and Sirens volumes from 4C.2.
+
+## New in Phase 4C.2: online races with friends at home
+
+(4C.2 also brought a Spotify playlist; Phase 4D.1 replaced it with the built-in music above.)
 
 **Online with friends at home**: see "How to play" at the top and "Racing online with friends".
 
@@ -801,11 +830,12 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
    - 4C. The big visual upgrade: GPU-painted materials, terrain and mountain ranges, trees,
      forests and grass with wind, aerial haze, AgX option, SMAA, lens fringe, before/after
      pictures (done). Still to do: TAA, lens dirt, new sky, car materials
-   - **4C.2. Your Spotify playlist in the game with a sound mixer; online races with friends at
-     their own homes: join by link, one-click hosting, lobby, late joiners, AI takes over
-     drop-outs, passwords (this build)**
+   - 4C.2. Sound mixer; online races with friends at their own homes: join by link,
+     one-click hosting, lobby, late joiners, AI takes over drop-outs, passwords (done)
    - **4D. Background detail around the circuit (grandstands with a reacting crowd, lit
      garages, marshals, catch fences, tyre walls, gravel, flags, floodlights, car park, power
-     lines, a town and a highway at night, birds) and the venue system (this build)**
+     lines, a town and a highway at night, birds) and the venue system (done)**
+   - **4D.1. Built-in music instead of Spotify: music packs, Add music, a Now playing line on
+     home, and the music page with ticks, play-now, all on/off and its own volume (this build)**
    - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

@@ -11,8 +11,9 @@ import { Actions, DeviceKind, glyph } from '../input/InputManager';
 import { CALIPER_COLOURS, CAR_MODELS, EDITIONS, editionById, FINISHES, Loadout, lookOf, RIM_COLOURS, statsOf, UNDERGLOW_COLOURS } from '../vehicle/Cars';
 import { artUrl } from './art';
 import { Nav } from './Nav';
+import { MusicMenu } from './MusicMenu';
 
-export type PageId = 'loading' | 'home' | 'cars' | 'garage' | 'event' | 'results';
+export type PageId = 'loading' | 'home' | 'cars' | 'garage' | 'event' | 'results' | 'music';
 
 export interface BoardRow {
   place: number;
@@ -54,6 +55,8 @@ export interface ScreenHooks {
   trackShape(): { pts: [number, number][]; start: number; length: number };
   /** weather or time changed on the event card: show it behind the menus */
   conditionsChanged(): void;
+  /** 4D.1: the music page */
+  music: MusicMenu;
 }
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -66,6 +69,7 @@ const ICONS: Record<string, string> = {
   pursuit: '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/>',
   online: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5.5a3 3 0 010 5.5M18 14.5c1.9.9 3 2.9 3 5.5"/>',
   garage: '<path d="M3 11l9-6 9 6v9H3z"/><path d="M7 20v-5h10v5"/>',
+  music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 00-2-1.2L14 3h-4l-.5 2.6a7 7 0 00-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 005 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 002 1.2L10 21h4l.5-2.6a7 7 0 002-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"/>',
 };
 const CHEV = '<svg viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M9 5l7 7-7 7"/></svg>';
@@ -99,6 +103,17 @@ export class Screens {
       this.navs[id] = nav;
       $(id).querySelectorAll<HTMLElement>('[data-back]').forEach((b) => b.addEventListener('click', () => this.back()));
     }
+    // 4D.1: the music page has its own Nav (it handles the extra buttons)
+    const mm = this.h.music;
+    this.navs.music = mm.nav;
+    $('music').querySelectorAll<HTMLElement>('[data-back]').forEach((b) => b.addEventListener('click', () => this.back()));
+    mm.wire();
+    mm.openRequest = () => {
+      if (this.current === 'home') {
+        this.h.sound('accept');
+        this.show('music');
+      }
+    };
     this.buildHome();
     this.buildCars();
     $('cars-garage').addEventListener('click', () => {
@@ -173,6 +188,7 @@ export class Screens {
       if (id === 'garage') this.buildGarage();
       if (id === 'event') this.buildEvent();
       if (id === 'results') this.refreshResults();
+      if (id === 'music') this.h.music.open();
       const nav = this.navs[id];
       if (nav) {
         const prefer =
@@ -196,7 +212,7 @@ export class Screens {
   back(): void {
     this.h.sound('back');
     if (this.current === 'garage') this.show('cars', true);
-    else if (this.current === 'cars' || this.current === 'event') this.show('home', true);
+    else if (this.current === 'cars' || this.current === 'event' || this.current === 'music') this.show('home', true);
     else if (this.current === 'results') this.h.home();
   }
 
@@ -211,6 +227,12 @@ export class Screens {
 
   handle(a: Actions): void {
     if (!this.current) return;
+    if (this.current === 'music') {
+      if (this.h.music.handle(a)) return;
+    } else if (this.current === 'home' && (a.musicMenu || a.triangle)) {
+      this.h.music.openRequest();
+      return;
+    }
     const nav = this.navs[this.current];
     nav?.handle(a);
   }
@@ -218,6 +240,7 @@ export class Screens {
   setDevice(kind: DeviceKind): void {
     if (kind === this.device) return;
     this.device = kind;
+    this.h.music.setDevice(kind);
     this.renderPrompts();
   }
 
@@ -244,6 +267,8 @@ export class Screens {
       if (this.heroTimer > 5.5) $('home-hero').classList.add('gone');
       this.refreshHome(false);
     }
+    this.h.music.ticker(this.current === 'home');
+    if (this.current === 'music') this.h.music.render();
     if (this.current === 'results') {
       this.resultsT += dt;
       if (this.resultsT > 0.5) this.refreshResults();
@@ -471,6 +496,7 @@ export class Screens {
       }, true],
       ['online', 'Online with friends', 'Up to 4 players, AI fills the grid', () => this.h.online(), true],
       ['garage', 'Garage', 'Choose your edition and livery', () => this.show('cars'), true],
+      ['music', 'Music', 'Your tracks, the rotation and the volume', () => this.show('music'), true],
       ['settings', 'Settings', 'Controller, rumble, graphics, sound', () => this.h.openSettings(), true],
     ];
     const menu = $('home-menu');

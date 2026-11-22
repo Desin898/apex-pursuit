@@ -10,3 +10,7 @@ Thumbs.db
 .env.*
 # cloudflared, downloaded by server/host.mjs when hosting over the internet
 tools/bin/
+
+# 4D.1: personal music packs (tools/music-pack.py) never go into the public repository
+play/music/
+dist/music/

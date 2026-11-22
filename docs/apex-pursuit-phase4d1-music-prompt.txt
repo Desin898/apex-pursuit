@@ -1,0 +1,75 @@
+APEX PURSUIT — PHASE 4D.1 PROMPT: MY OWN MUSIC IN THE GAME (FC-STYLE MUSIC MENU)
+================================================================================
+
+Why
+---
+The Spotify version is not what I want:
+- it needs Spotify in the browser, it plays 30-second previews unless signed in, and it feels laggy;
+- on the claude.ai page it's blocked;
+- the Spotify card on the event screen covers the "Start race" button, so I can't start the race.
+
+What I want instead: the game plays MY music files (Apex_Playlist.zip, 14 MP3 tracks, ~130 MB),
+with a music menu like EA SPORTS FC 26, and no Spotify anywhere.
+
+Tracks (from Apex_Playlist.zip, file names "Artist - Title (SPOTISAVER).mp3")
+- David Guetta, Sia - Titanium (feat. Sia)
+- DJ Shadow, Mos Def - Six Days - Remix
+- Don Toliver, Doja Cat - Lose My Mind (feat. Doja Cat)
+- Ellie Goulding - Lights - Single Version
+- Fred again.., Skepta, PlaqueBoyMax - Victory Lap
+- imase - NIGHT DANCER
+- John Newman - Love Me Again
+- Luke Combs - Fast Car
+- Max Coveri - RUNNING IN THE 90'S
+- Miki Matsubara - Mayonaka no Door~stay with me
+- Tate McRae - Just Keep Watching
+- Teriyaki Boyz - Tokyo Drift (Fast & Furious)
+- The Weeknd, Daft Punk - Starboy
+- Wiz Khalifa, Charlie Puth - See You Again (feat. Charlie Puth)
+
+1. Remove Spotify completely
+   - No Spotify script, player, card, link or "previews" note. Delete the Spotify playlist list.
+   - Nothing may cover menu buttons ("Start race" etc.) on any screen size.
+
+2. The game plays my own audio files
+   - Tracks play through the game's own audio engine (Web Audio): no lag, no extra services.
+   - Loading the music: "Music → Add music": pick the MP3 files or the whole Apex_Playlist folder
+     (or drag them onto the window). The game keeps them in the browser (IndexedDB), so it's a
+     one-time step per browser; works in the downloaded game and on the claude.ai page.
+   - Read the title, artist and cover art from each file's tags (ID3), falling back to the file
+     name ("Artist - Title"), and clean names ("(SPOTISAVER)" removed, "#U00ae" shown as ®).
+   - The music files are mine: they must NOT be committed to the public GitHub repo or put in
+     the published claude.ai page. (.gitignore any music folder.) Friends add their own music the
+     same way.
+   - Optional: a personal build for me with the 14 tracks already inside, delivered only to me.
+
+3. "Now playing" on the home screen, not distracting
+   - A small one-line ticker: "♪ Now playing · Title — Artist", placed where it never covers a
+     button or the race list (e.g. top-right corner of the home screen), fading after a few
+     seconds and showing again when the track changes.
+   - In a race: the same small line appears for ~5 s when a track starts, then hides.
+   - Press a button (e.g. ▲ / Y / Tab) on the home screen to expand it into the full Music menu.
+
+4. Music menu, like FC 26 (see the attached pictures)
+   - Reached from the home screen's settings area ("Music") and from the expanded ticker.
+   - Left: a grid of tracks with cover art, title and artist; a ✓ on each track that is in the
+     rotation (toggle per track); "Turn all on / off".
+   - Right: the selected track large (cover, title, artist), and "Currently playing" with a
+     progress bar and time.
+   - Controls: ✕ / Enter = play this track now; ○ / Esc = back; □ = turn all on/off;
+     △ = play / stop; L3 + R3 (or M) = skip to the next track from any screen.
+   - After a chosen track ends, the rotation continues as usual (shuffled through the tracks
+     that are ticked), looping forever.
+   - "Music always on: on/off" (music in races or only on menus), and the Music / game balance,
+     Engine, Effects and Sirens volumes stay (now the music volume is really controllable).
+   - Works with mouse, keyboard and DualShock 4.
+
+5. Checks
+   - No overlap with any button at 640×360 up to 2560×1440 (hudcheck).
+   - Music keeps playing across menus → race → results without gaps or double playback.
+   - Online and solo unaffected; performance unaffected (audio decoding off the main thread
+     where possible, one track loaded at a time).
+   - Commit to github.com/Desin898/apex-pursuit (code only), refresh play/ApexPursuit.html,
+     publish the claude.ai page, report what changed and what's not done.
+
+Then: Phase 5 — Hanagiri Pass.

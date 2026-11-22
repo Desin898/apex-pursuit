@@ -35,6 +35,11 @@ export interface Actions {
   fullscreen: boolean;
   /** next music track (M, or L3 + R3) */
   musicNext: boolean;
+  /** 4D.1 one-shots for the music menu: □ / T (all on / off), △ / Y (play / stop), R1 / X (tick this track), Tab (open music) */
+  square: boolean;
+  triangle: boolean;
+  tick: boolean;
+  musicMenu: boolean;
   // menu navigation (with key-repeat)
   up: boolean;
   down: boolean;
@@ -76,6 +81,10 @@ const KEYS = {
   paintNext: ['KeyV'],
   fullscreen: ['KeyF'],
   musicNext: ['KeyM'],
+  square: ['KeyT'],
+  triangle: ['KeyY'],
+  tick: ['KeyX'],
+  musicMenu: ['Tab'],
   accept: ['Enter', 'Space'],
   back: ['Escape', 'Backspace'],
 };
@@ -93,7 +102,7 @@ function classify(id: string): DeviceKind {
 export class InputManager {
   readonly actions: Actions = {
     throttle: 0, brake: 0, steer: 0, analogSteer: false, handbrake: false, nitro: false, lookBack: false, horn: false, lookX: 0, lookY: 0, lookSide: 0, mouseLook: null,
-    shiftUp: false, shiftDown: false, camera: false, reset: false, pause: false, paintNext: false, paintPrev: false, fullscreen: false, musicNext: false,
+    shiftUp: false, shiftDown: false, camera: false, reset: false, pause: false, paintNext: false, paintPrev: false, fullscreen: false, musicNext: false, square: false, triangle: false, tick: false, musicMenu: false,
     up: false, down: false, left: false, right: false, accept: false, back: false, any: false,
   };
   settings: InputSettings = { deadzone: 0.08, steerCurve: 1.6, triggerCurve: 1.0 };
@@ -226,6 +235,10 @@ export class InputManager {
     let paintPrev = false;
     const fullscreen = this.pressed(KEYS.fullscreen);
     let musicNext = this.pressed(KEYS.musicNext);
+    let square = this.pressed(KEYS.square);
+    let triangle = this.pressed(KEYS.triangle);
+    let tick = this.pressed(KEYS.tick);
+    const musicMenu = this.pressed(KEYS.musicMenu);
     let accept = this.pressed(KEYS.accept);
     let back = this.pressed(KEYS.back);
     // menus also count a tap that began and ended between two frames
@@ -329,6 +342,9 @@ export class InputManager {
         shiftUp = shiftUp || edge(M.r1);
         shiftDown = shiftDown || edge(M.l1);
         camera = camera || edge(M.triangle);
+        triangle = triangle || edge(M.triangle);
+        square = square || edge(M.square);
+        tick = tick || edge(M.r1);
         reset = reset || edge(M.share);
         pause = pause || edge(M.options);
         accept = accept || edge(M.cross);
@@ -367,6 +383,10 @@ export class InputManager {
     a.paintPrev = paintPrev;
     a.fullscreen = fullscreen;
     a.musicNext = musicNext;
+    a.square = square;
+    a.triangle = triangle;
+    a.tick = tick;
+    a.musicMenu = musicMenu;
     a.accept = accept;
     a.back = back;
     a.any = any;

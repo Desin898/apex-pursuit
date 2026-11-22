@@ -404,24 +404,99 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
 }
 @media (prefers-reduced-motion: reduce) { .toast { animation-duration: 2.6s; } #hud-hints, #pop { transition: none; } .track-cards, .card { transition: none; } }
 
-/* 4C.2: music — Spotify's own compact player, with our next-track hint */
-#music { position: fixed; z-index: 40; display: flex; flex-direction: column; gap: 4px; transition: opacity .6s var(--ease), transform .6s var(--ease); }
-#music[hidden] { display: none; }
-#music .frame { width: 300px; height: 80px; border-radius: 12px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); }
-#music .frame iframe { display: block; border: 0; }
-#music .tip { font-size: var(--t-xs); color: var(--ink-2); letter-spacing: .04em; display: flex; gap: 10px; justify-content: space-between; padding: 0 4px; }
-#music .tip b { color: var(--ink); font-weight: 600; }
-#music .tip .warn { color: var(--accent); }
-#music.menu { right: var(--gutter); bottom: var(--gutter); }
-#music-out { position: fixed; z-index: 40; right: var(--gutter); bottom: var(--gutter); max-width: 300px; display: grid; gap: 3px; padding: 12px 16px; border-radius: 14px; background: var(--glass); border: 1px solid var(--line-2); color: var(--ink); text-decoration: none; font-size: var(--t-sm); backdrop-filter: blur(8px); }
-#music-out[hidden] { display: none; }
-#music-out span { color: var(--ink-2); font-size: var(--t-xs); line-height: 1.4; }
-#music-out:hover { border-color: var(--accent); }
-#music.race { left: var(--gutter); top: var(--gutter); transform: scale(calc(var(--hud-scale) * 0.82)); transform-origin: top left; }
-#music.race .frame { pointer-events: none; }
-#music.race.quiet { opacity: 0.32; }
-#music.race.quiet:hover { opacity: 1; }
-@media (max-height: 520px) { #music.race { transform: scale(0.62); } }
+/* 4D.1: seven home items: keep the column clear of the bottom row (car chip, Now playing, prompts) */
+#home .col { bottom: calc(var(--gutter) + 44px); }
+@media (max-height: 900px) {
+  #home-menu .menu-item { padding-top: 8px; padding-bottom: 8px; }
+  #home-menu .menu-item .ico { width: 38px; height: 38px; }
+  #home-menu .menu-item small { font-size: var(--t-xs); }
+}
+@media (max-height: 760px) {
+  #home .brand { font-size: calc(var(--t-3xl) * .8); }
+  #home-menu .menu-item { padding-top: 6px; padding-bottom: 6px; }
+  #home-menu .menu-item .ico { width: 34px; height: 34px; }
+}
+@media (max-height: 640px) {
+  #home .col { gap: 12px; }
+  #home .eyebrow { display: none; }
+  #home .brand { font-size: 40px; }
+  #home-menu { gap: 6px; }
+  #home-menu .menu-item { padding-top: 5px; padding-bottom: 5px; }
+  #home-menu .menu-item small { display: none; }
+  #home-menu .menu-item .ico { width: 30px; height: 30px; }
+  #home-menu .menu-item b { font-size: var(--t-md); }
+}
+@media (max-height: 640px) and (max-width: 1100px) {
+  #home .profile .stat-card:not(.driver) { display: none; }
+  #home-prompts { display: none; }
+}
+/* 4D.1: music — the home screen's Now playing line and the music page */
+#np { margin-left: auto; pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: min(460px, 44vw); padding: 8px 10px 8px 14px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); color: var(--ink); font: inherit; font-size: var(--t-sm); cursor: pointer; backdrop-filter: blur(8px); transition: opacity .8s var(--ease), border-color .2s; white-space: nowrap; min-width: 0; }
+#np .note { font-style: normal; color: var(--accent); }
+#np .label { flex: none; }
+#np b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#np .by { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+#np kbd { flex: none; }
+#np.quiet { opacity: .5; }
+#np:hover, #np.focus { opacity: 1; border-color: var(--accent); }
+#music { background: linear-gradient(180deg, rgba(5,11,13,.78), rgba(5,11,13,.6) 40%, rgba(5,11,13,.82)); backdrop-filter: blur(10px); }
+#music .mwrap { position: absolute; inset: var(--gutter); display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 16px 22px; pointer-events: auto; }
+#music .mhead { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; }
+#music .mhead .page-title { font-size: var(--t-xl); }
+#music .mhead .label { margin-left: auto; }
+.mgrid { overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px; align-content: start; padding: 4px; margin: -4px; scrollbar-width: thin; }
+.mt { position: relative; display: grid; gap: 3px; text-align: left; padding: 8px 8px 10px; border-radius: 14px; background: var(--glass); border: 1.5px solid var(--line); color: var(--ink); font: inherit; cursor: pointer; backdrop-filter: blur(8px); transition: opacity .2s, border-color .15s, transform .15s var(--ease); }
+.mt .cv { aspect-ratio: 1; border-radius: 9px; background: var(--panel) center / cover no-repeat; margin-bottom: 5px; display: grid; place-items: center; }
+.mt b { font-size: var(--t-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt small { font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt .tk { position: absolute; top: 14px; right: 14px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 700 13px/1 var(--font); font-style: normal; background: var(--accent); color: #062124; box-shadow: 0 1px 6px rgba(0,0,0,.4); }
+.mt.off { opacity: .5; }
+.mt.off .tk { background: rgba(8,16,18,.7); border: 1.5px solid var(--ink-3); }
+.mt.now { border-color: var(--accent-soft, rgba(79,209,217,.4)); }
+.mt.focus, .mt:hover { border-color: var(--accent); opacity: 1; transform: translateY(-2px); }
+.mt .eq { position: absolute; left: 16px; top: 16px; display: flex; gap: 2px; align-items: flex-end; height: 16px; padding: 4px 5px; border-radius: 6px; background: rgba(8,16,18,.7); box-sizing: content-box; }
+.mt .eq i { width: 3px; background: var(--accent); animation: eq 0.9s ease-in-out infinite alternate; }
+.mt .eq i:nth-child(2) { animation-delay: -.3s; } .mt .eq i:nth-child(3) { animation-delay: -.6s; }
+@keyframes eq { from { height: 3px; } to { height: 16px; } }
+.cv em, .big em { font-style: normal; font-weight: 700; font-size: 28px; color: rgba(255,255,255,.75); letter-spacing: .04em; }
+.big em { font-size: 64px; }
+.m-empty { grid-column: 1 / -1; display: grid; gap: 8px; padding: 26px; border-radius: 16px; border: 1.5px dashed var(--line-2); background: var(--glass); max-width: 520px; }
+.m-empty span { color: var(--ink-2); line-height: 1.5; font-size: var(--t-sm); }
+.mside { grid-row: 2 / 4; grid-column: 2; display: flex; flex-direction: column; gap: 14px; padding: 16px; border-radius: var(--r-card); background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(14px); overflow: auto; min-height: 0; }
+#m-big { display: grid; gap: 12px; }
+#m-big .big { aspect-ratio: 1; width: 100%; max-height: min(30vh, 300px); justify-self: center; max-width: min(30vh, 300px); border-radius: 14px; background: var(--panel) center / cover no-repeat; display: grid; place-items: center; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.m-meta { display: grid; gap: 4px; }
+.m-meta b { font-size: var(--t-lg); font-weight: 600; line-height: 1.2; }
+.m-meta small { color: var(--ink-2); font-size: var(--t-sm); }
+.m-meta .dim { color: var(--ink-3); font-size: var(--t-xs); }
+.mbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mbtns .pill { justify-content: center; padding-left: 10px; padding-right: 10px; }
+.mrow { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 9px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--panel); font-size: var(--t-sm); cursor: pointer; }
+.mrow.focus, .mrow:hover { border-color: var(--accent); }
+.mrow input[type=range] { flex: 1; accent-color: var(--accent); min-width: 60px; }
+.mrow b { min-width: 42px; text-align: right; font-weight: 600; color: var(--accent); }
+.madd { display: flex; flex-wrap: wrap; gap: 8px; }
+.madd .chip { flex: 1 1 auto; text-align: center; }
+.madd .chip.quiet { flex: 0 0 auto; color: var(--ink-2); }
+#m-now { grid-column: 1; display: flex; align-items: center; gap: 14px; padding: 10px 16px 10px 10px; border-radius: 16px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(8px); min-width: 0; }
+#m-now .cv { width: 52px; height: 52px; flex: none; border-radius: 9px; background: var(--panel) center / cover no-repeat; display: grid; place-items: center; }
+#m-now .cv em { font-size: 16px; }
+#m-now .txt { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; }
+#m-now-art { flex: none; display: block; }
+#m-now-t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#m-now .bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.14); overflow: hidden; }
+#m-now .bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+#m-now-time { font: 500 var(--t-xs) var(--font); color: var(--ink-2); font-variant-numeric: tabular-nums; flex: none; }
+#music .prompts { grid-column: 1 / -1; }
+@media (max-width: 900px) {
+  #music .mwrap { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto auto auto; }
+  .mside { grid-row: auto; grid-column: 1; max-height: 40vh; }
+  #m-big .big { max-height: 18vh; max-width: 18vh; }
+  #m-now { grid-column: 1; }
+  #np { max-width: 60vw; }
+}
+@media (max-height: 820px) { #m-big .big { max-height: 22vh; max-width: 22vh; } .mside { gap: 10px; padding: 14px; } }
+@media (max-height: 620px) { #m-big .big { max-height: 16vh; max-width: 16vh; } .mgrid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
 
 /* 4C.2: Online panel (join / host) and the lobby */
 .dlg { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(4, 10, 12, .62); backdrop-filter: blur(6px); }
@@ -517,6 +592,7 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
   </div>
   <div class="foot">
     <div class="car-chip" id="home-car"><i></i><span>Phantom X1 · Street</span></div>
+    <button type="button" id="np" data-nav aria-label="Music"></button>
     <div class="prompts" id="home-prompts"></div>
   </div>
 </section>
@@ -591,6 +667,39 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
       <div class="prompts" id="event-prompts"></div>
       <div class="actions"><button class="pill primary" type="button" data-nav id="event-start">Start race</button></div>
     </div>
+  </div>
+</section>
+
+<!-- 4D.1: Music -->
+<section id="music" class="page" aria-label="Music">
+  <div class="mwrap">
+    <div class="mhead">
+      <button class="icon-btn" type="button" data-nav data-back aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <h2 class="page-title">Music</h2>
+      <span class="label" id="m-count">Your music</span>
+    </div>
+    <div class="mgrid" id="m-grid"></div>
+    <aside class="mside">
+      <div id="m-big"></div>
+      <div class="mbtns">
+        <button class="pill primary" type="button" data-nav id="m-now-btn">Play now</button>
+        <button class="pill" type="button" data-nav id="m-tick-btn">Leave out</button>
+        <button class="pill" type="button" data-nav id="m-play">Play</button>
+        <button class="pill" type="button" data-nav id="m-skip">Skip</button>
+        <button class="pill" type="button" data-nav id="m-all">All off</button>
+        <button class="pill" type="button" data-nav id="m-races">In races: <span id="m-races-v">On</span></button>
+      </div>
+      <label class="mrow" data-nav data-adjust id="m-volrow">Music volume <input type="range" id="m-vol" min="0" max="100" step="5" tabindex="-1"><b id="m-vol-v">70%</b></label>
+      <div class="madd">
+        <button class="chip" type="button" data-nav id="m-addfiles">Add music</button>
+        <button class="chip" type="button" data-nav id="m-addfolder">Add a folder</button>
+        <button class="chip quiet" type="button" data-nav id="m-clear">Remove added</button>
+      </div>
+      <input type="file" id="m-files" accept="audio/*,.mp3,.m4a,.ogg,.wav,.flac" multiple hidden>
+      <input type="file" id="m-folder" webkitdirectory multiple hidden>
+    </aside>
+    <div id="m-now"><span id="m-now-art"></span><div class="txt"><span class="label" id="m-now-l">Music</span><span id="m-now-t">Nothing playing</span><div class="bar"><i id="m-now-bar"></i></div></div><span id="m-now-time"></span></div>
+    <div class="prompts" id="m-prompts"></div>
   </div>
 </section>
 
@@ -673,11 +782,9 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
   </div>
 </div>
 <div id="boot-error" hidden><b>Couldn't start</b><span id="boot-msg"></span></div>
+<!-- 4D.1: an optional music pack next to the game (tools/music-pack.py makes one); fine when missing -->
+<script src="music/tracks.js"></script>
 <!--APP-->
-<a id="music-out" hidden target="_blank" rel="noopener" href="https://open.spotify.com/playlist/6YHSmt82WZB2ZlQrX42Njn"><b>Your playlist</b><span>This page can't play Spotify inside the game. Open it in Spotify ↗ and race with it playing.</span></a>
-<div id="music" class="menu" hidden aria-label="Music">
-  <div class="frame" id="music-frame"></div>
-  <div class="tip"><span id="music-note"></span><span id="music-key"></span></div>
 </div>
 <section id="online-dlg" class="dlg" hidden aria-label="Online with friends">
   <div class="dlg-card">

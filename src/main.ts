@@ -39,7 +39,8 @@ import { prof } from './core/Profiler';
 import { DETAIL_LAYER, mainOnly } from './core/layers';
 import { Ghost } from './game/Ghost';
 import { vegUniforms } from './world/Vegetation';
-import { MusicPlayer } from './audio/MusicPlayer';
+import { MusicLibrary } from './audio/MusicLibrary';
+import { MusicMenu } from './ui/MusicMenu';
 import { venueById } from './world/venues';
 import { cleanRoom, relaySocketUrl, servedByRelay, TransportOptions } from './net/Transport';
 import { FarShadow, PaintProbe, PlanarReflection, groundUniforms, patchGround, setGroundFeatures } from './fx/Reflections';
@@ -144,7 +145,9 @@ class Game {
   }
 
   constructor(private canvas: HTMLCanvasElement) {
+    this.musicMenu = new MusicMenu(this.music, this.settings, () => saveSettings(this.settings), (k) => this.audio.ui(k), (m) => this.hud.toast(m));
     this.screens = new Screens({
+      music: this.musicMenu,
       settings: this.settings,
       save: () => saveSettings(this.settings),
       sound: (k) => this.audio.ui(k),
@@ -251,7 +254,13 @@ class Game {
 
   // ── Setup helpers ────────────────────────────────────────────────────────
   private bindEvents(): void {
-    this.music.onTrack = () => (this.musicShownAt = performance.now());
+    // 4D.1: say what's playing when a track starts during a race (the home screen has its own line)
+    const showTrack = this.music.onTrack;
+    this.music.onTrack = (t) => {
+      showTrack(t);
+      if (this.state === 'playing') this.hud.toast(`♪ ${t.title} — ${t.artist}`);
+    };
+    void this.music.load();
     // 4C.2: a friend opened the host's race link: offer to join as soon as the home screen is up
     if (servedByRelay()) {
       let tries = 0;
@@ -267,7 +276,8 @@ class Game {
     const gesture = () => {
       this.audio.start();
       this.audio.setVolume(this.settings.volume);
-      if (this.settings.music && this.settings.musicBalance > 0 && this.music.state === 'off') this.music.play();
+      this.music.setVolume(this.settings.musicVolume);
+      this.music.unlock(this.settings.music);
     };
     window.addEventListener('keydown', (e) => {
       gesture();
@@ -368,8 +378,7 @@ class Game {
     this.rig.shakeScale = s.cameraShake;
     this.audio.setVolume(s.volume);
     this.audio.setMix(s.mixEngine, s.mixFx, s.mixSiren);
-    if ((!s.music || s.musicBalance <= 0) && (this.music.state === 'playing' || this.music.state === 'ready')) this.music.pause();
-    else if (s.music && s.musicBalance > 0 && this.music.state === 'paused') this.music.play();
+    this.music.setVolume(s.musicVolume);
     this.hud.setUserScale(s.hudScale);
     document.documentElement.classList.toggle('colour-safe', s.colourSafe);
     this.hud.colourSafe = s.colourSafe;
@@ -704,39 +713,21 @@ class Game {
   // ── F4 benchmark (4B.2): a fixed 30 s fly-round in night, heavy rain and (in a pursuit) Heat 5 ──
   // ── 4C.2: playlist music ──
   private carDots: { x: number; z: number; speed: number }[] = [];
-  readonly music = new MusicPlayer();
-  private musicShownAt = 0;
+  readonly music = new MusicLibrary(this.settings.musicOff);
+  readonly musicMenu: MusicMenu;
+  private openMusicFromSettings(): void {
+    if (this.menuFrom !== 'home' || this.state !== 'menu') return this.hud.toast('The music menu is on the home screen (Music) · skip and volume work here');
+    this.menu.close();
+    this.screens.show('music');
+  }
   private updateMusic(a: { musicNext: boolean }): void {
     const m = this.music;
-    const s = this.settings;
-    const box = document.getElementById('music');
-    if (!box) return;
-    if (a.musicNext && s.music) {
-      if (m.state === 'off') m.play();
+    if (a.musicNext) {
+      if (!m.count) this.hud.toast('No music yet: add some in Music on the home screen');
       else m.next();
     }
-    m.tick();
-    const on = s.music && s.musicBalance > 0 && (m.state === 'ready' || m.state === 'playing' || m.state === 'paused');
-    box.hidden = !on;
-    // 4D.1: Spotify's player is blocked on this page: offer the playlist in Spotify instead (menus only)
-    const out = document.getElementById('music-out');
-    if (out) out.hidden = !(s.music && m.state === 'unavailable' && this.state === 'menu');
-    const race = this.state === 'playing' || this.state === 'paused';
-    box.classList.toggle('race', race && this.state === 'playing');
-    box.classList.toggle('menu', !(race && this.state === 'playing'));
-    box.classList.toggle('quiet', performance.now() - this.musicShownAt > 10000);
-    // music up front turns the game down (Spotify's player has no volume control of its own)
-    this.audio.setDuck(m.state === 'playing' ? 1 - 0.75 * s.musicBalance : 1);
-    const key = document.getElementById('music-key');
-    if (key) {
-      const d = this.input.device;
-      key.innerHTML = d === 'playstation' ? '<b>L3 + R3</b> next track' : d === 'xbox' || d === 'generic' ? '<b>LS + RS</b> next track' : '<b>M</b> next track';
-    }
-    const note = document.getElementById('music-note');
-    if (note) {
-      note.className = m.preview ? 'warn' : '';
-      note.textContent = m.preview ? 'Previews: sign in at open.spotify.com in this browser for full tracks' : '';
-    }
+    // "music in races: off" pauses it while driving, then it carries on in the menus
+    m.hold(!this.settings.musicRaces && (this.state === 'playing' || this.state === 'paused' || this.state === 'photo'));
   }
 
   // ── 4C.2: Online panel (join / host) ──
@@ -1617,18 +1608,19 @@ class Game {
         },
         { label: 'Volume', value: () => pct(s.volume), adjust: (d) => ((s.volume = step(s.volume, d, 0, 1, 0.1)), done()) },
         {
-          label: 'Music (your Spotify playlist)',
-          value: () => (!s.music ? 'Off' : this.music.state === 'unavailable' ? "Can't play here · ✕ / Enter opens Spotify" : this.music.current ? `On · ${this.music.current[1]}` : 'On'),
+          label: 'Music',
+          value: () => (!this.music.count ? 'No music yet · ✕ / Enter opens Music' : this.music.state === 'playing' && this.music.current ? `Playing · ${this.music.current.title}` : 'Stopped'),
           adjust: () => {
-            s.music = !s.music;
-            if (s.music) this.music.play();
+            s.music = this.music.state !== 'playing';
+            this.music.toggle();
             done();
           },
-          // where Spotify's player is blocked (the claude.ai page), open the playlist in Spotify instead
-          accept: () => (this.music.state === 'unavailable' ? void window.open(this.music.url, '_blank', 'noopener') : undefined),
+          accept: () => this.openMusicFromSettings(),
         },
-        { label: 'Next track (M · L3 + R3)', value: () => (this.music.current ? this.music.current[2] : '—'), adjust: () => (s.music ? (this.music.state === 'off' ? this.music.play() : this.music.next()) : undefined) },
-        { label: 'Music / game balance', value: () => (s.musicBalance <= 0 ? 'Game only' : pct(s.musicBalance)), adjust: (d) => ((s.musicBalance = step(s.musicBalance, d, 0, 1, 0.1)), done()) },
+        { label: 'Music menu (tracks, rotation)', value: () => (this.music.count ? `${this.music.enabled.length} of ${this.music.count} on` : 'Add music'), adjust: () => this.openMusicFromSettings(), accept: () => this.openMusicFromSettings() },
+        { label: 'Skip track (M · L3 + R3)', value: () => (this.music.current ? this.music.current.artist : '—'), adjust: () => this.music.next() },
+        { label: 'Music volume', value: () => pct(s.musicVolume), adjust: (d) => ((s.musicVolume = step(s.musicVolume, d, 0, 1, 0.05)), done()) },
+        { label: 'Music in races', value: () => (s.musicRaces ? 'On' : 'Off (menus only)'), adjust: () => ((s.musicRaces = !s.musicRaces), done()) },
         { label: 'Engine volume', value: () => pct(s.mixEngine), adjust: (d) => ((s.mixEngine = step(s.mixEngine, d, 0, 1, 0.1)), done()) },
         { label: 'Effects volume (tyres, rain, crashes)', value: () => pct(s.mixFx), adjust: (d) => ((s.mixFx = step(s.mixFx, d, 0, 1, 0.1)), done()) },
         { label: 'Sirens volume', value: () => pct(s.mixSiren), adjust: (d) => ((s.mixSiren = step(s.mixSiren, d, 0, 1, 0.1)), done()) },
