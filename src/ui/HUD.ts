@@ -17,10 +17,14 @@ const $ = (id: string) => document.getElementById(id)!;
 export interface MapIcon {
   x: number;
   z: number;
-  kind: 'police' | 'roadblock' | 'spikes' | 'heli' | 'zone' | 'trap' | 'breaker';
+  kind: 'police' | 'roadblock' | 'spikes' | 'heli' | 'zone' | 'trap' | 'breaker' | 'charge' | 'smoke';
   /** for line-shaped marks: direction across the track */
   ax?: number;
   az?: number;
+  /** 4E: the helicopter's searchlight spot (heli), the ring size (charge, smoke) */
+  lx?: number;
+  lz?: number;
+  r?: number;
 }
 
 export class HUD {
@@ -252,7 +256,7 @@ export class HUD {
   // ── Pursuit panel ──
   private heatBox = $('hud-heat');
   private meters = $('hud-meters');
-  setPursuit(p: { on: boolean; joined: boolean; heat: number; status: string; cool: boolean; bust: number; evade: number }): void {
+  setPursuit(p: { on: boolean; joined: boolean; heat: number; status: string; cool: boolean; bust: number; evade: number; air?: '' | 'spotted' | 'hidden' | 'inbound' }): void {
     if (this.cache.pon !== String(p.on)) {
       this.cache.pon = String(p.on);
       this.heatBox.hidden = !p.on;
@@ -275,6 +279,15 @@ export class HUD {
       }
     }
     this.heatBox.classList.toggle('cool', p.cool);
+    // 4E: is Air One watching you?
+    const air = p.air ?? '';
+    if (this.cache.air !== air) {
+      this.cache.air = air;
+      const el = $('heat-air');
+      el.hidden = !air;
+      el.className = `air ${air}`;
+      el.querySelector('em')!.textContent = air === 'spotted' ? 'Spotted' : air === 'hidden' ? 'Hidden from it' : 'Inbound';
+    }
     if (this.cache.mj !== String(p.joined)) {
       this.cache.mj = String(p.joined);
       this.meters.hidden = !p.joined;

@@ -12,6 +12,8 @@ export const enum Surface {
   Kerb = 1,
   Grass = 2,
   Runoff = 3,
+  /** 4E: the gravel traps in the corners */
+  Gravel = 4,
 }
 
 export interface TrackSample {
@@ -302,6 +304,15 @@ export class WorldData {
         if (hit.offset > 0 ? s.kerbL : s.kerbR) return Surface.Kerb;
       }
       if (a <= this.halfWidth + WORLD.kerbWidth + WORLD.runoffWidth) return Surface.Runoff;
+      // 4E: gravel traps: between the run-off and the barrier through some corners
+      const N = this.samples.length;
+      for (let g = 0; g < this.gravel.length; g++) {
+        const t = this.gravel[g];
+        const span = (t.i1 - t.i0 + N) % N;
+        if ((hit.index - t.i0 + N) % N > span) continue;
+        const o = hit.offset * t.side;
+        if (o >= t.inner && o <= t.outer + 0.5) return Surface.Gravel;
+      }
     }
     const p = this.pad;
     if ((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z) <= p.r * p.r) return Surface.Asphalt;

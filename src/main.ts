@@ -319,7 +319,7 @@ class Game {
       let p = this.race.pursuit;
       if (!p) {
         p = this.race.enablePursuit(1);
-        p.mirror = true;
+        p.setMirror(true);
         this.pview.attach(p, this.settings.quality);
         this.pview.setNight(this.env.p.carLights, this.env.p.wet);
       }
@@ -1226,7 +1226,12 @@ class Game {
     r.randomHold = true;
     // Pursuit Race: the host (or a solo player) runs the police; guests get them from the host
     const guest = this.online?.status === 'online' && !this.online.isHost;
-    if (this.mode === 'race' && s.raceType === 'pursuit' && !guest) r.enablePursuit(Math.floor(Math.random() * 1e6));
+    if (this.mode === 'race' && s.raceType === 'pursuit' && !guest) {
+      const p = r.enablePursuit(Math.floor(Math.random() * 1e6));
+      // 4E: Air support settings (the host's apply online)
+      p.air.from = s.airSupport === 'off' ? 0 : s.airSupport === 'heat5' ? 5 : 3;
+      p.air.dropsOn = s.airDrops;
+    }
     r.setWet(this.env?.p.wet ?? 0);
     return r;
   }
@@ -1662,6 +1667,28 @@ class Game {
         { label: 'Ghost car (Free run)', value: () => (s.ghost ? 'On' : 'Off'), adjust: () => ((s.ghost = !s.ghost), done()) },
         { label: 'Performance overlay', value: () => (s.debug ? 'On' : 'Off (F3)'), adjust: () => ((s.debug = !s.debug), done()) },
         { label: 'Police radio voice', value: () => (s.radioVoice ? 'On' : 'Subtitles only'), adjust: () => ((s.radioVoice = !s.radioVoice), done()) },
+        {
+          label: 'Air support (helicopter)',
+          value: () => ({ heat3: 'From Heat 3', heat5: 'From Heat 5', off: 'Off' })[s.airSupport],
+          adjust: (d) => {
+            const o: Settings['airSupport'][] = ['heat3', 'heat5', 'off'];
+            s.airSupport = o[(o.indexOf(s.airSupport) + (d < 0 ? o.length - 1 : 1)) % o.length];
+            const p = this.race.pursuit;
+            if (p && !p.mirror) p.air.from = s.airSupport === 'off' ? 0 : s.airSupport === 'heat5' ? 5 : 3;
+            done();
+          },
+        },
+        {
+          label: 'Air One drops',
+          value: () => (s.airDrops ? 'Smoke, spikes, shock charges' : 'Off (searchlight only)'),
+          adjust: () => {
+            s.airDrops = !s.airDrops;
+            const p = this.race.pursuit;
+            if (p && !p.mirror) p.air.dropsOn = s.airDrops;
+            done();
+          },
+        },
+        { label: 'Air One arrival shot', value: () => (s.airCutIn ? 'On (2 s from the helicopter)' : 'Off'), adjust: () => ((s.airCutIn = !s.airCutIn), done()) },
         { label: 'Speed units', value: () => (s.mph ? 'mph' : 'km/h'), adjust: () => ((s.mph = !s.mph), done()) },
         { label: 'HUD size', value: () => pct(s.hudScale), adjust: (d) => ((s.hudScale = step(s.hudScale, d, 0.8, 1.25, 0.05)), done()) },
         { label: 'Colour-blind-safe colours', value: () => (s.colourSafe ? 'On' : 'Off'), adjust: () => ((s.colourSafe = !s.colourSafe), done()) },
@@ -1738,6 +1765,16 @@ class Game {
     this.resetRaceFlow();
     this.pview?.attach(this.race.pursuit, this.settings.quality);
     this.pview?.setNight(this.env?.p.carLights ?? 0, this.env?.p.wet ?? 0);
+    // 4E: compile Air One's shaders now, not mid-chase when it first comes into view
+    if (this.race.pursuit && this.pview && this.renderer) {
+      this.pview.warm(true);
+      try {
+        this.renderer.compile(this.scene, this.rig.camera);
+      } catch {
+        /* optional */
+      }
+      this.pview.warm(false);
+    }
     this.buildCarVisuals();
     this.props.reset();
     this.skids.clear();
@@ -1944,6 +1981,11 @@ class Game {
       this.renderer.toneMappingExposure = this.env.p.exposure * this.env.exposureK * Math.pow(2, this.photo.exposure);
       if (r === 'exit') this.exitPhoto();
       else if (r === 'save') this.savePhoto();
+      else if (r === 'air') {
+        const h = this.race.pursuit?.heli;
+        if (h?.active) this.photo.jumpTo(this.pview.heli.lampPos.clone().add(new THREE.Vector3(0, -0.6, 0)), this.carVisuals[0].root.position.clone().add(new THREE.Vector3(0, 0.8, 0)));
+        else this.hud.toast("Air One isn't up right now");
+      }
     } else if (this.state === 'results') {
       this.screens.handle(a);
       this.screens.update(dt);
@@ -2057,6 +2099,21 @@ class Game {
       c.updateProjectionMatrix();
     } else if (this.bench) this.benchCamera(dt);
     else if (this.state !== 'photo') this.rig.update(rp, s, dt, { x: pl ? a.lookX : 0, y: pl ? a.lookY : 0, back: pl && a.lookBack, side: pl ? a.lookSide : 0, mouse: pl ? a.mouseLook : null }, this.state === 'menu' ? (this.screens.showroom ? 'showroom' : 'home') : false);
+    // 4E: the Air One arrival shot: looking down from the helicopter at your car
+    if (this.airCam > 0) {
+      this.airCam -= dt;
+      const h = this.race.pursuit?.heli;
+      if (!h?.active || this.state !== 'playing' || this.shotCam) this.airCam = 0;
+      else {
+        const c = this.rig.camera;
+        const lp = this.pview.heli.lampPos;
+        c.position.set(lp.x, lp.y - 0.4, lp.z);
+        c.up.set(0, 1, 0);
+        c.lookAt(rp.x + s.vx * 0.15, rp.y + 0.6, rp.z + s.vz * 0.15);
+        c.fov = 38;
+        c.updateProjectionMatrix();
+      }
+    }
     this.visuals.follow(rp.x, rp.y, rp.z);
     tSec = prof.add('scene', tSec);
     this.pview.update(this.time, live ? dt * this.timeScale : 0, al, this.rig.camera);
@@ -2167,11 +2224,42 @@ class Game {
           this.hud.toast('Spike strip ahead');
           break;
         case 'heli':
-          this.hud.toast('Air One is up');
+          this.hud.pop('AIR ONE', 'Police helicopter on scene', false, 2);
+          this.haptics.pulse(0.4, 0.5, 0.4);
+          // a short shot from the helicopter as it arrives (only while driving)
+          if (this.settings.airCutIn && this.state === 'playing') this.airCam = 2.2;
           break;
+        case 'heliLeave':
+          this.hud.toast('Air One is leaving');
+          break;
+        case 'drop':
+          this.hud.toast(e.kind === 'smoke' ? 'Smoke canister incoming' : e.kind === 'spikes' ? 'Spike strip dropping ahead · watch the red bar' : 'Shock charges · stay out of the red rings');
+          this.audio.squelch();
+          break;
+        case 'landed':
+          if (e.kind === 'smoke') this.audio.canister(Math.hypot(e.x - this.race.player.s.x, e.z - this.race.player.s.z));
+          break;
+        case 'smoked':
+          this.smokeTrail = 2.6;
+          this.smokeRed = e.red;
+          this.rig.addShake(0.25);
+          this.haptics.pulse(0.3, 0.2, 0.3);
+          break;
+        case 'boom': {
+          const d = Math.hypot(e.x - this.race.player.s.x, e.z - this.race.player.s.z);
+          this.audio.boom(d);
+          this.rig.addShake(Math.max(0, 1.1 * (1 - d / 70)));
+          if (d < 40) this.haptics.pulse(0.9 * (1 - d / 40), 0.9 * (1 - d / 40), 0.35);
+          if (e.mine) {
+            this.hud.pop('HIT', 'Shock charge', false, 1.6);
+            this.haptics.pulse(1, 1, 0.7);
+            this.impactFlash = Math.max(this.impactFlash, 1);
+          }
+          break;
+        }
         case 'spiked':
           if (e.mine) {
-            this.hud.pop('SPIKED', 'Tyres punctured', false, 2);
+            this.hud.pop('SPIKED', this.race.player.s.puncture > 100 ? 'Flat until the end of the lap' : 'Tyres punctured', false, 2);
             this.audio.spikes();
             this.haptics.pulse(1, 1, 0.9);
             this.rig.addShake(0.7);
@@ -2246,15 +2334,25 @@ class Game {
 
   private bustedFine = 0;
   private slowT = 0;
+  /** 4E: seconds left of the Air One arrival shot */
+  private airCam = 0;
+  /** 4E: seconds of smoke trailing off your car after driving through a smoke screen */
+  private smokeTrail = 0;
+  private smokeRed = false;
+  private airTag: HTMLElement | null = null;
+  private tagV = new THREE.Vector3();
   private sirenVoices: { dist: number; closing: number; phase: number; mode?: 'wail' | 'yelp' | 'phaser' }[] = [];
   /** Heat panel, meters, Busted card and sirens. */
   private updatePursuitHud(dt: number): void {
     const p = this.race.pursuit;
     const bustedEl = document.getElementById('busted')!;
     if (!p) {
-      this.hud.setPursuit({ on: false, joined: false, heat: 0, status: '', cool: false, bust: 0, evade: 0 });
+      this.hud.setPursuit({ on: false, joined: false, heat: 0, status: '', cool: false, bust: 0, evade: 0, air: '' });
       bustedEl.hidden = true;
       this.audio.setSirens([], dt);
+      this.audio.setHeli(0, 0, 0, false);
+      if (this.airTag) this.airTag.hidden = true;
+      this.env.rain.setWash(0, 0, 0, 0);
       return;
     }
     const laps = Math.max(1, this.race.targetLaps);
@@ -2264,8 +2362,11 @@ class Game {
       ? `${p.trapsLive ? 'Cameras live · ' : ''}Police join on lap ${joinLap}`
       : p.cooldown > 0
         ? 'Lost you · units searching'
-        : `${units} unit${units === 1 ? '' : 's'}${p.heli.active ? ' · Air One' : ''}${p.obstacles.some((o) => o.group === 'roadblock') ? ' · roadblock' : ''}`;
-    this.hud.setPursuit({ on: true, joined: p.joined, heat: p.heat, status, cool: p.cooldown > 0, bust: p.bust, evade: p.evade });
+        : `${units} unit${units === 1 ? '' : 's'}${p.obstacles.some((o) => o.group === 'roadblock') ? ' · roadblock' : ''}`;
+    const h = p.heli;
+    const air = h.active && h.mode === 'chase' ? (h.sees ? 'spotted' : 'hidden') : h.active && h.mode === 'inbound' ? 'inbound' : '';
+    this.hud.setPursuit({ on: true, joined: p.joined, heat: p.heat, status, cool: p.cooldown > 0, bust: p.bust, evade: p.evade, air });
+    this.updateAirOne(p, dt);
     // Busted card
     const busted = p.bustedT > 0;
     if (bustedEl.hidden === busted) bustedEl.hidden = !busted;
@@ -2304,6 +2405,55 @@ class Game {
       .sort((a, b) => a.dist - b.dist);
     for (let i = 0; i < Math.min(2, list.length); i++) v.push(list[i]);
     this.audio.setSirens(this.state === 'playing' ? v : [], dt);
+  }
+
+  /** 4E: Air One's sound, the tag over it, the rotor wash in the rain, the smoke trail */
+  private updateAirOne(p: import('./game/Pursuit').Pursuit, dt: number): void {
+    const h = p.heli;
+    const cam = this.rig.camera;
+    const on = h.active && (this.state === 'playing' || this.state === 'results');
+    if (on) {
+      const cp = cam.position;
+      const dx = h.x - cp.x;
+      const dy = h.y - cp.y;
+      const dz = h.z - cp.z;
+      const d = Math.hypot(dx, dy, dz) || 1;
+      const me = this.race.player.s;
+      const closing = -((h.vx - me.vx) * dx + (h.vz - me.vz) * dz) / d;
+      // left / right of the view
+      const right = this.tagV.set(1, 0, 0).applyQuaternion(cam.quaternion);
+      const pan = (dx * right.x + dz * right.z) / d;
+      this.audio.setHeli(d, closing, pan, true);
+    } else this.audio.setHeli(0, 0, 0, false);
+    // rotor wash in the rain
+    this.env.rain.setWash(h.x, h.y, h.z, h.active ? Math.max(0, Math.min(1, (42 - h.y) / 26)) : 0);
+    // "AIR ONE" over the helicopter while it's chasing
+    if (!this.airTag) {
+      this.airTag = document.createElement('div');
+      this.airTag.id = 'air-tag';
+      this.airTag.innerHTML = '<i></i><b>AIR ONE</b>';
+      document.getElementById('hud')!.appendChild(this.airTag);
+    }
+    const tag = this.airTag;
+    let show = false;
+    if (on && h.mode !== 'leaving' && this.airCam <= 0) {
+      const v = this.tagV.set(h.x, h.y + 3.2, h.z).project(cam);
+      const dist = Math.hypot(h.x - cam.position.x, h.z - cam.position.z);
+      if (v.z < 1 && Math.abs(v.x) < 0.95 && Math.abs(v.y) < 0.95 && dist < 420) {
+        show = true;
+        tag.style.transform = `translate(${((v.x + 1) / 2) * innerWidth}px, ${((1 - v.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
+        tag.classList.toggle('lit', h.sees);
+        tag.style.opacity = String(Math.max(0.35, 1 - dist / 420));
+      }
+    }
+    if (tag.hidden === show) tag.hidden = !show;
+    // a smoke trail behind you after a smoke screen
+    if (this.smokeTrail > 0 && dt > 0) {
+      this.smokeTrail -= dt;
+      const s = this.race.player.s;
+      const n = Math.min(6, Math.round(dt * 40 * Math.min(1, this.smokeTrail)));
+      for (let i = 0; i < n; i++) this.particles.smoke(s.x - Math.sin(s.yaw) * 2.2, 0.6, s.z - Math.cos(s.yaw) * 2.2, s.vx * 0.3, s.vz * 0.3, 0.9);
+    }
   }
 
   /** where each car was drawn last frame, for motion blur that keeps cars sharp */
@@ -2488,10 +2638,25 @@ class Game {
       const slip = s.wheelSlip[i];
       const onGround = s.wheelContact[i];
       const grass = s.wheelSurface[i] === Surface.Grass;
+      const gravel = s.wheelSurface[i] === Surface.Gravel;
       const k = index * 4 + i;
       const wet = this.env.p.wet;
       // skid marks only on hard surfaces (fainter on a wet road)
-      this.skids.add(k, wx, wy, wz, cs, -sn, i < 2 ? 0.12 : 0.15, onGround && !grass ? smoothstep(0.25, 0.8, slip) * (1 - wet * 0.6) : 0);
+      this.skids.add(k, wx, wy, wz, cs, -sn, i < 2 ? 0.12 : 0.15, onGround && !grass && !gravel ? smoothstep(0.25, 0.8, slip) * (1 - wet * 0.6) : 0);
+      // 4E: gravel: stones flung up and a dust trail
+      if (gravel && onGround && s.speed > 2) {
+        const gk = index * 4 + i + 128;
+        this.smokeAcc[gk] = (this.smokeAcc[gk] || 0) + (smoothstep(2, 30, s.speed) * 26 + slip * 20) * (index > 0 ? 0.5 : 1) * dt;
+        while (this.smokeAcc[gk] >= 1) {
+          this.smokeAcc[gk] -= 1;
+          this.particles.stones(wx, wy, wz, s.vx, s.vz, clamp01(s.speed / 35));
+          if (Math.random() < 0.5 * (1 - wet)) this.particles.dust(wx, wy, wz, s.vx, s.vz, clamp01(s.speed / 30));
+        }
+      }
+      // 4E: a flat tyre: sparks off the rim
+      if (s.puncture > 0 && onGround && s.speed > 8 && i >= 2 && Math.random() < dt * 22 * smoothstep(8, 50, s.speed)) {
+        this.particles.sparks(wx, wy + 0.1, wz, -sn * 0.3, -cs * 0.3, s.vx, s.vz, 2);
+      }
       // spray in the wet: rooster tails off the rear tyres, a thinner mist off the fronts
       if (wet > 0 && onGround && s.speed > 5) {
         const sk = index * 4 + i + 64;
@@ -2504,7 +2669,7 @@ class Game {
       }
       // smoke / dust
       let rate = 0;
-      if (onGround) rate = grass ? smoothstep(6, 30, s.speed) * 22 * (1 - wet * 0.7) + slip * 30 : smoothstep(0.3, 0.9, slip) * (i < 2 ? 18 : 46) * (1 - wet * 0.65);
+      if (onGround && !gravel) rate = grass ? smoothstep(6, 30, s.speed) * 22 * (1 - wet * 0.7) + slip * 30 : smoothstep(0.3, 0.9, slip) * (i < 2 ? 18 : 46) * (1 - wet * 0.65);
       if (index > 0) rate *= 0.6;
       if (s.speed < 3) rate *= 0.35; // a standing burnout shouldn't bury the car in white
       this.smokeAcc[k] = (this.smokeAcc[k] || 0) + rate * dt;

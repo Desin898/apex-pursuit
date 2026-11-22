@@ -52,6 +52,12 @@ export interface Settings {
   lensFx: boolean;
   /** 4C.1: screen-space ambient occlusion on Ultra (off by default: it draws the scene twice) */
   ao: boolean;
+  /** 4E: when Air One joins a pursuit */
+  airSupport: 'heat3' | 'heat5' | 'off';
+  /** 4E: Air One drops smoke, spikes and shock charges */
+  airDrops: boolean;
+  /** 4E: a short shot from the helicopter when it arrives */
+  airCutIn: boolean;
   /** 4D.1: music plays (starts on the first click or key) */
   music: boolean;
   /** 4D.1: keep the music going during races */
@@ -119,6 +125,9 @@ export const defaults: Settings = {
   toneMap: 'filmic',
   lensFx: true,
   ao: false,
+  airSupport: 'heat3',
+  airDrops: true,
+  airCutIn: true,
   music: true,
   musicRaces: true,
   musicVolume: 0.6,

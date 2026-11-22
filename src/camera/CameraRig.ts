@@ -263,7 +263,7 @@ export class CameraRig {
 
     // Shake: continuous (speed, nitrous, rough ground) + trauma from impacts
     this.trauma = Math.max(0, this.trauma - dt * 1.9);
-    const rough = s.airborne ? 0 : s.onGrass * C.shakeGrass * smoothstep(3, 25, s.speed) + s.onKerb * 0.03 * smoothstep(3, 25, s.speed);
+    const rough = s.airborne ? 0 : (s.onGrass + s.onGravel * 1.8) * C.shakeGrass * smoothstep(3, 25, s.speed) + s.onKerb * 0.03 * smoothstep(3, 25, s.speed);
     const amount = menu ? 0 : (C.shakeSpeed * Math.pow(speedN, 2.2) + C.shakeNitro * nitro + rough + this.trauma * this.trauma * 0.55) * this.shakeScale * (kind === 'cinematic' ? 0.25 : kind === 'cockpit' ? 0.35 : 1);
     if (amount > 0.0005) {
       const t = this.t;

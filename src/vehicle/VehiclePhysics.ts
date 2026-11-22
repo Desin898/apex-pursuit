@@ -121,6 +121,8 @@ export class VehicleState {
   onGrass = 0; // 0..1 fraction of wheels on grass
   onKerb = 0;
   onRunoff = 0;
+  /** 4E: 0..1 fraction of wheels on gravel */
+  onGravel = 0;
   nitroLevel = 0; // 0..1 how much of the nitrous effect is on (ramps in)
   /** seconds left passing through other cars after a rejoin */
   ghost = 0;
@@ -134,6 +136,7 @@ export class VehicleState {
 export class VehiclePhysics {
   readonly s = new VehicleState();
   private prevGround = [0, 0, 0, 0];
+  private wob = 0;
   /** this car's tuning (an edition's values; defaults to the base car) */
   p: VehicleParams;
   /** 0 dry .. 1 fully wet track: scales grip per surface (WEATHER in config) */
@@ -260,14 +263,16 @@ export class VehiclePhysics {
     let grass = 0;
     let kerb = 0;
     let runoff = 0;
+    let gravel = 0;
     const load = s.wheelLoad;
     for (let i = 0; i < 4; i++) {
       const ax = WHEEL_X[i];
       const az = WHEEL_Z[i];
       const wx = s.x + fx * az + lx * ax;
       const wz = s.z + fz * az + lz * ax;
-      const h = W.heightAt(wx, wz);
       const surf = W.surfaceAt(wx, wz);
+      // 4E: gravel is lumpy: a little noise in the ground height under each wheel
+      const h = W.heightAt(wx, wz) + (surf === Surface.Gravel ? V.gravelWobble * 0.012 * (Math.sin(wx * 3.1 + wz * 1.7) * Math.sin(wz * 2.3 - wx * 0.9) + 0.6) : 0);
       const H = s.y + az * s.pitch + ax * s.roll;
       const Hdot = s.vy + az * s.pitchRate + ax * s.rollRate;
       let hdot = (h - this.prevGround[i]) / dt;
@@ -284,6 +289,7 @@ export class VehiclePhysics {
         if (surf === Surface.Grass) grass++;
         else if (surf === Surface.Kerb) kerb++;
         else if (surf === Surface.Runoff) runoff++;
+        else if (surf === Surface.Gravel) gravel++;
       }
       s.wheelContact[i] = comp > 0;
       s.wheelSurface[i] = surf;
@@ -298,6 +304,7 @@ export class VehiclePhysics {
     s.onGrass = contacts ? grass / contacts : 0;
     s.onKerb = contacts ? kerb / contacts : 0;
     s.onRunoff = contacts ? runoff / contacts : 0;
+    s.onGravel = contacts ? gravel / contacts : 0;
 
     // ── Tyre loads and grip per axle ───────────────────────────────────────
     const df = V.downforce * speed * speed;
@@ -311,7 +318,7 @@ export class VehiclePhysics {
     if (s.puncture > 0) s.puncture = Math.max(0, s.puncture - dt);
     const pG = 1 - punct * (1 - POLICE.punctureGrip);
     const mu0 = (i: number) =>
-      s.wheelSurface[i] === Surface.Grass ? V.gripGrass * wG : s.wheelSurface[i] === Surface.Kerb ? V.gripKerb * wK : s.wheelSurface[i] === Surface.Runoff ? V.gripRunoff * wR : V.gripAsphalt * wA;
+      s.wheelSurface[i] === Surface.Grass ? V.gripGrass * wG : s.wheelSurface[i] === Surface.Gravel ? V.gripGravel * wG : s.wheelSurface[i] === Surface.Kerb ? V.gripKerb * wK : s.wheelSurface[i] === Surface.Runoff ? V.gripRunoff * wR : V.gripAsphalt * wA;
     const frontOn = s.wheelContact[0] || s.wheelContact[1];
     const rearOn = s.wheelContact[2] || s.wheelContact[3];
     // Tyre load = suspension load. Under braking it is pulled part-way back towards the static
@@ -395,7 +402,7 @@ export class VehiclePhysics {
     // Traction limit → wheelspin
     let spin = 0;
     // loose surfaces: extra bite at walking pace so a car can always drive itself out of the grass
-    const loose = s.onGrass * (V.looseTraction - 1) * (1 - smoothstep(4, 15, speed));
+    const loose = (s.onGrass + s.onGravel) * (V.looseTraction - 1) * (1 - smoothstep(4, 15, speed));
     const tractionCap = Math.max(gripR * V.tractionBoost * (1 + loose), 1);
     const usage = Fdrive / tractionCap;
     if (usage > 1) {
@@ -420,7 +427,8 @@ export class VehiclePhysics {
     FbF *= lowSpeedFade;
     FbR *= lowSpeedFade;
     const grassFrac = s.onGrass;
-    const rollDecel = V.rollResist * G + grassFrac * (V.grassDragBase + V.grassDragSpeed * speed) + s.onRunoff * 0.25;
+    // 4E: gravel bogs the car down; a flat tyre drags (a lower top speed)
+    const rollDecel = V.rollResist * G + grassFrac * (V.grassDragBase + V.grassDragSpeed * speed) + s.onRunoff * 0.25 + s.onGravel * (V.gravelDragBase + V.gravelDragSpeed * speed) + punct * (POLICE.punctureDrag + 0.012 * speed);
     const Froll = contacts ? rollDecel * V.mass * lowSpeedFade : 0;
 
     const FxR = (s.gear === -1 ? -Fdrive : Fdrive) - dir * FbR - dir * Froll;
@@ -486,6 +494,8 @@ export class VehiclePhysics {
     s.vx += (aF * fx + aL * lx - drag * s.vx) * dt;
     s.vz += (aF * fz + aL * lz - drag * s.vz) * dt;
     s.yawRate += (Mz / V.yawInertia) * dt;
+    // 4E: on gravel the car twitches as the stones roll under the tyres
+    if (s.onGravel > 0 && speed > 3) s.yawRate += Math.sin(s.x * 0.9 + s.z * 1.3) * Math.sin(this.wob += dt * 17) * V.gravelWobble * 0.9 * s.onGravel * smoothstep(3, 25, speed) * dt;
 
     // Brakes must stop the car, not shove it backwards.
     if ((brakeCmd > 0.05 || inp.handbrake) && contacts) {

@@ -35,6 +35,7 @@ export class AudioEngine {
   private squealGain!: GainNode;
   private squealFilter!: BiquadFilterNode;
   private rumbleGain!: GainNode;
+  private gravelGain!: GainNode;
   private windGain!: GainNode;
   private windFilter!: BiquadFilterNode;
   private nitroGain!: GainNode;
@@ -190,6 +191,29 @@ export class AudioEngine {
     this.rumbleGain = ctx.createGain();
     this.rumbleGain.gain.value = 0;
     this.noiseSource().connect(rumbleF).connect(this.rumbleGain).connect(this.fxBus);
+    // ── 4E: gravel rattle: stones hitting the floor pan ──
+    const gBp = ctx.createBiquadFilter();
+    gBp.type = 'bandpass';
+    gBp.frequency.value = 1900;
+    gBp.Q.value = 0.6;
+    this.gravelGain = ctx.createGain();
+    this.gravelGain.gain.value = 0;
+    // crackle: the noise is chopped by a fast, irregular gate
+    const gate = ctx.createGain();
+    gate.gain.value = 0.5;
+    const lfo = ctx.createOscillator();
+    lfo.type = 'square';
+    lfo.frequency.value = 23;
+    const lfo2 = ctx.createOscillator();
+    lfo2.type = 'square';
+    lfo2.frequency.value = 37;
+    const lfoG = ctx.createGain();
+    lfoG.gain.value = 0.25;
+    lfo.connect(lfoG).connect(gate.gain);
+    lfo2.connect(lfoG);
+    lfo.start();
+    lfo2.start();
+    this.noiseSource().connect(gBp).connect(gate).connect(this.gravelGain).connect(this.fxBus);
 
     // ── Wind ──
     this.windFilter = ctx.createBiquadFilter();
@@ -328,6 +352,92 @@ export class AudioEngine {
     }
   }
 
+  // ── 4E: Air One — rotor thump (felt before it's seen), turbine whine, Doppler, panning ──
+  private heliNodes: { lfo: OscillatorNode; body: OscillatorNode; thump: GainNode; whine: OscillatorNode; whine2: OscillatorNode; whineGain: GainNode; pan: StereoPannerNode } | null = null;
+  /**
+   * dist (m), closing speed (m/s, + = coming towards you), pan −1..1 (left..right of the view),
+   * 0 when it isn't up.
+   */
+  setHeli(dist: number, closing: number, pan: number, on: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running') return;
+    if (!this.heliNodes) {
+      if (!on) return;
+      // blade slap: a pulse train (sharp peaks) gating low noise and a low sine
+      const lfo = ctx.createOscillator();
+      lfo.type = 'sawtooth';
+      lfo.frequency.value = 17;
+      const shaper = ctx.createWaveShaper();
+      const curve = new Float32Array(256);
+      for (let i = 0; i < 256; i++) curve[i] = Math.pow(i / 255, 7);
+      shaper.curve = curve;
+      const slap = ctx.createGain();
+      slap.gain.value = 0;
+      lfo.connect(shaper).connect(slap.gain);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 260;
+      this.noiseSource().connect(lp).connect(slap);
+      const body = ctx.createOscillator();
+      body.type = 'sine';
+      body.frequency.value = 34;
+      const bodyG = ctx.createGain();
+      bodyG.gain.value = 0.9;
+      body.connect(bodyG).connect(slap);
+      const thump = ctx.createGain();
+      thump.gain.value = 0;
+      const pan = ctx.createStereoPanner();
+      slap.connect(thump).connect(pan);
+      // turbine whine
+      const whine = ctx.createOscillator();
+      whine.type = 'sine';
+      whine.frequency.value = 3100;
+      const whine2 = ctx.createOscillator();
+      whine2.type = 'triangle';
+      whine2.frequency.value = 5240;
+      const wbp = ctx.createBiquadFilter();
+      wbp.type = 'bandpass';
+      wbp.frequency.value = 3800;
+      wbp.Q.value = 0.5;
+      const whineGain = ctx.createGain();
+      whineGain.gain.value = 0;
+      whine.connect(wbp);
+      whine2.connect(wbp);
+      wbp.connect(whineGain).connect(pan);
+      pan.connect(this.sirenBus);
+      lfo.start();
+      body.start();
+      whine.start();
+      whine2.start();
+      this.heliNodes = { lfo, body, thump, whine, whine2, whineGain, pan };
+    }
+    const n = this.heliNodes;
+    const t = ctx.currentTime;
+    const doppler = 343 / (343 - Math.max(-90, Math.min(90, closing)));
+    n.lfo.frequency.setTargetAtTime(17 * doppler, t, 0.08);
+    n.body.frequency.setTargetAtTime(34 * doppler, t, 0.08);
+    n.whine.frequency.setTargetAtTime(3100 * doppler, t, 0.08);
+    n.whine2.frequency.setTargetAtTime(5240 * doppler, t, 0.08);
+    // the thump carries a long way; the whine only up close
+    n.thump.gain.setTargetAtTime(on ? 0.55 / (1 + (dist / 75) ** 2) : 0, t, 0.25);
+    n.whineGain.gain.setTargetAtTime(on ? 0.03 / (1 + (dist / 28) ** 2) : 0, t, 0.25);
+    n.pan.pan.setTargetAtTime(Math.max(-0.85, Math.min(0.85, pan)), t, 0.1);
+  }
+
+  /** A shock charge going off, `dist` m away. */
+  boom(dist: number): void {
+    const a = 1 / (1 + (dist / 40) ** 2);
+    this.burst(2600, 90, 0.6, 0.6 * a + 0.05, 0.9, 'lowpass');
+    this.tone(60, 24, 0.7 * a + 0.04, 0.7);
+    this.burst(6000, 3000, 1, 0.16 * a, 0.12, 'highpass'); // the crack
+  }
+  /** A smoke canister landing and starting to hiss. */
+  canister(dist: number): void {
+    const a = 1 / (1 + (dist / 30) ** 2);
+    this.tone(420, 180, 0.12 * a, 0.12, 'triangle');
+    this.burst(4200, 1800, 0.8, 0.12 * a, 1.6, 'highpass');
+  }
+
   /** Radio squelch before / after a dispatcher line. */
   squelch(): void {
     this.burst(2400, 1200, 1.2, 0.06, 0.14);
@@ -375,7 +485,8 @@ export class AudioEngine {
     const tarmac = 1 - s.onGrass;
     this.squealGain.gain.setTargetAtTime(Math.min(0.2, slip * 0.16) * tarmac * (s.airborne ? 0 : 1), t, 0.05);
     this.squealFilter.frequency.setTargetAtTime(850 + smoothstep(5, 50, s.speed) * 500 + s.wheelSpinSlip * 250, t, 0.08);
-    this.rumbleGain.gain.setTargetAtTime((s.onGrass * 0.5 + s.onKerb * 0.35) * smoothstep(1, 25, s.speed) * (s.airborne ? 0 : 1), t, 0.06);
+    this.rumbleGain.gain.setTargetAtTime((s.onGrass * 0.5 + s.onKerb * 0.35 + s.onGravel * 0.6) * smoothstep(1, 25, s.speed) * (s.airborne ? 0 : 1), t, 0.06);
+    this.gravelGain.gain.setTargetAtTime(s.onGravel * 0.16 * smoothstep(1, 20, s.speed) * (s.airborne ? 0 : 1), t, 0.04);
 
     // wind
     const v = Math.min(1.2, s.speed / 100);

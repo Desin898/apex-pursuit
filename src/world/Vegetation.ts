@@ -18,7 +18,7 @@ import { Surface, WorldData } from './WorldData';
 import { HILL_FOG, TERRAIN, forestMask, terrainHeight } from './Terrain';
 
 /** shared by every vegetation shader: time and wind strength (rain makes it gustier) */
-export const vegUniforms = { uTime: { value: 0 }, uWind: { value: 0.45 } };
+export const vegUniforms = { uTime: { value: 0 }, uWind: { value: 0.45 }, uWash: { value: new THREE.Vector4(0, 0, 1, 0) } };
 
 type Quality = 'low' | 'medium' | 'high' | 'ultra';
 
@@ -154,7 +154,7 @@ function cypress(): Species {
 function windTrees(mat: THREE.MeshStandardMaterial): void {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, vegUniforms);
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uWind;').replace(
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uWind;\nuniform vec4 uWash;').replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
       {
@@ -164,6 +164,14 @@ function windTrees(mat: THREE.MeshStandardMaterial): void {
         float bend = hgt * hgt * 0.0035 * uWind;
         transformed.x += (sin(uTime * 1.1 + ph) * 0.7 + sin(uTime * 2.6 + ph * 1.7) * 0.3) * bend;
         transformed.z += (cos(uTime * 0.9 + ph * 1.3) * 0.5) * bend;
+        // 4E: rotor wash bends the crowns away from a low helicopter, shaking them
+        vec2 aw = ip.xz - uWash.xy;
+        float wr = length(aw);
+        float wk = uWash.w * (1.0 - smoothstep(uWash.z * 0.2, uWash.z, wr));
+        if (wk > 0.001) {
+          vec3 ld = normalize(transpose(mat3(instanceMatrix)) * vec3(aw.x, 0.0, aw.y) + vec3(1e-4));
+          transformed.xz += ld.xz * hgt * hgt * 0.012 * wk * (1.0 + 0.35 * sin(uTime * 9.0 + ph));
+        }
         // leaves flutter a little on their own
         transformed += normal * sin(uTime * 5.0 + dot(transformed, vec3(1.3, 0.7, 1.1))) * 0.04 * uWind * step(1.5, transformed.y);
       }`,
@@ -264,7 +272,7 @@ function grassMaterial(): THREE.MeshStandardMaterial {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, vegUniforms);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uWind;')
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uWind;\nuniform vec4 uWash;')
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
@@ -276,6 +284,16 @@ function grassMaterial(): THREE.MeshStandardMaterial {
           float k = transformed.y * transformed.y * uWind;
           transformed.x += (sin(uTime * 2.1 + ph) * 0.6 + sin(uTime * 4.3 + ph * 2.0) * 0.25) * 0.5 * k;
           transformed.z += cos(uTime * 1.7 + ph) * 0.3 * k;
+          // 4E: flattened and rippling under the rotor wash
+          vec2 aw = ip.xz - uWash.xy;
+          float wr = length(aw);
+          float wk = uWash.w * (1.0 - smoothstep(uWash.z * 0.15, uWash.z, wr));
+          if (wk > 0.001) {
+            vec3 ld = normalize(transpose(mat3(instanceMatrix)) * vec3(aw.x, 0.0, aw.y) + vec3(1e-4));
+            float fl = transformed.y * transformed.y * wk * (0.9 + 0.4 * sin(uTime * 14.0 + wr * 0.8));
+            transformed.xz += ld.xz * fl * 1.1;
+            transformed.y *= 1.0 - 0.35 * wk;
+          }
         }`,
       )
       // light the blades like the ground under them, not like vertical cards

@@ -53,6 +53,11 @@ const FRAG_SPARK = /* glsl */ `
     gl_FragColor = vec4(max(vColor.rgb * a * vColor.a, 0.0), 1.0);
   }`;
 
+const smooth = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
 class Pool {
   readonly points: THREE.Points;
   private pos: Float32Array;
@@ -68,7 +73,7 @@ class Pool {
   private head = 0;
   private mat: THREE.ShaderMaterial;
 
-  constructor(private n: number, additive: boolean, private gravity: number, private dragK: number) {
+  constructor(private n: number, additive: boolean, private gravity: number, private dragK: number, private hold = false) {
     this.pos = new Float32Array(n * 3);
     this.col = new Float32Array(n * 4);
     this.size = new Float32Array(n);
@@ -129,6 +134,23 @@ class Pool {
     this.rgb[i * 3 + 2] = b;
   }
 
+  /** Rotor wash: push everything within r of (x, z) outwards (and down a little). */
+  push(x: number, z: number, r: number, strength: number, dt: number): void {
+    const r2 = r * r;
+    for (let i = 0; i < this.n; i++) {
+      if (this.life[i] <= 0) continue;
+      const dx = this.pos[i * 3] - x;
+      const dz = this.pos[i * 3 + 2] - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      const d = Math.sqrt(d2) || 1;
+      const k = (1 - d / r) * strength * dt;
+      this.vel[i * 3] += (dx / d) * k;
+      this.vel[i * 3 + 2] += (dz / d) * k;
+      this.vel[i * 3 + 1] -= k * 0.25;
+    }
+  }
+
   update(dt: number): void {
     const drag = Math.max(0, 1 - this.dragK * dt);
     for (let i = 0; i < this.n; i++) {
@@ -151,8 +173,8 @@ class Pool {
         this.vel[i * 3 + 1] *= -0.4;
       }
       this.size[i] = this.size0[i] + this.grow[i] * t;
-      // fade in quickly, fade out slowly
-      const fade = Math.min(1, t * 8) * (1 - t) * (1 - t);
+      // fade in quickly, fade out slowly (a smoke screen holds, then thins out)
+      const fade = this.hold ? Math.min(1, t * 5) * (1 - smooth(0.55, 1, t)) : Math.min(1, t * 8) * (1 - t) * (1 - t);
       this.col[i * 4] = this.rgb[i * 3];
       this.col[i * 4 + 1] = this.rgb[i * 3 + 1];
       this.col[i * 4 + 2] = this.rgb[i * 3 + 2];
@@ -172,22 +194,28 @@ export class Particles {
   private bright = new Pool(260, true, 9.8, 0.4); // sparks fall and bounce
   /** rain spray: thrown up off the tyres, hangs as mist and settles (4B) */
   private mist = new Pool(3200, false, 1.1, 1.35);
+  /** 4E: smoke screens from Air One's canisters: big, slow, they hang, then thin out */
+  private cloud = new Pool(1400, false, -0.18, 0.45, true);
+  /** 4E: stones thrown up from the gravel traps */
+  private grit = new Pool(500, false, 9.8, 0.3);
   /** the point clouds (for render-layer setup) */
   objects(): THREE.Object3D[] {
-    return [this.soft.points, this.bright.points, this.mist.points];
+    return [this.soft.points, this.bright.points, this.mist.points, this.cloud.points, this.grit.points];
   }
   /** spray density by graphics preset */
   sprayScale = 1;
   private seed = 1;
 
   constructor(scene: THREE.Scene) {
-    scene.add(this.soft.points, this.bright.points, this.mist.points);
-    // the mist shares the smoke's light (lamps, tail lights, police bars)
+    scene.add(this.soft.points, this.bright.points, this.mist.points, this.cloud.points, this.grit.points);
+    // the mist, smoke screens and stones share the smoke's light (lamps, tail lights, police bars)
     const su = this.soft.uniforms;
-    const mu = this.mist.uniforms;
-    mu.uAmb = su.uAmb;
-    mu.uGlowPos = su.uGlowPos;
-    mu.uGlowCol = su.uGlowCol;
+    for (const pool of [this.mist, this.cloud, this.grit]) {
+      const mu = pool.uniforms;
+      mu.uAmb = su.uAmb;
+      mu.uGlowPos = su.uGlowPos;
+      mu.uGlowCol = su.uGlowCol;
+    }
   }
   private rnd(): number {
     this.seed = (this.seed * 16807) % 2147483647;
@@ -197,6 +225,8 @@ export class Particles {
     this.soft.setViewport(heightPx, fovDeg);
     this.bright.setViewport(heightPx, fovDeg);
     this.mist.setViewport(heightPx, fovDeg);
+    this.cloud.setViewport(heightPx, fovDeg);
+    this.grit.setViewport(heightPx, fovDeg);
   }
 
   /** Warm-lit tyre smoke. `amount` 0..1 scales density and opacity. */
@@ -264,9 +294,54 @@ export class Particles {
       this.bright.emit(x, y + r() * 0.5, z, vx * 0.55 + nx * sp + r() * 6, 1 + this.rnd() * 5, vz * 0.55 + nz * sp + r() * 6, 0.35 + this.rnd() * 0.6, 0.11 + this.rnd() * 0.1, -0.06, 1.0, 0.72 + this.rnd() * 0.2, 0.3, 2.6);
     }
   }
+  /**
+   * 4E: a smoke canister pouring out: thick puffs that billow up and out and hang across the road.
+   * `red`: a red flare canister. `k` 0..1 how hard it is pouring.
+   */
+  smokeScreen(x: number, z: number, red: boolean, k: number, spread: number): void {
+    const r = () => this.rnd() - 0.5;
+    const a = this.rnd() * Math.PI * 2;
+    const out = 1.5 + this.rnd() * 3.5;
+    const g = 0.88 + this.rnd() * 0.12;
+    this.cloud.emit(
+      x + r() * 1.2, 0.4 + this.rnd() * 0.6, z + r() * 1.2,
+      Math.cos(a) * out * spread, 0.5 + this.rnd() * 1.3, Math.sin(a) * out * spread,
+      7 + this.rnd() * 4, 2.2 + this.rnd() * 1.2, 12 + this.rnd() * 7,
+      red ? 0.95 : g, red ? 0.22 + this.rnd() * 0.08 : g * 0.99, red ? 0.2 : g * 0.97,
+      Math.min(0.9, 0.55 + 0.35 * k),
+    );
+  }
+  /** 4E: a burst of smoke where a shock charge went off */
+  blast(x: number, z: number): void {
+    const r = () => this.rnd() - 0.5;
+    for (let i = 0; i < 26; i++) {
+      const a = (i / 26) * Math.PI * 2;
+      const sp = 4 + this.rnd() * 6;
+      this.cloud.emit(x + r(), 0.3 + this.rnd(), z + r(), Math.cos(a) * sp, 1 + this.rnd() * 3, Math.sin(a) * sp, 2.2 + this.rnd() * 1.6, 1.2, 6 + this.rnd() * 3, 0.5, 0.47, 0.43, 0.6);
+    }
+    for (let i = 0; i < 40; i++) {
+      const a = this.rnd() * Math.PI * 2;
+      const sp = 6 + this.rnd() * 14;
+      this.bright.emit(x, 0.4, z, Math.cos(a) * sp, 3 + this.rnd() * 9, Math.sin(a) * sp, 0.4 + this.rnd() * 0.7, 0.14 + this.rnd() * 0.1, -0.05, 1, 0.65 + this.rnd() * 0.3, 0.25, 3.2);
+    }
+  }
+  /** 4E: stones and grit flung up by a wheel on gravel */
+  stones(x: number, y: number, z: number, vx: number, vz: number, amount: number): void {
+    const r = () => this.rnd() - 0.5;
+    const c = 0.42 + this.rnd() * 0.2;
+    this.grit.emit(x + r() * 0.3, y + 0.05, z + r() * 0.3, vx * 0.45 + r() * 4, 1.5 + this.rnd() * 4.5 * amount, vz * 0.45 + r() * 4, 0.5 + this.rnd() * 0.5, 0.05 + this.rnd() * 0.05, 0, c, c * 0.95, c * 0.85, 1);
+  }
+  /** 4E: rotor wash pushes smoke and spray away from under the helicopter */
+  wash(x: number, z: number, r: number, strength: number, dt: number): void {
+    this.cloud.push(x, z, r, strength, dt);
+    this.soft.push(x, z, r, strength * 0.6, dt);
+    this.mist.push(x, z, r, strength, dt);
+  }
   update(dt: number): void {
     this.soft.update(dt);
     this.bright.update(dt);
     this.mist.update(dt);
+    this.cloud.update(dt);
+    this.grit.update(dt);
   }
 }

@@ -23,6 +23,8 @@ import { VehiclePhysics } from '../vehicle/VehiclePhysics';
 import type { VehicleParams } from '../vehicle/Cars';
 import { WorldData } from '../world/WorldData';
 import { LapTimer } from './LapTimer';
+import { AirOne, type DropKind, type Heli } from './AirOne';
+export type { Heli, Drop, DropKind } from './AirOne';
 import type { NetCar, Race, RaceCar } from './Race';
 
 /** cruiser: the patrol sedan; unmarked: a dark sedan from Heat 4; rammer: the heavy pickup from Heat 3 */
@@ -69,21 +71,10 @@ export interface Obstacle {
   vz: number;
   brokenAt: number;
   life: number;
+  /** 4E: dropped by Air One: the flat lasts until the end of the lap */
+  lapLong?: boolean;
 }
 
-export interface Heli {
-  active: boolean;
-  x: number;
-  y: number;
-  z: number;
-  yaw: number;
-  vx: number;
-  vz: number;
-  /** searchlight aim on the ground */
-  lx: number;
-  lz: number;
-  sees: boolean;
-}
 
 export type PursuitEvent =
   | { type: 'radio'; text: string }
@@ -94,6 +85,11 @@ export type PursuitEvent =
   | { type: 'roadblock' }
   | { type: 'spikes' }
   | { type: 'heli' }
+  | { type: 'heliLeave' }
+  | { type: 'drop'; kind: DropKind }
+  | { type: 'landed'; kind: DropKind; x: number; z: number }
+  | { type: 'smoked'; red: boolean }
+  | { type: 'boom'; x: number; z: number; mine: boolean }
   | { type: 'spiked'; mine: boolean }
   | { type: 'smash'; kind: ObstacleKind; mine: boolean }
   | { type: 'policeHit'; strength: number }
@@ -122,7 +118,11 @@ const blankInput = () => ({ throttle: 0, brake: 0, steer: 0, handbrake: false, n
 export class Pursuit {
   readonly units: PoliceUnit[] = [];
   readonly obstacles: Obstacle[] = [];
-  readonly heli: Heli = { active: false, x: 0, y: -100, z: 0, yaw: 0, vx: 0, vz: 0, lx: 0, lz: 0, sees: false };
+  /** 4E: the helicopter's brain (flight, sight, drops) */
+  readonly air: AirOne;
+  get heli(): Heli {
+    return this.air.heli;
+  }
   events: PursuitEvent[] = [];
   /** shared Heat, 0..5.99 (level = floor, at least 1 once police are out) */
   heat = 0;
@@ -179,6 +179,16 @@ export class Pursuit {
       this.park(this.units[i]);
     });
     for (let k = 0; k < world.speedTraps.length; k++) this.trapCool.push(0);
+    this.air = new AirOne(world, race, (e) => this.events.push(e), (t) => this.radio(t), this.rand, (x, z, ax, az) => {
+      const o = this.newObstacle('spikes', 'spikes', x, z, ax, az, POLICE.spikeLength / 2, 0.3, POLICE.spikeLife);
+      o.lapLong = true;
+    });
+  }
+
+  /** an online guest mirrors the host (set by the session) */
+  setMirror(m: boolean): void {
+    this.mirror = m;
+    this.air.mirror = m;
   }
 
   get level(): number {
@@ -301,7 +311,8 @@ export class Pursuit {
     if (lvl !== this.lastLevel) {
       if (lvl > this.lastLevel && this.lastLevel > 0) {
         this.events.push({ type: 'heat', level: lvl });
-        const lines = ['', '', 'Dispatch: Heat level two. Units, you are cleared for contact.', 'Dispatch: Heat three. Setting up a roadblock ahead of the suspect.', 'Dispatch: Heat four. Spike strips and heavy units are authorised.', 'Dispatch: Heat five. Air One is in the air.'];
+        const air = this.air.from;
+        const lines = ['', '', 'Dispatch: Heat level two. Units, you are cleared for contact.', `Dispatch: Heat three. Setting up a roadblock ahead of the suspect${air === 3 ? ', and calling Air One' : ''}.`, 'Dispatch: Heat four. Spike strips and heavy units are authorised.', `Dispatch: Heat five. ${air === 5 ? 'Air One is in the air.' : 'Everything we have, all units.'}`];
         if (lines[lvl]) this.radio(lines[lvl]);
       }
       this.lastLevel = lvl;
@@ -341,7 +352,7 @@ export class Pursuit {
     this.contacts(dt);
     this.updateObstacles(dt);
     this.traps(dt);
-    if (!this.mirror) this.updateHeli(dt);
+    this.stepAir(dt);
     this.meters(dt);
     if (!this.mirror) this.breakers(dt);
   }
@@ -409,16 +420,6 @@ export class Pursuit {
         this.radio('Spike strip is down. Let them run into it.');
       }
     }
-    if (lvl >= 5 && !this.heli.active) {
-      this.heli.active = true;
-      const t = leader.s;
-      this.heli.x = t.x - Math.sin(t.yaw) * 300;
-      this.heli.z = t.z - Math.cos(t.yaw) * 300;
-      this.heli.y = POLICE.heliHeight + 20;
-      this.events.push({ type: 'heli' });
-      this.radio('Air One on scene. I have the suspect in the light.');
-    }
-    if (lvl < 5 && this.heli.active && this.cooldown > 0) this.heli.active = false;
     // a chatty dispatcher, now and then
     if (this.radioT > 16 && anySees) {
       const u = this.units.find((o) => o.active && o.sees && o.target);
@@ -763,7 +764,10 @@ export class Pursuit {
         const key = `${o.id}:${c.netId || c.id}`;
         if (!this.spiked.has(key) && !remote) {
           this.spiked.add(key);
-          s.puncture = POLICE.punctureTime;
+          if (o.lapLong) {
+            s.puncture = 999;
+            this.punctLap.set(c, { lap: c.lap.laps, t: 0 });
+          } else s.puncture = Math.max(s.puncture, POLICE.punctureTime);
           this.events.push({ type: 'spiked', mine });
           if (mine) this.radio('Dispatch: they hit the spikes! Tyres are shredded, move in.');
         }
@@ -830,34 +834,43 @@ export class Pursuit {
     });
   }
 
-  // ── Helicopter ──
-  private updateHeli(dt: number): void {
-    const h = this.heli;
-    if (!h.active) {
-      h.sees = false;
-      return;
+  // ── Air One (4E) and helicopter punctures ──
+  private punctLap = new Map<RaceCar, { lap: number; t: number }>();
+  private stepAir(dt: number): void {
+    let target: RaceCar | null = null;
+    if (!this.mirror) {
+      const humans = this.humans().filter((h) => !h.finished);
+      const chased = this.units.find((u) => u.active && u.target && humans.includes(u.target))?.target ?? null;
+      target = chased ?? (humans.length ? humans.reduce((a, b) => (this.race.distanceOf(b) > this.race.distanceOf(a) ? b : a)) : null);
     }
-    const t = this.units.find((u) => u.target)?.target ?? this.race.player;
-    const ts = t.s;
-    // hold a point a little behind and beside the target, at height
-    const gx = ts.x + ts.vx * 0.8 - Math.sin(ts.yaw) * 25 + Math.cos(ts.yaw) * 14;
-    const gz = ts.z + ts.vz * 0.8 - Math.cos(ts.yaw) * 25 - Math.sin(ts.yaw) * 14;
-    const dx = gx - h.x;
-    const dz = gz - h.z;
-    const d = Math.hypot(dx, dz);
-    const want = Math.min(POLICE.heliSpeed, d * 0.9);
-    const k = Math.min(1, dt * 1.2);
-    h.vx += ((dx / (d || 1)) * want - h.vx) * k;
-    h.vz += ((dz / (d || 1)) * want - h.vz) * k;
-    h.x += h.vx * dt;
-    h.z += h.vz * dt;
-    h.y += (POLICE.heliHeight - h.y) * Math.min(1, dt * 0.6);
-    const face = Math.atan2(ts.x - h.x, ts.z - h.z);
-    h.yaw += wrapAngle(face - h.yaw) * Math.min(1, dt * 1.5);
-    // searchlight sweeps a little around the target
-    h.lx = ts.x + Math.sin(this.time * 0.9) * 2.5;
-    h.lz = ts.z + Math.cos(this.time * 1.3) * 2.5;
-    h.sees = Math.hypot(ts.x - h.x, ts.z - h.z) < POLICE.heliSight && this.cooldown <= 0;
+    this.air.step(dt, this.level, this.cooldown, this.joined, target);
+    // a flat from a helicopter spike strip lasts until the end of the lap
+    for (const [c, p] of this.punctLap) {
+      p.t += dt;
+      if (c.s.puncture <= 0) this.punctLap.delete(c);
+      else if (c.lap.laps > p.lap && p.t >= POLICE.heliSpikeMin) {
+        c.s.puncture = 0;
+        this.punctLap.delete(c);
+      }
+    }
+  }
+
+  /** Race calls this for each AI rival after it has decided its inputs. */
+  aiReact(c: RaceCar): void {
+    this.air.react(c);
+    // and they steer round a helicopter spike strip they can see
+    const s = c.s;
+    const fx = Math.sin(s.yaw);
+    const fz = Math.cos(s.yaw);
+    for (const o of this.obstacles) {
+      if (!o.lapLong) continue;
+      const rx = o.x - s.x;
+      const rz = o.z - s.z;
+      const along = rx * fx + rz * fz;
+      const lat = rx * fz - rz * fx;
+      const r = o.hl + 1.4;
+      if (along > 0 && along < 55 && Math.abs(lat) < r) c.input.steer = clamp(c.input.steer - Math.sign(lat || 1) * (1 - Math.abs(lat) / r) * 0.9, -1, 1);
+    }
   }
 
   // ── Line of sight, Busted and Evade for the local player ──
@@ -958,7 +971,7 @@ export class Pursuit {
       if (!this.mirror) {
         this.heat = Math.max(1, Math.floor(this.heat) - 1 + 0.2);
         this.cooldown = POLICE.evadeCooldown;
-        this.heli.active = false;
+        this.air.breakOff();
       }
       this.hot = false;
     }
@@ -1047,10 +1060,10 @@ export class Pursuit {
   // ── Online: the host's view of police, packed small ──
   pack(packCar: (s: RaceCar['s']) => NetCar): unknown {
     const units = this.units.map((u) => (u.active ? packCar(u.car.s) : 0));
-    const obs = this.obstacles.filter((o) => o.group !== 'zone').map((o) => [['jersey', 'blockCar', 'spikes'].indexOf(o.kind), Math.round(o.x * 10) / 10, Math.round(o.z * 10) / 10, Math.round(o.ax * 1000) / 1000, Math.round(o.az * 1000) / 1000, Math.round(o.hl * 100) / 100, o.id]);
+    const obs = this.obstacles.filter((o) => o.group !== 'zone').map((o) => [['jersey', 'blockCar', 'spikes'].indexOf(o.kind), Math.round(o.x * 10) / 10, Math.round(o.z * 10) / 10, Math.round(o.ax * 1000) / 1000, Math.round(o.az * 1000) / 1000, Math.round(o.hl * 100) / 100, o.id, o.lapLong ? 1 : 0]);
     let zoneBroken = '';
     for (const o of this.obstacles) if (o.group === 'zone') zoneBroken += o.broken ? '1' : '0';
-    const h = this.heli;
+    const air = this.air.pack();
     return {
       h: Math.round(this.heat * 100) / 100,
       j: this.joined ? 1 : 0,
@@ -1062,7 +1075,8 @@ export class Pursuit {
       z: zoneBroken,
       zl: this.zoneLap,
       b: this.breakerDown,
-      x: h.active ? [Math.round(h.x * 10) / 10, Math.round(h.y * 10) / 10, Math.round(h.z * 10) / 10, Math.round(h.yaw * 100) / 100, Math.round(h.lx), Math.round(h.lz)] : 0,
+      x: air.x,
+      ad: air.d,
     };
   }
 
@@ -1132,6 +1146,7 @@ export class Pursuit {
         if (this.obstacles.some((ob) => ob.id === nid)) continue;
         const ob = this.newObstacle(kind, kind === 'spikes' ? 'spikes' : 'roadblock', x, z, ax, az, clamp(hl, 0.1, 6), kind === 'blockCar' ? 1.05 : kind === 'spikes' ? 0.3 : 0.32, 1e9);
         ob.id = nid;
+        if (e.length > 7 && e[7] === 1) ob.lapLong = true;
         this.obstacleId--;
         if (kind === 'blockCar' && !this.obstacles.some((q) => q.kind === 'blockCar' && q.id !== nid)) this.events.push({ type: 'roadblock' });
       }
@@ -1142,23 +1157,7 @@ export class Pursuit {
       this.rebuildPseudo();
     }
     if (Array.isArray(o.b)) this.breakerDown = o.b.slice(0, 3).map((v) => num(v, -1, 999, -1));
-    const h = this.heli;
-    if (Array.isArray(o.x) && o.x.length >= 6 && o.x.every((v) => typeof v === 'number' && Number.isFinite(v))) {
-      const x = o.x as number[];
-      if (!h.active) this.events.push({ type: 'heli' });
-      h.active = true;
-      h.x = x[0];
-      h.y = x[1];
-      h.z = x[2];
-      h.yaw = x[3];
-      h.lx = x[4];
-      h.lz = x[5];
-      const me = this.race.player.s;
-      h.sees = Math.hypot(me.x - h.x, me.z - h.z) < POLICE.heliSight;
-    } else {
-      h.active = false;
-      h.sees = false;
-    }
+    this.air.unpack(o.x, o.ad);
   }
 
   /** Back to the start of a race (restart). */
@@ -1173,7 +1172,8 @@ export class Pursuit {
     this.zoneLap = -1;
     this.lastLevel = 0;
     this.chaseTime = 0;
-    this.heli.active = false;
+    this.air.reset();
+    this.punctLap.clear();
     this.spiked.clear();
     this.lastIndex.clear();
     this.breakerDown = this.world.breakers.map(() => -1);

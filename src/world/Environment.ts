@@ -197,6 +197,8 @@ export class Environment {
   private moon: THREE.Sprite;
   private moonHalo: THREE.Sprite;
   private pools: THREE.InstancedMesh;
+  private floodPools: THREE.InstancedMesh;
+  private floodMat: THREE.MeshBasicMaterial;
   private poolMat: THREE.MeshBasicMaterial;
   private streaks: THREE.InstancedMesh;
   private streakMat: THREE.MeshBasicMaterial;
@@ -355,6 +357,36 @@ export class Environment {
       scene.add(this.pools);
     }
 
+    // ── 4E: floodlight pools: each tower lays a broad pool of cool white light on the track ──
+    {
+      const g = new THREE.PlaneGeometry(1, 1);
+      g.rotateX(-Math.PI / 2);
+      this.floodMat = new THREE.MeshBasicMaterial({ map: tex.poolTexture(), color: 0x000000, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 });
+      const fl = world.floodlights;
+      this.floodPools = new THREE.InstancedMesh(g, this.floodMat, Math.max(1, fl.length));
+      const m = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      fl.forEach((f, i) => {
+        // centred where the beam meets the track, stretched along the beam
+        const hit = world.nearestTrack(f.x, f.z);
+        const S = world.samples;
+        const c = hit ? S[hit.index] : { x: f.x, z: f.z };
+        const dx = c.x - f.x;
+        const dz = c.z - f.z;
+        const d = Math.hypot(dx, dz) || 1;
+        const cx = f.x + (dx / d) * (d + 4);
+        const cz = f.z + (dz / d) * (d + 4);
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(dx, dz));
+        m.compose(new THREE.Vector3(cx, 0.045, cz), q, new THREE.Vector3(52, 1, 74));
+        this.floodPools.setMatrixAt(i, m);
+      });
+      this.floodPools.count = fl.length;
+      this.floodPools.renderOrder = 6;
+      this.floodPools.frustumCulled = false;
+      this.floodPools.visible = false;
+      scene.add(this.floodPools);
+    }
+
     // ── Reflections of lights on a wet road ──
     {
       const g = new THREE.PlaneGeometry(1, 1);
@@ -403,7 +435,7 @@ export class Environment {
   /** Sky, lights, fog, reflections and glowing things for the current preset. */
   /** decals lying on the road (lamp pools, wet light streaks): no use in a reflection */
   roadDecals(): THREE.Object3D[] {
-    return [this.pools, this.streaks].filter(Boolean) as THREE.Object3D[];
+    return [this.pools, this.floodPools, this.streaks].filter(Boolean) as THREE.Object3D[];
   }
 
   // ── Rain intensity (4B.2): 0..1 on top of the "rain" weather ──
@@ -489,6 +521,10 @@ export class Environment {
     for (const m of v.mats.floods) m.emissiveIntensity = p.lamps * 1.15;
     this.pools.visible = p.pools > 0.01;
     this.poolMat.color.setRGB(1.0 * p.pools * 0.5, 0.8 * p.pools * 0.5, 0.55 * p.pools * 0.5);
+    // floodlights: on at dusk, full at night (a little more in the rain, where they reflect)
+    const fk = Math.max(0, Math.min(1, (p.lamps - 2) / 4));
+    this.floodPools.visible = fk > 0.01 && this.floodPools.count > 0;
+    this.floodMat.color.setRGB(0.46 * fk, 0.45 * fk, 0.42 * fk);
     this.renderer.toneMappingExposure = p.exposure * this.exposureK;
   }
 

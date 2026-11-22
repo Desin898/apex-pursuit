@@ -85,11 +85,13 @@ export class Rain {
         uMaxLen: { value: R.maxStreak },
         uNear: { value: R.nearFade },
         uOpacity: { value: 0.5 },
+        uWash: { value: new THREE.Vector4(0, 0, 0, 0) },
       },
       vertexShader: /* glsl */ `
         attribute float aEnd;
         uniform float uTime, uExposure, uMaxLen, uNear;
         uniform vec3 uCam, uOff, uRel, uBox;
+        uniform vec4 uWash;
         varying vec3 vCol;
         varying float vFade;
         ${LIGHTING}
@@ -101,6 +103,16 @@ export class Rain {
           vec3 rel = uRel * uExposure;
           float L = length(rel);
           if (L > uMaxLen) rel *= uMaxLen / L;
+          // 4E: rotor wash under a low helicopter blows the rain outwards and down
+          vec2 aw = p.xz - uWash.xz;
+          float wr = length(aw);
+          float wk = uWash.w * (1.0 - smoothstep(5.0, 24.0, wr)) * step(p.y, uWash.y);
+          if (wk > 0.001) {
+            vec2 wd = aw / max(wr, 0.5);
+            p.xz += wd * wk * 3.5 * (1.0 - clamp(p.y / max(uWash.y, 1.0), 0.0, 1.0));
+            rel.xz -= wd * wk * 0.45;
+            rel.y -= wk * 0.3;
+          }
           p -= rel * aEnd;
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           float d = length(p - uCam);
@@ -210,6 +222,11 @@ export class Rain {
         this.lights.col[i].setRGB(l.r, l.g, l.b);
       } else this.lights.col[i].setRGB(0, 0, 0);
     }
+  }
+
+  /** 4E: where the helicopter's rotor wash is (x, height, z) and how strong (0..1) */
+  setWash(x: number, y: number, z: number, k: number): void {
+    (this.mat.uniforms.uWash.value as THREE.Vector4).set(x, y, z, k);
   }
 
   setViewport(heightPx: number, fovDeg: number): void {

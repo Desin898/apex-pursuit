@@ -123,9 +123,27 @@ export class MiniMap {
         g.fill();
         g.stroke();
       } else if (ic.kind === 'heli') {
+        // 4E: its searchlight: a cone from the helicopter to the spot on the ground
+        if (ic.lx !== undefined && ic.lz !== undefined) {
+          const [lx, ly] = P(ic.lx, ic.lz);
+          const ang = Math.atan2(ly - py, lx - px);
+          const len = Math.hypot(lx - px, ly - py);
+          const w = Math.max(10, len * 0.25);
+          g.beginPath();
+          g.moveTo(px, py);
+          g.lineTo(lx + Math.cos(ang + Math.PI / 2) * w, ly + Math.sin(ang + Math.PI / 2) * w);
+          g.lineTo(lx + Math.cos(ang - Math.PI / 2) * w, ly + Math.sin(ang - Math.PI / 2) * w);
+          g.closePath();
+          g.fillStyle = 'rgba(255,240,190,0.22)';
+          g.fill();
+          g.beginPath();
+          g.arc(lx, ly, w, 0, Math.PI * 2);
+          g.fillStyle = 'rgba(255,244,210,0.3)';
+          g.fill();
+        }
         g.beginPath();
-        g.arc(px, py, 34, 0, Math.PI * 2);
-        g.fillStyle = 'rgba(255,240,190,0.14)';
+        g.arc(px, py, 20, 0, Math.PI * 2);
+        g.fillStyle = 'rgba(10,11,14,0.55)';
         g.fill();
         g.strokeStyle = flash ? '#ffffff' : red;
         g.lineWidth = 4;
@@ -135,6 +153,19 @@ export class MiniMap {
         g.moveTo(px, py - 13);
         g.lineTo(px, py + 13);
         g.stroke();
+      } else if (ic.kind === 'charge' || ic.kind === 'smoke') {
+        // 4E: Air One's drops: a blinking red ring (shock charge), a grey blot (smoke)
+        const rr = Math.max(9, (ic.r ?? 5) * 2.6);
+        g.beginPath();
+        g.arc(px, py, rr, 0, Math.PI * 2);
+        if (ic.kind === 'smoke') {
+          g.fillStyle = 'rgba(190,196,204,0.55)';
+          g.fill();
+        } else {
+          g.lineWidth = 6;
+          g.strokeStyle = flash ? red : '#ffffff';
+          g.stroke();
+        }
       } else if (ic.kind === 'roadblock' || ic.kind === 'spikes') {
         const [qx, qy] = P(ic.x + (ic.ax ?? 1) * 14, ic.z + (ic.az ?? 0) * 14);
         const [rx, ry] = P(ic.x - (ic.ax ?? 1) * 14, ic.z - (ic.az ?? 0) * 14);

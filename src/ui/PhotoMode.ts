@@ -78,11 +78,11 @@ export class PhotoMode {
   }
 
   /** Per frame while active. Returns what the player asked for. */
-  update(dt: number, a: Actions): 'save' | 'exit' | null {
+  update(dt: number, a: Actions): 'save' | 'exit' | 'air' | null {
     const k = (c: string) => this.input.keyHeld(c);
     const edge = (c: string) => this.keyEdge.has(c);
     const st = this.input.sticks;
-    let out: 'save' | 'exit' | null = null;
+    let out: 'save' | 'exit' | 'air' | null = null;
     if (a.back || a.pause) out = 'exit';
     else if (a.accept) out = 'save';
     // look
@@ -103,9 +103,9 @@ export class PhotoMode {
     this.pos.z += (fz * fwd + Math.sin(this.yaw) * side) * sp;
     this.pos.y += (fy * fwd + up) * sp;
     // stay above the road and within reach of the car
-    this.pos.y = clamp(this.pos.y, 0.25, 60);
+    this.pos.y = clamp(this.pos.y, 0.25, 90);
     const off = this.pos.clone().sub(this.anchor);
-    if (off.length() > 90) this.pos.copy(this.anchor).add(off.setLength(90));
+    if (off.length() > 140) this.pos.copy(this.anchor).add(off.setLength(140));
     // depth of field and exposure
     let changed = false;
     const focusD = (edge('BracketRight') || a.up ? 1 : 0) - (edge('BracketLeft') || a.down ? 1 : 0);
@@ -124,6 +124,7 @@ export class PhotoMode {
       changed = true;
     }
     if (edge('KeyG')) this.grid.hidden = !this.grid.hidden;
+    if (edge('KeyV') || a.square) out = 'air';
     if (edge('KeyH') || (st.triangle && !this.triWas)) this.panel.classList.toggle('min');
     this.triWas = st.triangle;
     if (changed) this.refresh();
@@ -134,4 +135,15 @@ export class PhotoMode {
     return out;
   }
   private triWas = false;
+
+  /** 4E: jump to a viewpoint (the Air One cam): stand at `pos`, look at `at`. */
+  jumpTo(pos: THREE.Vector3, at: THREE.Vector3): void {
+    this.pos.copy(pos);
+    this.anchor.copy(at);
+    const d = at.clone().sub(pos);
+    this.yaw = Math.atan2(d.x, d.z);
+    this.pitch = Math.asin(clamp(d.y / (d.length() || 1), -1, 1));
+    this.focus = Math.max(1.5, d.length());
+    this.refresh();
+  }
 }

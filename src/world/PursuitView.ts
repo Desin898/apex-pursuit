@@ -7,7 +7,10 @@
 import * as THREE from 'three';
 import { PHYSICS_DT, POLICE_LOOK } from '../config';
 import { Particles } from '../fx/Particles';
-import { Obstacle, Pursuit } from '../game/Pursuit';
+import { Obstacle, Pursuit, type Drop } from '../game/Pursuit';
+import { POLICE } from '../config';
+import { vegUniforms } from './Vegetation';
+import { mainOnly } from '../core/layers';
 import { Helicopter } from '../vehicle/Helicopter';
 import { FlashPattern, PoliceCar } from '../vehicle/PoliceCar';
 import { mergeByMaterial } from '../core/merge';
@@ -79,10 +82,34 @@ export class PursuitView {
   private geos: Record<string, THREE.BufferGeometry> = {};
   private heliSpotAdded = false;
   private tmpC = new THREE.Color();
+  // 4E: Air One's drops: the falling canister, the warning marker on the road, the smoke and bang
+  private dropVis = new Map<number, { obj: THREE.Object3D; led?: THREE.MeshStandardMaterial; marker: THREE.Mesh; mmat: THREE.MeshBasicMaterial; booms: boolean; emit: number }>();
+  private boomLight: THREE.PointLight | null = null;
+  private boomT = 0;
+  private flash: THREE.Sprite;
+  private flashMat: THREE.SpriteMaterial;
+  /** last frame's bangs, for the game to shake / sound (x, z) */
+  readonly booms: { x: number; z: number }[] = [];
 
   constructor(private scene: THREE.Scene, private world: WorldData, private particles: Particles) {
     this.heli = new Helicopter(scene);
     this.buildMaterials();
+    // the white flash of a shock charge
+    const fc = document.createElement('canvas');
+    fc.width = fc.height = 64;
+    const fg = fc.getContext('2d')!;
+    const gr = fg.createRadialGradient(32, 32, 2, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)');
+    gr.addColorStop(0.3, 'rgba(255,220,160,0.6)');
+    gr.addColorStop(1, 'rgba(255,160,80,0)');
+    fg.fillStyle = gr;
+    fg.fillRect(0, 0, 64, 64);
+    this.flashMat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(fc), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 });
+    this.flash = new THREE.Sprite(this.flashMat);
+    this.flash.visible = false;
+    this.flash.renderOrder = 11;
+    mainOnly(this.flash);
+    scene.add(this.flash);
     this.buildGantries();
     this.buildBreakers();
   }
@@ -97,7 +124,23 @@ export class PursuitView {
     m.jersey = new THREE.MeshStandardMaterial({ color: 0xa9a7a1, roughness: 0.92, flatShading: true });
     m.spikes = new THREE.MeshStandardMaterial({ map: stripeTexture('#1a1a1a', '#e8c21a'), roughness: 0.5, metalness: 0.6 });
     m.steel = new THREE.MeshStandardMaterial({ color: 0x3a3e44, roughness: 0.45, metalness: 0.85 });
+    m.canGrey = new THREE.MeshStandardMaterial({ color: 0x6c7076, roughness: 0.5, metalness: 0.5 });
+    m.canRed = new THREE.MeshStandardMaterial({ color: 0xb0161c, roughness: 0.45, metalness: 0.4 });
+    m.charge = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.4, metalness: 0.6 });
     const g = this.geos;
+    g.can = new THREE.CylinderGeometry(0.11, 0.11, 0.42, 12);
+    g.can.rotateZ(Math.PI / 2);
+    g.puck = new THREE.CylinderGeometry(0.26, 0.3, 0.16, 16);
+    g.puck.translate(0, 0.08, 0);
+    g.led = new THREE.SphereGeometry(0.06, 8, 6);
+    g.roll = new THREE.CylinderGeometry(0.16, 0.16, 0.9, 10);
+    g.roll.rotateZ(Math.PI / 2);
+    g.ring = new THREE.RingGeometry(0.86, 1, 56);
+    g.ring.rotateX(-Math.PI / 2);
+    g.disc = new THREE.CircleGeometry(1, 40);
+    g.disc.rotateX(-Math.PI / 2);
+    g.bar = new THREE.PlaneGeometry(1, 1);
+    g.bar.rotateX(-Math.PI / 2);
     g.cone = new THREE.ConeGeometry(0.2, 0.7, 10);
     g.cone.translate(0, 0.35, 0);
     g.water = new THREE.BoxGeometry(1.9, 0.82, 0.55, 1, 1, 1);
@@ -325,6 +368,12 @@ export class PursuitView {
       this.scene.add(l);
       this.lights.push(l);
     }
+    if (p && quality !== 'low' && !this.boomLight) {
+      this.boomLight = new THREE.PointLight(0xffd2a0, 0, 60, 2);
+      this.scene.add(this.boomLight);
+    }
+    for (const [, v] of this.dropVis) this.dropDrop(v);
+    this.dropVis.clear();
     const spot = !!p && quality !== 'low';
     if (spot && !this.heliSpotAdded) this.scene.add(this.heli.spot, this.heli.spot.target);
     if (!spot && this.heliSpotAdded) this.scene.remove(this.heli.spot, this.heli.spot.target);
@@ -357,6 +406,136 @@ export class PursuitView {
       this.blockPool.push(o.car);
     } else this.scene.remove(o.mesh);
   }
+
+  private dropDrop(v: { obj: THREE.Object3D; marker: THREE.Mesh; mmat: THREE.MeshBasicMaterial }): void {
+    this.scene.remove(v.obj, v.marker);
+    v.mmat.dispose();
+  }
+
+  /** the canister and its warning marker on the road */
+  private makeDrop(d: Drop): { obj: THREE.Object3D; led?: THREE.MeshStandardMaterial; marker: THREE.Mesh; mmat: THREE.MeshBasicMaterial; booms: boolean; emit: number } {
+    const m = this.mats;
+    const g = this.geos;
+    let obj: THREE.Object3D;
+    let led: THREE.MeshStandardMaterial | undefined;
+    if (d.kind === 'smoke') obj = new THREE.Mesh(g.can, d.red ? m.canRed : m.canGrey);
+    else if (d.kind === 'spikes') obj = new THREE.Mesh(g.roll, m.spikes);
+    else {
+      const grp = new THREE.Group();
+      grp.add(new THREE.Mesh(g.puck, m.charge));
+      led = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff1a1a, emissiveIntensity: 0 });
+      const l = new THREE.Mesh(g.led, led);
+      l.position.y = 0.17;
+      grp.add(l);
+      obj = grp;
+    }
+    obj.userData.noBake = true;
+    this.scene.add(obj);
+    // the warning: a red ring for a charge, a red bar across the lane for spikes, an amber
+    // circle where smoke will land
+    const mmat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -10, polygonOffsetUnits: -10, side: THREE.DoubleSide });
+    let marker: THREE.Mesh;
+    if (d.kind === 'charge') {
+      marker = new THREE.Mesh(g.ring, mmat);
+      marker.scale.setScalar(POLICE.chargeRadius);
+    } else if (d.kind === 'spikes') {
+      marker = new THREE.Mesh(g.bar, mmat);
+      marker.scale.set(POLICE.spikeLength + 1, 1, 1.6);
+      marker.rotation.y = Math.atan2(-d.az, d.ax);
+    } else {
+      marker = new THREE.Mesh(g.ring, mmat);
+      marker.scale.setScalar(3);
+    }
+    marker.position.set(d.x, 0.05, d.z);
+    marker.renderOrder = 7;
+    mainOnly(marker);
+    this.scene.add(marker);
+    return { obj, led, marker, mmat, booms: false, emit: 0 };
+  }
+
+  /** Air One's drops this frame */
+  private updateDrops(p: Pursuit, time: number, dt: number): void {
+    this.booms.length = 0;
+    const seen = new Set<number>();
+    for (const d of p.air.drops) {
+      seen.add(d.id);
+      let v = this.dropVis.get(d.id);
+      if (!v) {
+        v = this.makeDrop(d);
+        this.dropVis.set(d.id, v);
+      }
+      const u = Math.max(0, Math.min(1, d.age / d.fall));
+      // falling: straight-ish line from the helicopter, accelerating, tumbling
+      if (!d.landed) {
+        v.obj.visible = d.age >= 0;
+        v.obj.position.set(lerp(d.sx, d.x, u), Math.max(0.12, d.sy * (1 - u * u)), lerp(d.sz, d.z, u));
+        v.obj.rotation.set(time * 7 + d.id, time * 3, time * 5);
+      } else {
+        v.obj.visible = d.kind !== 'spikes' && !d.boomed;
+        v.obj.position.set(d.x, d.kind === 'smoke' ? 0.11 : 0, d.z);
+        v.obj.rotation.set(0, d.id, 0);
+      }
+      // warning marker: blinking, faster as a charge is about to go
+      const armed = d.kind === 'charge' && d.landed ? (d.age - d.fall) / POLICE.chargeArm : 0;
+      const rate = d.kind === 'charge' ? 3 + armed * 9 : 2.5;
+      const on = (time * rate) % 1 < 0.55;
+      const showMarker = d.age >= -0.05 && (d.kind === 'charge' ? !d.boomed : !d.landed || d.age < d.fall + 0.4);
+      v.marker.visible = showMarker;
+      if (showMarker) {
+        const k = on ? 1 : 0.35;
+        if (d.kind === 'smoke') v.mmat.color.setRGB(0.9 * k, 0.55 * k, 0.1 * k);
+        else v.mmat.color.setRGB(1.0 * k, 0.08 * k, 0.06 * k);
+      }
+      if (v.led) v.led.emissiveIntensity = on ? 18 : 2;
+      // smoke pours out for ~6 s, thinning
+      if (d.kind === 'smoke' && d.landed) {
+        const t = d.age - d.fall;
+        if (t < 6.5 && dt > 0) {
+          const k = 1 - t / 7;
+          v.emit += dt * 60 * k;
+          while (v.emit >= 1) {
+            v.emit -= 1;
+            this.particles.smokeScreen(d.x, d.z, d.red, k, 0.6 + t * 0.25);
+          }
+        }
+      }
+      // the bang
+      if (d.kind === 'charge' && d.boomed && !v.booms) {
+        v.booms = true;
+        this.particles.blast(d.x, d.z);
+        for (let i = 0; i < 8; i++) this.particles.dust(d.x + (Math.random() - 0.5) * 3, 0, d.z + (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16, 1);
+        this.booms.push({ x: d.x, z: d.z });
+        this.boomT = 0.35;
+        this.flash.position.set(d.x, 1.2, d.z);
+        if (this.boomLight) this.boomLight.position.set(d.x, 2.5, d.z);
+      }
+    }
+    for (const [id, v] of this.dropVis) {
+      if (!seen.has(id)) {
+        this.dropDrop(v);
+        this.dropVis.delete(id);
+      }
+    }
+    // the flash and its light fade fast
+    this.boomT = Math.max(0, this.boomT - dt);
+    const f = this.boomT / 0.35;
+    this.flash.visible = f > 0;
+    this.flashMat.opacity = f;
+    this.flash.scale.setScalar(6 + (1 - f) * 10);
+    if (this.boomLight) this.boomLight.intensity = 900 * f * f;
+  }
+
+  /** red light from the burning red canisters, for the smoke and rain */
+  private flareGlows(p: Pursuit, cam: THREE.Vector3, out: { x: number; y: number; z: number; r: number; g: number; b: number; d: number }[]): void {
+    for (const d of p.air.drops) {
+      if (d.kind !== 'smoke' || !d.red || !d.landed || d.age - d.fall > POLICE.smokeLife - 1 || out.length >= 8) continue;
+      const dd = Math.hypot(d.x - cam.x, d.z - cam.z);
+      if (dd > 140) continue;
+      const flick = 0.8 + 0.2 * Math.sin(this.flickT * 23 + d.id) * Math.sin(this.flickT * 7.3);
+      out.push({ x: d.x, y: 0.6, z: d.z, r: 3.2 * flick, g: 0.35 * flick, b: 0.25 * flick, d: dd });
+    }
+  }
+  private flickT = 0;
 
   private makeObstacle(o: Obstacle): { mesh: THREE.Object3D; car?: PoliceCar } {
     const m = this.mats;
@@ -441,8 +620,13 @@ export class PursuitView {
       }
     });
     if (!p) {
-      this.heli.update(0, 0, 0, 0, 0, 0, time, dt, 0, false, false);
+      this.heli.update(0, 0, 0, 0, 0, 0, 0, 0, time, dt, 0, false, false);
       for (const l of this.lights) l.intensity = 0;
+      vegUniforms.uWash.value.w = 0;
+      for (const [, v] of this.dropVis) this.dropDrop(v);
+      this.dropVis.clear();
+      this.flash.visible = false;
+      if (this.boomLight) this.boomLight.intensity = 0;
       return;
     }
     // units: pattern from the chase (Heat is shared with guests, so everyone sees the same)
@@ -503,15 +687,27 @@ export class PursuitView {
     }
     // helicopter
     const h = p.heli;
-    this.heli.update(h.x, h.y, h.z, h.yaw, h.lx, h.lz, time, dt, Math.max(this.night, 0.15), h.active, this.heliSpotAdded);
     this.heli.haze = this.wet;
-    // rotor down-wash: dust on a dry track, a ring of spray on a wet one
-    if (h.active && h.y < 45 && Math.random() < dt * (this.wet > 0.3 ? 60 : 30)) {
-      const a = Math.random() * Math.PI * 2;
-      const r = 4 + Math.random() * 6;
-      if (this.wet > 0.3) this.particles.spray(h.x + Math.cos(a) * r, 0, h.z + Math.sin(a) * r, Math.cos(a) * 12, Math.sin(a) * 12, 0.7, this.night > 0.5);
-      else this.particles.dust(h.x + Math.cos(a) * r, 0, h.z + Math.sin(a) * r, Math.cos(a) * 9, Math.sin(a) * 9, 0.6);
+    this.heli.gust = this.wet;
+    this.heli.update(h.x, h.y, h.z, h.yaw, h.vx, h.vz, h.lx, h.lz, time, dt, Math.max(this.night, 0.15), h.active, this.heliSpotAdded, h.low);
+    // rotor wash: strongest when it's low. Dust off a dry track, a ring of spray off a wet one,
+    // smoke and spray pushed away, grass and trees bending
+    const washK = h.active ? Math.max(0, Math.min(1, (42 - h.y) / 26)) : 0;
+    vegUniforms.uWash.value.set(h.x, h.z, 26, washK);
+    if (washK > 0 && dt > 0) {
+      this.particles.wash(h.x, h.z, 18, 40 * washK, dt);
+      const rate = dt * (this.wet > 0.3 ? 90 : 45) * washK;
+      const n = Math.min(14, Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0));
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = 3 + Math.random() * 7;
+        const sp = 10 + 8 * washK;
+        if (this.wet > 0.3) this.particles.spray(h.x + Math.cos(a) * r, 0, h.z + Math.sin(a) * r, Math.cos(a) * sp, Math.sin(a) * sp, 0.6 + 0.4 * washK, this.night > 0.5);
+        else this.particles.dust(h.x + Math.cos(a) * r, 0, h.z + Math.sin(a) * r, Math.cos(a) * sp * 0.8, Math.sin(a) * sp * 0.8, 0.4 + 0.5 * washK);
+      }
     }
+    this.flickT += dt;
+    this.updateDrops(p, time, dt);
     // the units nearest the camera share a few real flashing lights; all of them light the
     // rain and streak on the wet road
     const near: { v: PoliceCar; d: number }[] = [];
@@ -538,6 +734,7 @@ export class PursuitView {
     });
     const gl = this.glowList;
     gl.length = 0;
+    this.flareGlows(p, cam, gl);
     for (const n of near) {
       if (n.d > 120 * 120 || gl.length >= 6) break;
       const g = n.v.glow;
@@ -572,6 +769,13 @@ export class PursuitView {
     }
   }
 
+  /** 4E: show the helicopter for a shader warm-up compile (then hide it again) */
+  warm(on: boolean): void {
+    this.heli.root.visible = on;
+    this.heli.cone.visible = on;
+    this.flash.visible = on;
+  }
+
   /** roots of the police cars on the road (for motion blur) */
   unitRoots(): THREE.Object3D[] {
     return this.units.filter((v) => v.root.visible).map((v) => v.root);
@@ -593,7 +797,13 @@ export class PursuitView {
     if (p.zonesLive) for (const z of this.world.workZones) out.push({ x: z.pieces[Math.floor(z.pieces.length / 2)].x, z: z.pieces[Math.floor(z.pieces.length / 2)].z, kind: 'zone' });
     if (p.trapsLive) for (const t of this.world.speedTraps) out.push({ x: t.x, z: t.z, kind: 'trap' });
     if (p.joined) this.world.breakers.forEach((b, k) => p.breakerDown[k] < 0 && out.push({ x: b.x, z: b.z, kind: 'breaker' }));
-    if (p.heli.active) out.push({ x: p.heli.x, z: p.heli.z, kind: 'heli' });
+    if (p.heli.active) out.push({ x: p.heli.x, z: p.heli.z, kind: 'heli', lx: p.heli.lx, lz: p.heli.lz });
+    for (const d of p.air.drops) {
+      if (d.done || d.age < 0) continue;
+      if (d.kind === 'charge' && !d.boomed) out.push({ x: d.x, z: d.z, kind: 'charge', r: POLICE.chargeRadius });
+      else if (d.kind === 'smoke' && d.landed) out.push({ x: d.x, z: d.z, kind: 'smoke', r: p.air.smokeRadius(d) });
+      else if (d.kind === 'spikes' && !d.landed) out.push({ x: d.x, z: d.z, kind: 'spikes', ax: d.ax, az: d.az });
+    }
     return out;
   }
 }

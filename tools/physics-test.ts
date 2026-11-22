@@ -840,3 +840,146 @@ import { policeVehicle } from '../src/game/Pursuit';
   const order = firstOf(1) === 3 && firstOf(2) === 4;
   check('police vehicles', ok && order, `${res.join(', ')} (from a standing start); pickup from Heat ${firstOf(1)}, unmarked from Heat ${firstOf(2)}`);
 }
+
+// 17. Phase 4E: Air One (flight, sight, drops) and the gravel traps
+{
+  const S = world.samples;
+  const N = S.length;
+  const freshAir = () => {
+    const race = new Race(world, Race.soloSpecs(0, defaultLoadout()), 'medium', 0);
+    race.targetLaps = 3;
+    const p = race.enablePursuit(23);
+    race.countdown = 0;
+    p.joined = true;
+    p.heat = 3.4;
+    return { race, p };
+  };
+  const bot = (race: Race) => new AIDriver(world, race.line, 'clean', AI.levels.hard, 5);
+  // a) the helicopter launches at Heat 3, flies in and keeps up with a car lapping hard
+  {
+    const { race, p } = freshAir();
+    const b = bot(race);
+    let t = 0;
+    let onScene = -1;
+    let near = 0;
+    let samples = 0;
+    let maxTerrainClear = 1e9;
+    while (t < 70) {
+      const me = race.player;
+      b.update(me, race.cars.concat(p.traffic()), DT, 50, 0);
+      race.step({ ...me.input }, DT);
+      for (const c of race.cars) c.s.impacts.length = 0;
+      if (p.bustedT > 0) p.bustedT = 0.01; // keep driving
+      p.events.length = 0;
+      t += DT;
+      const h = p.heli;
+      if (onScene < 0 && h.mode === 'chase') onScene = t;
+      if (onScene > 0 && t > onScene + 5 && h.mode === 'chase' && Math.round(t / DT) % 12 === 0) {
+        samples++;
+        if (Math.hypot(h.x - me.s.x, h.z - me.s.z) < 110) near++;
+        maxTerrainClear = Math.min(maxTerrainClear, h.y - p.air.ceilingAt(h.x, h.z));
+      }
+    }
+    const keep = samples ? near / samples : 0;
+    check('Air One chase', onScene > 0 && onScene < 25 && keep > 0.8 && maxTerrainClear > -1.5, `on scene after ${onScene.toFixed(1)} s; within 110 m ${(keep * 100).toFixed(0)}% of the time; lowest clearance over the height map ${maxTerrainClear.toFixed(1)} m`);
+  }
+  // b) line of sight: a grandstand between the helicopter and the car hides it
+  {
+    const { p } = freshAir();
+    const st = world.stands[0];
+    // the car right behind the stand (away from the track side), the helicopter low over the track side
+    const fx = Math.sin(st.yaw);
+    const fz = Math.cos(st.yaw);
+    const carX = st.x - fx * (st.d / 2 + 2);
+    const carZ = st.z - fz * (st.d / 2 + 2);
+    const hx = st.x + fx * 40;
+    const hz = st.z + fz * 40;
+    const hidden = p.air.blocked(hx, 14, hz, carX, carZ);
+    const open = p.air.blocked(hx, 14, hz, st.x + fx * 25, st.z + fz * 25);
+    check('Air One line of sight', hidden && !open, `behind the grandstand: ${hidden ? 'hidden' : 'seen'}; in front of it: ${open ? 'hidden' : 'seen'}`);
+  }
+  // c) a helicopter spike strip: a flat until the end of the lap, a lower top speed
+  {
+    const { race, p } = freshAir();
+    const me = race.player;
+    const i0 = (world.startIndex + N - 700) % N;
+    me.physics.reset(S[i0].x, S[i0].z, Math.atan2(S[i0].tx, S[i0].tz));
+    me.trackIndex = i0;
+    p.heli.active = true;
+    p.heli.mode = 'chase';
+    p.heli.x = me.s.x;
+    p.heli.z = me.s.z;
+    p.heli.y = 30;
+    p.air.dropsOn = false;
+    const b = bot(race);
+    let dropped = false;
+    let flatAt = -1;
+    let clearedAt = -1;
+    let lapAt = -1;
+    let topFlat = 0;
+    let t = 0;
+    const laps0 = me.lap.laps;
+    while (t < 60 && clearedAt < 0) {
+      b.update(me, race.cars, DT, 50, 0);
+      race.step({ ...me.input }, DT);
+      for (const c of race.cars) c.s.impacts.length = 0;
+      if (p.bustedT > 0) p.bustedT = 0.01;
+      p.events.length = 0;
+      if (!dropped && me.s.speed > 25) {
+        p.air.dropAhead(me, 'spikes', 1, 45 + me.s.speed * 1.5);
+        dropped = true;
+      }
+      t += DT;
+      if (flatAt < 0 && me.s.puncture > 100) flatAt = t;
+      if (flatAt > 0 && me.s.puncture > 0) topFlat = Math.max(topFlat, me.s.speed);
+      // the lap line (the car started mid-lap, so the lap counter is moved on by hand)
+      if (lapAt < 0 && flatAt > 0 && t > flatAt + 2.5) {
+        me.lap.laps = laps0 + 1;
+        lapAt = t;
+      }
+      if (flatAt > 0 && me.s.puncture <= 0) clearedAt = t;
+    }
+    check('Air One spike strip', flatAt > 0 && clearedAt > 0 && lapAt > 0 && Math.abs(clearedAt - Math.max(lapAt, flatAt + POLICE.heliSpikeMin)) < 0.1, `flat at ${flatAt.toFixed(1)} s, lap line at ${lapAt.toFixed(1)} s, tyres fixed at ${clearedAt.toFixed(1)} s; fastest on the flat ${(topFlat * 3.6).toFixed(0)} km/h`);
+  }
+  // d) a shock charge: a car in the ring is shoved, spun and slowed; police are not
+  {
+    const { race, p } = freshAir();
+    const me = race.player;
+    const i0 = 900;
+    me.physics.reset(S[i0].x, S[i0].z, Math.atan2(S[i0].tx, S[i0].tz));
+    me.s.vx = S[i0].tx * 40;
+    me.s.vz = S[i0].tz * 40;
+    race.step({ ...me.input, throttle: 0 }, DT);
+    p.air.drops.push({ id: 7, kind: 'charge', x: me.s.x + S[i0].nx * 1.5, z: me.s.z + S[i0].nz * 1.5, sx: me.s.x, sy: 30, sz: me.s.z, age: 1 + POLICE.chargeArm - DT / 2, fall: 1, ax: 0, az: 1, red: false, landed: true, boomed: false, done: false });
+    const v0 = Math.hypot(me.s.vx, me.s.vz);
+    const h0 = Math.atan2(me.s.vx, me.s.vz);
+    race.step({ ...me.input, throttle: 0 }, DT);
+    const v1 = Math.hypot(me.s.vx, me.s.vz);
+    const h1 = Math.atan2(me.s.vx, me.s.vz);
+    const boom = p.events.find((e) => e.type === 'boom');
+    const turned = Math.abs(Math.atan2(Math.sin(h1 - h0), Math.cos(h1 - h0)));
+    check('Air One shock charge', !!boom && (boom as { mine: boolean }).mine && turned > 0.12 && Math.abs(me.s.yawRate) > 0.8 && v1 < v0, `kicked ${((turned * 180) / Math.PI).toFixed(0)}° off line, yaw rate ${me.s.yawRate.toFixed(1)} rad/s, ${(v0 * 3.6).toFixed(0)} → ${(v1 * 3.6).toFixed(0)} km/h`);
+  }
+  // e) gravel: grips less than grass, drags much more
+  {
+    const g = world.gravel[0];
+    const mid = (g.i0 + Math.floor(((g.i1 - g.i0 + N) % N) / 2)) % N;
+    const p = S[mid];
+    const off = (g.inner + g.outer) / 2 * g.side;
+    const gx = p.x + p.nx * off;
+    const gz = p.z + p.nz * off;
+    const surf = world.surfaceAt(gx, gz);
+    const coast = (x: number, z: number) => {
+      const c = new VehiclePhysics(world);
+      const yaw = Math.atan2(p.tx, p.tz);
+      c.reset(x, z, yaw);
+      c.s.vx = p.tx * 25;
+      c.s.vz = p.tz * 25;
+      for (let i = 0; i < 1.2 / DT; i++) c.step({ throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, analog: true, shiftUp: false, shiftDown: false }, DT);
+      return c.s.speed;
+    };
+    const vG = coast(gx, gz);
+    const vGrass = coast(-20, 500);
+    check('gravel trap', surf === 4 && vG < vGrass - 2, `surface ${surf}; 90 km/h coasting 1.2 s: gravel ${(vG * 3.6).toFixed(0)} km/h, grass ${(vGrass * 3.6).toFixed(0)} km/h`);
+  }
+}

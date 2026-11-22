@@ -1,7 +1,10 @@
 # Apex Pursuit
 
 Open-world arcade street racer, built in stages from the Phantom X1 concept sketch. **This is
-Phase 4C, the big visual upgrade:** GPU-painted road, kerb, grass, concrete and rock materials, real hills and mountain ranges around the circuit, three kinds of swaying trees, hillside forests, grass along the track edges, cooler aerial haze, a Natural (AgX) tone-mapping option, SMAA on Medium and a slight lens fringe. Before that, **Phase 4B.2:** rain that changes from showers to downpours, realistic lens drops, and a smoother frame rate (F3 timing breakdown, F4 benchmark, far fewer draw calls, dynamic resolution). Before that, **Phase 4B:** realistic police cars (patrol sedan, unmarked car, heavy pickup, light patterns, sirens, damage) and realistic rain (lit streaks, spray, no lens bubbles). Before that, **Phase 4A:** HUD layout fixes, rain on the lens redone, and a full camera set with a modelled cockpit (wheel, hands, live dash, mirrors, wipers). Before that, Phase 3B added the in-race HUD from the reference image: an analog rev dial with boost and nitrous
+Phase 4E, Air One:** a live police helicopter that chases you from Heat 3 with a real
+searchlight, rotor wash and sound, and drops smoke, spike strips and shock charges; plus gravel
+traps that drive like gravel and floodlights that light the track. Before that, **Phase 4D / 4D.1:**
+background detail round the circuit, venues, and built-in music. Before that, **Phase 4C, the big visual upgrade:** GPU-painted road, kerb, grass, concrete and rock materials, real hills and mountain ranges around the circuit, three kinds of swaying trees, hillside forests, grass along the track edges, cooler aerial haze, a Natural (AgX) tone-mapping option, SMAA on Medium and a slight lens fringe. Before that, **Phase 4B.2:** rain that changes from showers to downpours, realistic lens drops, and a smoother frame rate (F3 timing breakdown, F4 benchmark, far fewer draw calls, dynamic resolution). Before that, **Phase 4B:** realistic police cars (patrol sedan, unmarked car, heavy pickup, light patterns, sirens, damage) and realistic rain (lit streaks, spray, no lens bubbles). Before that, **Phase 4A:** HUD layout fixes, rain on the lens redone, and a full camera set with a modelled cockpit (wheel, hands, live dash, mirrors, wipers). Before that, Phase 3B added the in-race HUD from the reference image: an analog rev dial with boost and nitrous
 gauges, a tilted minimap that turns with the car, an event panel with a live leaderboard, gaps to
 the cars around you, start lights with a random hold and jump starts, and named events. Earlier
 phases added the menus and garage (3A), handling, weather and police (3C) and the graphics (3D). Racing seven AI rivals, online play with up to 4 friends, keyboard and
@@ -114,6 +117,71 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
   hosts block Gamepad access inside frames.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
+
+## New in Phase 4E: Air One, a live police helicopter
+
+**When it comes.** Settings → **Air support**: *From Heat 3* (new default), *From Heat 5* or
+*Off*. It flies in from the horizon ("Air One on scene"), and a 2-second shot from the
+helicopter shows it arriving (Settings → **Air One arrival shot** turns that off). After 80–105
+s it runs low on fuel and leaves to refuel; it comes back later at a higher Heat. An evade sends
+it away too.
+
+**How it flies the chase.** It trails beside you, sits ahead of you facing you on the
+straights, swings wide round the outside of corners, and now and then drops for a low pass
+head-on over the cars. It noses down to speed up, banks into turns, flares to slow and wobbles
+in the wind and rain. A height map keeps it clear of the stands, floodlight towers and trees.
+
+**The new helicopter.** An original design (invented "AIR ONE · 07 / PROVING GROUNDS PATROL"
+livery and crest, no real department or registration): black over white with a red pinstripe,
+framed windows, sliding-door outline, engine fairing with twin exhausts, antennas, camera ball,
+step bars on the skids, red/blue flashers, strobe, beacon, navigation and landing lights, and
+rotors that blur into a lit disc without flicker.
+
+**The searchlight** is a real moving light (Medium and up): it lights the road, the cars, the
+barriers and the trees where it points, with a soft-edged beam you can see in rain, fog and at
+night. On Low a soft pool on the ground stands in for the light.
+
+**Hide from it.** It sees you within ~140 m (less in heavy rain) unless something is between
+the helicopter and your car: a grandstand, the garages, a building, trees. The pursuit box
+shows **Air One · Spotted** or **Hidden from it**, and a tag floats over the helicopter. While it
+sees you, the Evade meter can't fill.
+
+**What it drops** (Settings → **Air One drops** can turn them off and keep just the light).
+Every drop shows a warning on the road (and the minimap) while it falls:
+- **Smoke canisters** (from Heat 3): a grey or red cloud that pours over the road for ~10 s and
+  hides the corner. Driving through rocks the camera and leaves smoke trailing off your car.
+- **Spike strips** (from Heat 4): a red bar marks your lane. Hit it and you have a flat until the
+  end of the lap (at least 6 s): less grip, less power, a lower top speed and sparks off the rim.
+- **Shock charges** (from Heat 4, in twos and threes at Heat 5): a blinking red ring, then a bang,
+  a flash, sparks and dust; a car inside the ring is shoved sideways, spun and slowed. The pilot
+  never drops near police cars.
+AI rivals ease off for smoke and steer round the markers.
+
+**Rotor wash.** When it's low, rain blows outwards under it, spray and dust kick up off the road,
+grass flattens and trees bend away, and smoke is pushed aside.
+
+**Sound.** A deep blade thump you hear before you see it, a turbine whine up close, Doppler as
+it passes, panned left and right; radio lines from the pilot.
+
+**Online.** The host flies it (the host's Air support settings apply) and decides the drops;
+everyone sees the same helicopter, smoke, spikes and bangs in the same places, and each player's
+own car takes its own hits.
+
+**Photo mode:** **V** (pad: Square) jumps to the **Air One view**, looking down from the helicopter.
+
+**Proving Grounds fixes from 4D:**
+- **Gravel traps drive like gravel:** less grip than grass and much more drag, the car twitches
+  and bounces, stones spray and rattle off the floor, a dust trail, more rumble.
+- **Floodlights light the track:** a broad pool of cool light under each tower at dusk and night.
+- **Pause menu:** Back / Esc in the race pause menu went to the home screen after Settings had
+  been opened from home. It now goes back to the race.
+
+Pictures: `docs/4e/` (dusk chase, overhead, close-up, night rain searchlight, drop markers, a
+floodlight pool).
+
+**Not done in 4E:** the searchlight casts no shadows (a moving shadowed light costs too much).
+The floodlight pools are flat pools of light on the ground, not real lights, so cars aren't lit
+by them.
 
 ## New in Phase 4D: background detail around the circuit, and venues
 
@@ -839,7 +907,10 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
    - **4D. Background detail around the circuit (grandstands with a reacting crowd, lit
      garages, marshals, catch fences, tyre walls, gravel, flags, floodlights, car park, power
      lines, a town and a highway at night, birds) and the venue system (done)**
-   - **4D.1. Built-in music instead of Spotify: music packs, Add music, a Now playing line on
-     home, and the music page with ticks, play-now, all on/off and its own volume (this build)**
+   - 4D.1. Built-in music instead of Spotify: music packs, Add music, a Now playing line on
+     home, and the music page with ticks, play-now, all on/off and its own volume (done)
+   - **4E. Air One: a live police helicopter (searchlight, rotor wash, sound, smoke, spike
+     strips, shock charges), gravel traps that drive like gravel, floodlights that light the
+     track (this build)**
    - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

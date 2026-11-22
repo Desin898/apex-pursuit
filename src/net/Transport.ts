@@ -83,6 +83,25 @@ export interface TransportOptions {
 }
 
 const STALE_MS = 3500;
+
+/**
+ * Everyone we've heard from recently. 4E: if this page itself stalled (a long frame: shaders
+ * compiling, the tab in the background), the others only look stale because we haven't read
+ * their messages yet, so they're kept a little longer; dropping them would make us think we're
+ * alone and take over as host.
+ */
+function freshPeers(others: Map<string, { data: Record<string, unknown>; t: number }>, poll: { last: number; grace: number }): NetPeer[] {
+  const now = performance.now();
+  const gap = poll.last ? now - poll.last : 0;
+  poll.last = now;
+  poll.grace = gap > 700 ? Math.max(poll.grace, gap + 2500) : Math.max(0, poll.grace - gap);
+  const out: NetPeer[] = [];
+  for (const [id, v] of others) {
+    if (now - v.t > STALE_MS + poll.grace) others.delete(id);
+    else out.push({ id, isMe: false, data: v.data });
+  }
+  return out;
+}
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 // ── claude.ai page room ──────────────────────────────────────────────────────
@@ -229,14 +248,9 @@ class RelayTransport implements Transport {
   publish(state: Record<string, unknown>): void {
     if (this.ready()) this.ws!.send(JSON.stringify({ t: 's', d: state }));
   }
+  private poll = { last: 0, grace: 0 };
   peers(): NetPeer[] {
-    const now = performance.now();
-    const out: NetPeer[] = [];
-    for (const [id, v] of this.others) {
-      if (now - v.t > STALE_MS) this.others.delete(id);
-      else out.push({ id, isMe: false, data: v.data });
-    }
-    return out;
+    return freshPeers(this.others, this.poll);
   }
   close(): void {
     this.closed = true;
@@ -273,14 +287,9 @@ class TabsTransport implements Transport {
   publish(state: Record<string, unknown>): void {
     this.ch.postMessage({ id: this.id, d: state });
   }
+  private poll = { last: 0, grace: 0 };
   peers(): NetPeer[] {
-    const now = performance.now();
-    const out: NetPeer[] = [];
-    for (const [id, v] of this.others) {
-      if (now - v.t > STALE_MS) this.others.delete(id);
-      else out.push({ id, isMe: false, data: v.data });
-    }
-    return out;
+    return freshPeers(this.others, this.poll);
   }
   close(): void {
     this.ch.postMessage({ id: this.id, bye: true });

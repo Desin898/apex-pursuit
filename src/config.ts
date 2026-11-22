@@ -49,6 +49,10 @@ export const VEHICLE = {
   gripKerb: 1.42,
   gripGrass: 1.08, // raised in 3C so a car on the grass can still turn and drive back on
   gripRunoff: 1.32, // the strip of hard run-off beside the circuit
+  gripGravel: 0.92, // 4E: gravel traps: less grip than grass...
+  gravelDragBase: 3.4, // ...and much more drag (m/s²)...
+  gravelDragSpeed: 0.05, // ...plus this × speed
+  gravelWobble: 0.9, // how much the car twitches and bounces over the stones
   runoffWidth: 4.5,
   tyreB: 14, // Pacejka-style stiffness: peak grip at ~7.7° slip
   tyreC: 1.45, // shape: how much grip is kept once sliding (lower = grippier slides)
@@ -428,9 +432,26 @@ export const POLICE = {
   breakerRadius: 30, // police this close behind a collapsing pursuit breaker are wrecked
   breakerBounty: 1500,
   breakerReset: 2, // laps before a breaker stands again
-  heliSpeed: 58,
-  heliHeight: 34,
-  heliSight: 95, // the helicopter keeps you in its searchlight within this horizontal distance
+  // ── Air One (4E) ──
+  heliSpeed: 66, // m/s top speed (it cuts corners, so it keeps up)
+  heliAccel: 11, // m/s² it can change its velocity by
+  heliClimb: 8, // m/s up or down
+  heliHeight: 34, // usual altitude
+  heliLeadHeight: 27, // lower when it sits ahead of you, facing you
+  heliLow: 13, // the low pass over the cars
+  heliSight: 140, // it keeps you in its light within this horizontal distance (less in heavy rain)
+  heliFuel: [80, 105], // seconds on scene before it goes to refuel
+  heliBack: 45, // seconds away refuelling before it can come back
+  heliSpikeMin: 6, // a helicopter spike puncture lasts until the end of the lap, at least this long
+  punctureDrag: 1.1, // m/s² of extra drag with a flat (plus 0.012 × speed): a lower top speed
+  dropEvery: [0, 0, 0, 12.5, 9.5, 7], // seconds between drops by Heat level
+  dropFall: [1.2, 2.1], // seconds a drop takes to land (with the warning marker showing)
+  chargeArm: 1.15, // seconds a shock charge blinks on the road before it goes off
+  chargeRadius: 4.8, // m: cars inside the ring get shoved
+  chargeKick: 9, // m/s sideways shove at the centre
+  chargeSlow: 0.74, // speed kept after a hit
+  smokeLife: 11, // s a smoke canister's cloud hangs over the road
+  smokeRadius: 10, // m the cloud grows to
   /** obstacle impact speed above which a breakable piece is smashed rather than nudged */
   breakSpeed: 3.5,
 };

@@ -84,6 +84,14 @@ async def main():
         check(bb['ph'] == 'race' and bb['cd'] <= 0.5, 'the guests are racing too')
         check(bb['mirror'], "guests see the host's police")
 
+        # 4E: Air One: the host flies it and drops a charge; a guest sees both in the same place
+        await A.evaluate("""(()=>{const p=__apex.race.pursuit,me=__apex.race.player,h=p.air.heli;p.joined=true;h.active=true;h.mode='chase';h.x=me.s.x+20;h.z=me.s.z;h.y=30;p.air.dropAhead(me,'charge',1,160);return 1})()""")
+        await A.wait_for_timeout(1500)
+        ha = json.loads(await A.evaluate("JSON.stringify({h:__apex.race.pursuit.heli.active,d:__apex.race.pursuit.air.drops.map(d=>[d.id,d.x,d.z,d.kind])})"))
+        hb = json.loads(await B.evaluate("JSON.stringify({h:__apex.race.pursuit.heli.active,d:__apex.race.pursuit.air.drops.map(d=>[d.id,d.x,d.z,d.kind])})"))
+        same = bool(ha['d']) and any(abs(x[1]-y[1]) < 0.2 and abs(x[2]-y[2]) < 0.2 and x[3] == y[3] for x in ha['d'] for y in hb['d'])
+        check(hb['h'] and same, "a guest sees Air One and its drop where the host put it")
+
         # 150 ms extra delay on Ben's outgoing states, like a friend in another city
         await B.evaluate("""(()=>{const ws=__apex.online.transport.ws;const send=ws.send.bind(ws);ws.send=(m)=>setTimeout(()=>{try{send(m)}catch(e){}},150);})()""")
         AUTO = """(()=>{const g=__apex; const orig=g.input.poll.bind(g.input); g.input.poll=(dt)=>{const a=orig(dt); const r=g.race, me=r.player, S=g.world.samples, N=S.length; const j=(me.trackIndex+Math.round((6+me.s.speed*0.4)/2))%N; const t=S[j]; let e=Math.atan2(t.x-me.s.x,t.z-me.s.z)-me.s.yaw; while(e>Math.PI)e-=2*Math.PI; while(e<-Math.PI)e+=2*Math.PI; a.steer=Math.max(-1,Math.min(1,-e*3)); a.analogSteer=true; a.throttle=me.s.speed<26?1:0; return a;}})()"""

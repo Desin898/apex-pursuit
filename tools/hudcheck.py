@@ -17,7 +17,7 @@ START = """new Promise(r=>{__apex.screens.show('event');setTimeout(()=>{document
 const t=setInterval(()=>{const g=__apex;if(g.state==='playing'&&!g.race.held){clearInterval(t);r('racing')}},100)},800)})"""
 
 # Freeze the race and fill every slot the HUD has.
-FILL = """(()=>{const g=__apex;g.timeScale=0;const p=g.race.pursuit;if(p){p.joined=true;p.heat=3.4;}
+FILL = """(()=>{const g=__apex;g.timeScale=0;const p=g.race.pursuit;if(p){p.joined=true;p.heat=3.4;const h=p.air.heli,me=g.race.player.s;h.active=true;h.mode='chase';h.x=me.x+Math.sin(me.yaw)*60;h.z=me.z+Math.cos(me.yaw)*60;h.y=30;}
 g.hud.radio('All units, roadblock is set ahead of the suspect in the run to the line.');
 g.hud.toast('Chase near camera');
 g.hud.pop('JUMP START','Held for 1.0 s',false,600);

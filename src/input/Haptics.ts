@@ -100,8 +100,8 @@ export class Haptics {
       strong += 0.18 * rear * smoothstep(8, 30, car.speed);
       // Surface roughness
       const moving = smoothstep(1, 14, car.speed);
-      weak += H.roughGrass * car.onGrass * moving;
-      strong += H.roughGrass * 0.5 * car.onGrass * moving;
+      weak += H.roughGrass * (car.onGrass + car.onGravel * 1.6) * moving;
+      strong += H.roughGrass * 0.5 * (car.onGrass + car.onGravel * 1.4) * moving;
       if (car.onKerb > 0) {
         // kerbs are serrated: pulse at a rate set by road speed
         const saw = Math.sin(performance.now() * 0.001 * Math.min(60, 8 + car.speed) * Math.PI * 2) > 0 ? 1 : 0.2;

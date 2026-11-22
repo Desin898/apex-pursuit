@@ -349,6 +349,7 @@ export class Race {
       if (c.driver) {
         const t0 = prof.now();
         c.driver.update(c, traffic, dt, sinceGo, pd - c.lap.distance);
+        if (this.pursuit && !held) this.pursuit.aiReact(c); // 4E: smoke, drop markers, heli spikes
         prof.add('ai', t0);
         if (c.driver.wantRespawn && !held) {
           c.driver.wantRespawn = false;
