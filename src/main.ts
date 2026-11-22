@@ -1351,6 +1351,8 @@ class Game {
     this.haptics.stop(this.input.pad);
     this.menu.setDevice(this.input.device);
     this.hud.setVisible(false);
+    // fix (4D.2): Settings opened from home set this to 'home'; a race pause must always go back to the race
+    this.menuFrom = 'pause';
     this.menu.open(this.mainPage());
   }
 
@@ -1370,6 +1372,7 @@ class Game {
     this.post.photoDof = null;
     this.renderer.toneMappingExposure = this.env.p.exposure * this.env.exposureK;
     this.state = 'paused';
+    this.menuFrom = 'pause';
     this.menu.open(this.mainPage());
   }
 

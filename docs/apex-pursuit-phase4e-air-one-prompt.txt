@@ -1,0 +1,77 @@
+APEX PURSUIT — Phase 4E: "Air One", a live police helicopter (+ Proving Grounds fixes)
+
+Reference images (attached): a helicopter low over a dusk pursuit with its searchlight on
+the road; a patrol helicopter close up (shape, skids, nose camera ball); a helicopter
+over a wet city street at night, lit by its own spotlight; a helicopter tilted hard over
+a chase with police cars behind. Use them for mood, lighting and motion only. Every
+marking stays invented: no real police department, registration, car maker or plate.
+
+Today Air One only shows up at Heat 5, which a 3-lap race rarely reaches, and it mostly
+hovers. This phase makes it a real part of the chase you can see, hear and fight.
+
+1. Looks and feel (the helicopter itself)
+- A more detailed original model: nose camera / searchlight ball, sliding-door outline,
+  window frames, antennas, step bars on the skids, exhaust, tail fin decal, an invented
+  livery ("AIR ONE", unit number, made-up city crest). Close up it should hold up like
+  the close-up reference.
+- It flies like a helicopter: nose dips to speed up, it banks into turns, flares to slow,
+  the tail sways; small wobble in wind and rain.
+- Rotor blades that turn, blur into a disc at speed, and catch the light (no flicker).
+- Lights: red/blue light bar, white strobe, red/green navigation lights, landing light.
+- A real searchlight: a beam you can see in rain and fog that actually lights the road,
+  the cars, the barriers and the trees where it points (one moving light, with a soft edge
+  and a slight shadow if it's cheap enough). It tracks you, sweeps when it loses you.
+- Rotor wash under it: rain blown sideways, spray and dust kicked off the road, grass and
+  trees bending, smoke pushed away.
+- Sound: a deep rotor thump you feel before you see it, louder and lower as it passes
+  overhead (Doppler), turbine whine, radio chatter lines.
+
+2. When it comes and how it chases
+- Joins at Heat 3 (Settings: Air support = From Heat 3 / From Heat 5 / Off).
+- Flies in from the horizon with a radio call ("Air One on scene") and stays with you:
+  ahead of you on straights, swinging wide in corners, sometimes low and close over the
+  road like the reference shots, never clipping the stands, towers or wires.
+- It tells the ground units where you are while it can see you. Breaking its line of
+  sight (under the grandstand roof, through the garages, under trees, in heavy rain/fog)
+  starts the Evade timer like losing a patrol car does.
+- It has limited fuel: after a while it leaves ("Air One returning to refuel") and comes
+  back later at high Heat.
+
+3. What it drops (arcade, always warned, always dodgeable)
+- Smoke canisters: they bounce on the road and pour out thick grey/red smoke that hangs
+  across the track for a few seconds and hides the corner ahead. Driving through rocks the
+  camera a little and leaves a trail of smoke behind you. No damage.
+- Spike strips: dropped across your lane a few seconds ahead; a red marker on the road and
+  the minimap shows where. Hit them = a puncture: less grip and top speed until the end of
+  the lap (or a pit stop later), sparks from the rim.
+- Shock charges (mini bombs): small charges land with a blinking red ring on the road; one
+  second later a bang, a flash, dust and sparks; a car inside the ring gets shoved and spun,
+  loses speed, camera shake and controller rumble. They never hit police cars by design
+  (the pilot avoids its own units) and never land without the warning ring.
+- How often and how many grows with Heat; Settings can turn the drops off and keep only the
+  searchlight helicopter.
+
+4. Game side
+- HUD: helicopter icon on the minimap with its light cone, an "AIR ONE" tag when it's
+  chasing you, the warning ring/markers, and a "Spotted / Hidden from Air One" note.
+- New camera: Air One cam (looking down from the helicopter) for photo mode and as a short
+  cut-in when it arrives.
+- Online: the host flies the helicopter and decides the drops; everyone sees the same
+  smoke, spikes and bangs at the same places.
+- AI rivals react to smoke and markers (slow down, swerve).
+
+5. Proving Grounds fixes left from 4D
+- Gravel traps drive like gravel: lower grip, strong drag, the car wobbles, stones spray
+  and rattle, dust trail, gravel sound; AI avoids them.
+- Floodlights really light the track at dusk and night: pools of light on the road and kerbs
+  under each tower, done in the road shader so it stays fast.
+- Fixed already: Back / Esc in the race pause menu sometimes jumped to the home screen.
+
+6. Checks and delivery
+- Physics test, HUD check and net test pass; a new test for spikes and the shock push.
+- Frame-rate cost: helicopter + searchlight + drops add no more than about 1-2 ms on High
+  (F4 benchmark before / after).
+- Pictures in docs/4e/ that match the reference moods (dusk chase, night rain searchlight,
+  low pass over the cars).
+- Commit and push; refresh play/ApexPursuit.html; publish the artifact (keeps your music);
+  source zip; README "New in Phase 4E"; report what's done and what isn't.
