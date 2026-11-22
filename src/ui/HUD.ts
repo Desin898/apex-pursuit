@@ -17,7 +17,7 @@ const $ = (id: string) => document.getElementById(id)!;
 export interface MapIcon {
   x: number;
   z: number;
-  kind: 'police' | 'roadblock' | 'spikes' | 'heli' | 'zone' | 'trap' | 'breaker' | 'charge' | 'smoke';
+  kind: 'police' | 'roadblock' | 'spikes' | 'heli' | 'zone' | 'trap' | 'breaker' | 'charge' | 'smoke' | 'gap' | 'search' | 'hide';
   /** for line-shaped marks: direction across the track */
   ax?: number;
   az?: number;
@@ -256,7 +256,7 @@ export class HUD {
   // ── Pursuit panel ──
   private heatBox = $('hud-heat');
   private meters = $('hud-meters');
-  setPursuit(p: { on: boolean; joined: boolean; heat: number; status: string; cool: boolean; bust: number; evade: number; air?: '' | 'spotted' | 'hidden' | 'inbound' }): void {
+  setPursuit(p: { on: boolean; joined: boolean; heat: number; status: string; cool: boolean; bust: number; evade: number; air?: '' | 'spotted' | 'hidden' | 'inbound'; bounty?: number }): void {
     if (this.cache.pon !== String(p.on)) {
       this.cache.pon = String(p.on);
       this.heatBox.hidden = !p.on;
@@ -279,6 +279,14 @@ export class HUD {
       }
     }
     this.heatBox.classList.toggle('cool', p.cool);
+    // 4F: the bounty built up in this chase
+    const b = Math.round((p.bounty ?? 0) / 10) * 10;
+    if (this.cache.bounty !== String(b)) {
+      this.cache.bounty = String(b);
+      const el = $('heat-bounty');
+      el.hidden = b <= 0;
+      el.querySelector('b')!.textContent = b.toLocaleString('en-US');
+    }
     // 4E: is Air One watching you?
     const air = p.air ?? '';
     if (this.cache.air !== air) {

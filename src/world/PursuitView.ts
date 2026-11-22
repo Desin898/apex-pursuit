@@ -88,6 +88,11 @@ export class PursuitView {
   private boomT = 0;
   private flash: THREE.Sprite;
   private flashMat: THREE.SpriteMaterial;
+  // 4F: cars in the searchlight throw shadows away from the helicopter (soft dark decals)
+  private shadows: THREE.InstancedMesh;
+  private shadowMat: THREE.MeshBasicMaterial;
+  /** the race cars (set by the game): position and heading */
+  carsForShadow: () => { x: number; z: number; yaw: number }[] = () => [];
   /** last frame's bangs, for the game to shake / sound (x, z) */
   readonly booms: { x: number; z: number }[] = [];
 
@@ -105,6 +110,33 @@ export class PursuitView {
     fg.fillStyle = gr;
     fg.fillRect(0, 0, 64, 64);
     this.flashMat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(fc), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 });
+    // searchlight shadows: a soft dark shape stretched away from the lamp
+    {
+      const sc = document.createElement('canvas');
+      sc.width = 64;
+      sc.height = 128;
+      const sg = sc.getContext('2d')!;
+      const grd = sg.createLinearGradient(0, 0, 0, 128);
+      grd.addColorStop(0, 'rgba(0,0,0,1)');
+      grd.addColorStop(0.6, 'rgba(0,0,0,0.85)');
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      sg.fillStyle = grd;
+      sg.filter = 'blur(5px)';
+      sg.beginPath();
+      sg.roundRect(10, 6, 44, 116, 18);
+      sg.fill();
+      this.shadowMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sc), transparent: true, depthWrite: false, color: 0x000000, opacity: 0.8, polygonOffset: true, polygonOffsetFactor: -9, polygonOffsetUnits: -9 });
+      const g = new THREE.PlaneGeometry(1, 1);
+      g.rotateX(-Math.PI / 2);
+      g.translate(0, 0, 0.5); // starts at the car, stretches out along +z
+      this.shadows = new THREE.InstancedMesh(g, this.shadowMat, 16);
+      this.shadows.count = 0;
+      // after the beam's haze (9), so the shadow cuts the lit mist as well as the ground
+      this.shadows.renderOrder = 10;
+      this.shadows.frustumCulled = false;
+      mainOnly(this.shadows);
+      scene.add(this.shadows);
+    }
     this.flash = new THREE.Sprite(this.flashMat);
     this.flash.visible = false;
     this.flash.renderOrder = 11;
@@ -525,6 +557,47 @@ export class PursuitView {
     if (this.boomLight) this.boomLight.intensity = 900 * f * f;
   }
 
+  private sm = new THREE.Matrix4();
+  private sq = new THREE.Quaternion();
+  private sv = new THREE.Vector3();
+  private ss = new THREE.Vector3();
+  private yAxis = new THREE.Vector3(0, 1, 0);
+  /** cars inside the searchlight's pool throw a shadow away from the lamp */
+  private updateShadows(p: Pursuit): void {
+    const h = p.heli;
+    const beam = Math.max(this.night, this.wet * 0.5);
+    let n = 0;
+    if (h.active && this.heliSpotAdded && beam > 0.2) {
+      const lamp = this.heli.lampPos;
+      const ly = Math.max(4, lamp.y);
+      const reach = Math.max(4, Math.hypot(h.lx - lamp.x, ly, h.lz - lamp.z) * 0.14);
+      const list = this.carsForShadow();
+      for (const u of p.units) if (u.active) list.push({ x: u.car.s.x, z: u.car.s.z, yaw: u.car.s.yaw });
+      for (const c of list) {
+        if (n >= 16) break;
+        const inBeam = 1 - Math.max(0, Math.min(1, (Math.hypot(c.x - h.lx, c.z - h.lz) - reach * 0.6) / (reach * 0.6)));
+        if (inBeam <= 0.3) continue;
+        const dx = c.x - lamp.x;
+        const dz = c.z - lamp.z;
+        const hd = Math.hypot(dx, dz) || 1;
+        // a 1.2 m tall car, lit from ly above at hd away: the shadow reaches 1.2 * hd / ly behind it
+        const len = Math.min(16, 1.2 * (hd / ly) + 6);
+        // width: how much of the car's side faces the light
+        const across = Math.abs(Math.sin(Math.atan2(dx, dz) - c.yaw));
+        this.sq.setFromAxisAngle(this.yAxis, Math.atan2(dx, dz));
+        this.sv.set(c.x - (dx / hd) * 2.0, 0.05, c.z - (dz / hd) * 2.0);
+        this.ss.set(1.9 + across * 2.4, 1, len);
+        this.sm.compose(this.sv, this.sq, this.ss);
+        this.shadows.setMatrixAt(n, this.sm);
+        n++;
+        this.shadowMat.opacity = 0.92 * Math.min(1, beam);
+      }
+    }
+    this.shadows.count = n;
+    this.shadows.instanceMatrix.needsUpdate = true;
+    this.shadows.visible = n > 0;
+  }
+
   /** red light from the burning red canisters, for the smoke and rain */
   private flareGlows(p: Pursuit, cam: THREE.Vector3, out: { x: number; y: number; z: number; r: number; g: number; b: number; d: number }[]): void {
     for (const d of p.air.drops) {
@@ -708,6 +781,7 @@ export class PursuitView {
     }
     this.flickT += dt;
     this.updateDrops(p, time, dt);
+    this.updateShadows(p);
     // the units nearest the camera share a few real flashing lights; all of them light the
     // rain and streak on the wet road
     const near: { v: PoliceCar; d: number }[] = [];
@@ -797,6 +871,13 @@ export class PursuitView {
     if (p.zonesLive) for (const z of this.world.workZones) out.push({ x: z.pieces[Math.floor(z.pieces.length / 2)].x, z: z.pieces[Math.floor(z.pieces.length / 2)].z, kind: 'zone' });
     if (p.trapsLive) for (const t of this.world.speedTraps) out.push({ x: t.x, z: t.z, kind: 'trap' });
     if (p.joined) this.world.breakers.forEach((b, k) => p.breakerDown[k] < 0 && out.push({ x: b.x, z: b.z, kind: 'breaker' }));
+    // 4F: the roadblock's gap, the search circle and the hiding spots
+    const gap = rb ? p.roadblockGap() : null;
+    if (gap) out.push({ x: gap.x, z: gap.z, kind: 'gap' });
+    if (p.searching) {
+      out.push({ x: p.lastSeenX, z: p.lastSeenZ, kind: 'search', r: p.searchR });
+      for (const h of p.hideSpots) out.push({ x: h.x, z: h.z, kind: 'hide', r: h.r });
+    }
     if (p.heli.active) out.push({ x: p.heli.x, z: p.heli.z, kind: 'heli', lx: p.heli.lx, lz: p.heli.lz });
     for (const d of p.air.drops) {
       if (d.done || d.age < 0) continue;

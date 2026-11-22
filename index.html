@@ -323,6 +323,13 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
 #hud-heat .pips i.part { background: linear-gradient(90deg, var(--danger) var(--p), rgba(255,255,255,.12) var(--p)); }
 #hud-heat .status { font-size: var(--t-sm); color: var(--ink-2); }
 #hud-heat.cool .head b { color: var(--accent); }
+/* 4F: the bounty in the pursuit box, and on the results */
+#hud-heat .bounty { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--t-sm); }
+#hud-heat .bounty[hidden] { display: none; }
+#hud-heat .bounty .label { color: var(--ink-2); }
+#hud-heat .bounty b { font-weight: 700; color: #ffd166; font-variant-numeric: tabular-nums; }
+.stat-card.bounty b { color: #ffd166; }
+.stat-card.bounty small { display: block; margin-top: 4px; color: var(--ink-2); font-size: var(--t-xs); line-height: 1.35; }
 /* 4E: Air One status in the pursuit box, and the tag over the helicopter */
 #hud-heat .air { display: flex; align-items: center; gap: 7px; font-size: var(--t-sm); }
 #hud-heat .air[hidden] { display: none; }
@@ -577,6 +584,7 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
     <div class="head"><span class="label">Pursuit</span><b id="heat-label">Heat 1</b></div>
     <div class="pips" id="heat-pips"><i></i><i></i><i></i><i></i><i></i></div>
     <span class="status" id="heat-status">Police join on lap 2</span>
+    <span class="bounty" id="heat-bounty" hidden><span class="label">Bounty</span><b>0</b></span>
     <span class="air" id="heat-air" hidden><i></i><b>Air One</b><em>Spotted</em></span>
   </div>
   <div class="hud-box" id="hud-meters" hidden>

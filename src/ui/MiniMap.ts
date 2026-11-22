@@ -153,9 +153,43 @@ export class MiniMap {
         g.moveTo(px, py - 13);
         g.lineTo(px, py + 13);
         g.stroke();
+      } else if (ic.kind === 'search') {
+        // 4F: where they're looking for you: a pulsing circle round the last sighting
+        const [ex, ey] = P(ic.x + (ic.r ?? 70), ic.z);
+        const rr = Math.hypot(ex - px, ey - py);
+        g.beginPath();
+        g.arc(px, py, rr, 0, Math.PI * 2);
+        g.fillStyle = 'rgba(255,77,85,0.10)';
+        g.fill();
+        g.setLineDash([10, 8]);
+        g.lineWidth = 4;
+        g.strokeStyle = flash ? 'rgba(255,77,85,0.9)' : 'rgba(255,77,85,0.5)';
+        g.stroke();
+        g.setLineDash([]);
+      } else if (ic.kind === 'hide') {
+        // 4F: a hiding spot
+        const [ex, ey] = P(ic.x + (ic.r ?? 12), ic.z);
+        const rr = Math.max(10, Math.hypot(ex - px, ey - py));
+        g.beginPath();
+        g.arc(px, py, rr, 0, Math.PI * 2);
+        g.fillStyle = 'rgba(95,227,154,0.22)';
+        g.fill();
+        g.lineWidth = 3;
+        g.strokeStyle = '#5fe39a';
+        g.stroke();
+      } else if (ic.kind === 'gap') {
+        // 4F: the way through the roadblock
+        g.beginPath();
+        g.arc(px, py, 9, 0, Math.PI * 2);
+        g.fillStyle = '#5fe39a';
+        g.fill();
+        g.lineWidth = 3;
+        g.strokeStyle = '#0a0b0e';
+        g.stroke();
       } else if (ic.kind === 'charge' || ic.kind === 'smoke') {
         // 4E: Air One's drops: a blinking red ring (shock charge), a grey blot (smoke)
-        const rr = Math.max(9, (ic.r ?? 5) * 2.6);
+        const [ex, ey] = P(ic.x + (ic.r ?? 5), ic.z);
+        const rr = Math.max(9, Math.hypot(ex - px, ey - py));
         g.beginPath();
         g.arc(px, py, rr, 0, Math.PI * 2);
         if (ic.kind === 'smoke') {

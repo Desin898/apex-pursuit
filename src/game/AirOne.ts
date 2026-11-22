@@ -361,10 +361,10 @@ export class AirOne {
           bendSign += c;
         }
         // fallen behind: catch up first
-        if (dist > 95 && h.tactic !== 'pass') {
+        if (dist > 85 && h.tactic !== 'pass') {
           h.tactic = 'trail';
           this.tacticT = Math.max(this.tacticT, 2);
-          maxV = POLICE.heliSpeed * 1.2;
+          maxV = POLICE.heliSpeed * 1.35;
         }
         if (h.tactic !== 'pass' && this.tacticT <= 0) {
           this.tacticT = 5 + this.rand() * 4;
@@ -422,13 +422,25 @@ export class AirOne {
         if (this.dropsOn && level >= 3 && cooldown <= 0) this.director(dt, tg, level);
       }
     }
+    // far behind: aim where the car will be, which cuts straight across the infield
+    if (tg && h.mode === 'chase') {
+      const far = Math.hypot(tg.s.x - h.x, tg.s.z - h.z);
+      if (far > 60) {
+        const lead = Math.min(3, far / 40);
+        gx += tg.s.vx * lead;
+        gz += tg.s.vz * lead;
+      }
+    }
     // ── motion: chase the goal (plus the target's own velocity), acceleration-limited ──
     this.goalX = gx;
     this.goalZ = gz;
     const dx = gx - h.x;
     const dz = gz - h.z;
-    let wvx = dx * 1.05 + feedX;
-    let wvz = dz * 1.05 + feedZ;
+    // closing speed it can still brake from in time (no overshooting a car that has stopped)
+    const dg = Math.hypot(dx, dz);
+    const close = Math.min(dg * 1.05, Math.sqrt(2 * POLICE.heliAccel * 0.8 * dg), maxV);
+    let wvx = (dg > 0.01 ? (dx / dg) * close : 0) + feedX;
+    let wvz = (dg > 0.01 ? (dz / dg) * close : 0) + feedZ;
     const wl = Math.hypot(wvx, wvz);
     if (wl > maxV) {
       wvx *= maxV / wl;

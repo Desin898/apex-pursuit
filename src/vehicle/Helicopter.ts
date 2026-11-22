@@ -601,7 +601,9 @@ export class Helicopter {
     this.spot.position.copy(lamp);
     this.spot.target.position.set(lx, 0, lz);
     this.spot.target.updateMatrixWorld();
-    this.spot.intensity = spotOn ? 5200 * lit : 0;
+    // 4F: when Air One drops low the beam is close, so it's held to its 30 m brightness
+    // instead of burning the car under it white
+    this.spot.intensity = spotOn ? 5200 * lit * Math.min(1, Math.pow(len / 30, 1.6)) : 0;
     // without a real light, a soft pool on the ground shows where the beam lands
     this.pool.visible = !spotOn && show > 0.05;
     if (this.pool.visible) {

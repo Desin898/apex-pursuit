@@ -50,7 +50,13 @@ export interface PoliceUnit {
   damage: number;
   /** seconds since the last horn blast (a blast warns before a ram) */
   hornT: number;
+  /** 4F: its job in the squad round the target */
+  role: SquadRole;
 }
+
+/** 4F: lead = out in front slowing the target (rolling block); left / right = boxing it in from
+ *  the sides; rear = ramming from behind; chase = on its own (catching up, or Heat 1) */
+export type SquadRole = 'chase' | 'lead' | 'left' | 'right' | 'rear';
 
 export type ObstacleKind = 'cone' | 'water' | 'saw' | 'jersey' | 'blockCar' | 'spikes';
 export interface Obstacle {
@@ -82,7 +88,8 @@ export type PursuitEvent =
   | { type: 'heat'; level: number }
   | { type: 'trap'; speed: number; mine: boolean }
   | { type: 'zones' }
-  | { type: 'roadblock' }
+  | { type: 'roadblock'; gap?: 'left' | 'centre' | 'right' }
+  | { type: 'bounty'; amount: number; why: string }
   | { type: 'spikes' }
   | { type: 'heli' }
   | { type: 'heliLeave' }
@@ -93,7 +100,7 @@ export type PursuitEvent =
   | { type: 'spiked'; mine: boolean }
   | { type: 'smash'; kind: ObstacleKind; mine: boolean }
   | { type: 'policeHit'; strength: number }
-  | { type: 'busted'; fine: number }
+  | { type: 'busted'; fine: number; lost?: number }
   | { type: 'freed' }
   | { type: 'restart' }
   | { type: 'evaded'; bounty: number }
@@ -145,6 +152,27 @@ export class Pursuit {
   breakerDown: number[] = [];
   /** guest → host: counters of heat-raising things this client did (trap flashes, police hits, smashes) */
   heatReport = 0;
+  // ── 4F: the local player's bounty, the search for them, and places to hide ──
+  /** this race's pursuit bounty (Speed Points earned from the chase) */
+  bounty = 0;
+  /** what it was earned for, for the results */
+  readonly bountyLog = new Map<string, number>();
+  /** where the police last saw you, and how far they're searching round it */
+  lastSeenX = 0;
+  lastSeenZ = 0;
+  searchR = 0;
+  searching = false;
+  /** you are in a hiding spot right now */
+  hiding = false;
+  /** hiding spots: the pit lane, the car park, behind the grandstands */
+  readonly hideSpots: { x: number; z: number; r: number; name: string }[] = [];
+  private bountyAcc = 0;
+  private boxedFor = 0;
+  private passedObs = new Set<number>();
+  private obsS = new Map<number, { s: number; offset: number }>();
+  private heliSaw = false;
+  private hiddenAwardT = 0;
+  private hitBlockT = 0;
   private rand: () => number;
   private obstacleId = 0;
   private zoneLap = -1;
@@ -175,14 +203,50 @@ export class Pursuit {
         prev: { x: 0, y: -60, z: 0, yaw: 0, pitch: 0, roll: 0 }, grid: 0, remote: false, netId: `pol:${i}`, net: null, netTime: 0, netDistance: 0,
         gone: true, edition: 'police', look: race.player.look, finished: false, finishTime: 0,
       };
-      this.units.push({ id: i, kind, car, driver, active: false, respawnIn: 0, target: null, side: i % 2 === 0 ? 1 : -1, slowT: 0, sees: false, aggroT: 0, aggro: null, damage: 0, hornT: 99 });
+      this.units.push({ id: i, kind, car, driver, active: false, respawnIn: 0, target: null, side: i % 2 === 0 ? 1 : -1, slowT: 0, sees: false, aggroT: 0, aggro: null, damage: 0, hornT: 99, role: 'chase' });
       this.park(this.units[i]);
     });
     for (let k = 0; k < world.speedTraps.length; k++) this.trapCool.push(0);
-    this.air = new AirOne(world, race, (e) => this.events.push(e), (t) => this.radio(t), this.rand, (x, z, ax, az) => {
+    this.air = new AirOne(world, race, (e) => {
+      this.events.push(e);
+      if (e.type === 'boom' && !e.mine) this.nearMissCharge(e.x, e.z);
+    }, (t) => this.radio(t), this.rand, (x, z, ax, az) => {
       const o = this.newObstacle('spikes', 'spikes', x, z, ax, az, POLICE.spikeLength / 2, 0.3, POLICE.spikeLife);
       o.lapLong = true;
     });
+    this.buildHideSpots();
+  }
+
+  private buildHideSpots(): void {
+    const w = this.world;
+    if (w.parked.length) {
+      let x = 0;
+      let z = 0;
+      for (const p of w.parked) {
+        x += p.x;
+        z += p.z;
+      }
+      x /= w.parked.length;
+      z /= w.parked.length;
+      let r = 10;
+      for (const p of w.parked) r = Math.max(r, Math.hypot(p.x - x, p.z - z) + 5);
+      this.hideSpots.push({ x, z, r: Math.min(r, 45), name: 'car park' });
+    }
+    for (const b of w.buildings) {
+      if (b.kind !== 'pit') continue;
+      const hit = w.nearestTrack(b.x, b.z);
+      if (!hit) continue;
+      const S = w.samples[hit.index];
+      const dx = S.x - b.x;
+      const dz = S.z - b.z;
+      const l = Math.hypot(dx, dz) || 1;
+      this.hideSpots.push({ x: b.x + (dx / l) * (b.d / 2 + 5), z: b.z + (dz / l) * (b.d / 2 + 5), r: Math.max(10, b.w / 2), name: 'pit garages' });
+    }
+    for (const st of w.stands) {
+      const fx = Math.sin(st.yaw);
+      const fz = Math.cos(st.yaw);
+      this.hideSpots.push({ x: st.x - fx * (st.d / 2 + 9), z: st.z - fz * (st.d / 2 + 9), r: Math.max(10, st.w * 0.42), name: 'behind the grandstand' });
+    }
   }
 
   /** an online guest mirrors the host (set by the session) */
@@ -400,13 +464,25 @@ export class Pursuit {
       }
     }
 
+    // 4F: how long each human has been out of everyone's sight
+    for (const h of humans) {
+      const eyes = this.units.some((u) => u.active && u.sees && u.target === h) || (this.heli.active && this.heli.seesTarget);
+      this.lostFor.set(h, eyes ? 0 : (this.lostFor.get(h) ?? 0) + dt);
+    }
+    // 4F: the squad: who leads, who boxes in, who rams
+    this.squadT -= dt;
+    if (this.squadT <= 0) {
+      this.squadT = 1.5;
+      this.assignRoles(humans);
+    }
+
     // roadblocks (Heat 3+) and spike strips (Heat 4+), ahead of the leader
     if (lvl >= 3 && this.cooldown <= 0) {
       this.roadblockT -= dt;
       if (this.roadblockT <= 0 && !this.obstacles.some((o) => o.group === 'roadblock' && !o.broken)) {
         this.roadblockT = POLICE.roadblockEvery;
         if (this.placeRoadblock(leader)) {
-          this.events.push({ type: 'roadblock' });
+          this.events.push({ type: 'roadblock', gap: this.roadblockGap()?.side });
           this.radio(`All units, roadblock is set ahead of the suspect in ${this.sectorName(leader.trackIndex + 140)}.`);
         }
       }
@@ -433,6 +509,103 @@ export class Pursuit {
         this.radio(lines[Math.floor(this.rand() * lines.length)]);
       }
     }
+  }
+
+  // ── 4F: the roadblock's gap (from its two cruisers): where it is, and which side ──
+  private roadblockNew = false;
+  roadblockGap(): { x: number; z: number; side: 'left' | 'centre' | 'right'; s: number; offset: number } | null {
+    const cars = this.obstacles.filter((o) => o.kind === 'blockCar' && !o.broken);
+    if (cars.length < 2) return null;
+    // the two cruisers either side of the gap are the closest pair
+    let best: [Obstacle, Obstacle] | null = null;
+    let bd = 1e9;
+    for (let i = 0; i < cars.length; i++)
+      for (let j = i + 1; j < cars.length; j++) {
+        const d = Math.hypot(cars[i].x - cars[j].x, cars[i].z - cars[j].z);
+        if (d < bd) {
+          bd = d;
+          best = [cars[i], cars[j]];
+        }
+      }
+    if (!best || bd > 16) return null;
+    const x = (best[0].x + best[1].x) / 2;
+    const z = (best[0].z + best[1].z) / 2;
+    const hit = this.world.nearestTrack(x, z);
+    if (!hit) return null;
+    const side = hit.offset > 1.2 ? 'left' : hit.offset < -1.2 ? 'right' : 'centre';
+    return { x, z, side, s: hit.s, offset: hit.offset };
+  }
+
+  // ── 4F: squad roles ──
+  private lostFor = new Map<RaceCar, number>();
+  private squadT = 0;
+  private squadKey = '';
+  private assignRoles(humans: RaceCar[]): void {
+    const lvl = this.level;
+    for (const u of this.units) if (!u.active) u.role = 'chase';
+    for (const h of humans) {
+      const team = this.units.filter((u) => u.active && u.target === h && Math.hypot(u.car.s.x - h.s.x, u.car.s.z - h.s.z) < 110);
+      for (const u of this.units) if (u.active && u.target === h && !team.includes(u)) u.role = 'chase';
+      if (team.length < 2 || lvl < 2) {
+        for (const u of team) u.role = 'chase';
+        continue;
+      }
+      // how far ahead of the target each one is, along its heading
+      const fx = Math.sin(h.s.yaw);
+      const fz = Math.cos(h.s.yaw);
+      const along = (u: PoliceUnit) => (u.car.s.x - h.s.x) * fx + (u.car.s.z - h.s.z) * fz;
+      const rx = fz;
+      const rz = -fx;
+      const side = (u: PoliceUnit) => (u.car.s.x - h.s.x) * rx + (u.car.s.z - h.s.z) * rz;
+      const free = team.slice();
+      const take = (u: PoliceUnit | undefined, role: SquadRole) => {
+        if (!u) return;
+        u.role = role;
+        free.splice(free.indexOf(u), 1);
+      };
+      // a heavy pickup rams from behind; the unit furthest forward gets out in front
+      take(free.find((u) => u.kind === 'rammer' && along(u) < 8), 'rear');
+      take(free.slice().sort((a, b) => along(b) - along(a))[0], 'lead');
+      // the rest box in, each on the side it is already on
+      const sides = free.slice().sort((a, b) => side(a) - side(b));
+      if (sides.length) take(sides[0], side(sides[0]) > 0 ? 'right' : 'left');
+      if (sides.length > 1) take(sides[sides.length - 1], sides[0].role === 'left' ? 'right' : 'left');
+      for (const u of free) u.role = u.kind === 'rammer' ? 'rear' : 'chase';
+      // a call from dispatch when the formation changes
+      const key = team.map((u) => `${u.id}${u.role[0]}`).sort().join('');
+      if (key !== this.squadKey && this.radioT > 7) {
+        const lead = team.find((u) => u.role === 'lead');
+        const flanks = team.filter((u) => u.role === 'left' || u.role === 'right');
+        const rear = team.find((u) => u.role === 'rear');
+        const name = (u: PoliceUnit) => (u.kind === 'rammer' ? 'Heavy unit' : u.kind === 'unmarked' ? 'Unmarked unit' : u.car.name);
+        const bits: string[] = [];
+        if (lead) bits.push(`${name(lead)}, get out in front and slow them down`);
+        if (flanks.length === 2) bits.push(`${flanks.map(name).join(' and ')}, box them in`);
+        else if (flanks.length === 1) bits.push(`${name(flanks[0])}, pin them on the ${flanks[0].role} side`);
+        if (rear) bits.push(`${name(rear)}, hit them from behind`);
+        if (bits.length >= 2) this.radio(`Dispatch: ${bits.join('. ')}.`);
+      }
+      this.squadKey = key;
+    }
+  }
+
+  /** 4F: units boxing the target in right now (lead ahead, at least one beside); for the HUD */
+  boxedIn(c: RaceCar): boolean {
+    const s = c.s;
+    const fx = Math.sin(s.yaw);
+    const fz = Math.cos(s.yaw);
+    let ahead = false;
+    let beside = 0;
+    for (const u of this.units) {
+      if (!u.active) continue;
+      const dx = u.car.s.x - s.x;
+      const dz = u.car.s.z - s.z;
+      const al = dx * fx + dz * fz;
+      const la = Math.abs(dx * fz - dz * fx);
+      if (al > 3 && al < 14 && la < 2.6) ahead = true;
+      else if (Math.abs(al) < 4 && la < 4.2) beside++;
+    }
+    return ahead && beside >= 1;
   }
 
   private nearestHuman(u: PoliceUnit, humans: RaceCar[]): RaceCar | null {
@@ -467,6 +640,13 @@ export class Pursuit {
     if (!u.target || this.time % 1 < dt) u.target = u.aggro ?? this.nearestHuman(u, this.humans());
     const t = u.target;
     const patrol = this.cooldown > 0 || !t || t.finished;
+    // 4F: nobody has eyes on the target: they search at a careful pace along the circuit
+    if (!patrol && t && (this.lostFor.get(t) ?? 0) > 2) {
+      u.driver.level.grip = 0.78;
+      u.driver.update(c, this.trafficFor(c), dt, 99, 0);
+      c.input.throttle = Math.min(c.input.throttle, 0.82);
+      return;
+    }
     const gap = t ? this.trackGap(c, t) : 0; // + = target ahead
     // base: follow the circuit; pace depends on how far behind the target the unit is
     u.driver.level.grip = patrol ? 0.66 : gap > 80 ? POLICE.catchUpGrip : POLICE.chaseGrip;
@@ -496,18 +676,43 @@ export class Pursuit {
     let px = ts.x + ts.vx * lead;
     let pz = ts.z + ts.vz * lead;
     let wantV = ts.speed + clamp(dist * 0.7, 0, 22);
-    if (u.kind === 'rammer') {
-      wantV += 6;
+    const role = lvl >= 2 ? u.role : 'chase';
+    if (role === 'rear' || (role === 'chase' && u.kind === 'rammer')) {
+      // ram: straight at the back of the car, faster than it
+      px = ts.x - fx * 1.5;
+      pz = ts.z - fz * 1.5;
+      wantV = ts.speed + 6 + clamp(dist * 0.4, 0, 14);
+    } else if (role === 'lead') {
+      if (along > 5) {
+        // rolling block: in front, in its lane, a little slower than it
+        px = ts.x + fx * Math.min(along, 14) + ts.vx * 0.25;
+        pz = ts.z + fz * Math.min(along, 14) + ts.vz * 0.25;
+        wantV = Math.max(8, ts.speed - (along < 16 ? 5 : 1));
+      } else {
+        // get past it first, on the side it's already on
+        const sd = Math.sign(lateral || u.side);
+        px = ts.x + fx * 22 + rx * sd * 3.6;
+        pz = ts.z + fz * 22 + rz * sd * 3.6;
+        wantV = ts.speed + 12;
+      }
+    } else if (role === 'left' || role === 'right') {
+      const sd = role === 'right' ? 1 : -1;
+      if (Math.abs(along) < 3.2 && Math.abs(lateral) < 3.6 && (this.time + u.id) % 7 < 1.2) {
+        // now and then a PIT: turn into the target's rear quarter
+        px = ts.x - fx * 2 + rx * sd * 0.3;
+        pz = ts.z - fz * 2 + rz * sd * 0.3;
+        wantV = ts.speed + 1.5;
+      } else {
+        // alongside, door to door, matching its speed
+        px = ts.x + fx * (1 + ts.speed * 0.08) + rx * sd * POLICE.boxOffset;
+        pz = ts.z + fz * (1 + ts.speed * 0.08) + rz * sd * POLICE.boxOffset;
+        wantV = ts.speed + clamp(-along * 0.8, -4, 10);
+      }
     } else if (lvl >= 2 && Math.abs(along) < 3.2 && Math.abs(lateral) < 3.6) {
       // PIT: alongside, turn into the target's rear quarter
       px = ts.x - fx * 2 + rx * Math.sign(lateral || 1) * 0.3;
       pz = ts.z - fz * 2 + rz * Math.sign(lateral || 1) * 0.3;
       wantV = ts.speed + 1.5;
-    } else if (lvl >= 2 && along > 4 && along < 40) {
-      // rolling block: ahead of the target, sit in its lane and slow it down
-      px = ts.x + fx * along + ts.vx * 0.2;
-      pz = ts.z + fz * along + ts.vz * 0.2;
-      wantV = Math.max(8, ts.speed - 4);
     } else if (dist < 26) {
       // box in: aim beside the target
       px += rx * u.side * POLICE.boxOffset;
@@ -644,7 +849,8 @@ export class Pursuit {
     for (let k = 0; k < 40 && Math.abs(S[i].curv) > 1 / 180; k++) i = (i + 2) % N;
     const p = S[i];
     const reach = this.world.halfWidth + 1.4 + 4.5 + 4; // across the run-off and onto the grass
-    const gapW = 5.2;
+    const lvl = this.level;
+    const gapW = lvl >= 5 ? 4.4 : 5.2; // 4F: tighter at Heat 5
     const gapC = (this.rand() - 0.5) * (this.world.halfWidth * 2 - gapW - 2);
     // pieces from one side to the other, skipping the gap
     const across = (o: number) => [p.x + p.nx * o, p.z + p.nz * o] as const;
@@ -663,9 +869,26 @@ export class Pursuit {
     pieces.push(['blockCar', gapR + 2.45, 2.4]);
     fill(-reach, gapL - 4.9);
     fill(gapR + 4.9, reach);
+    // 4F: from Heat 4 the wider side is sawhorses, not concrete: a second way through, if you
+    // don't mind smashing it (it slows you and raises the Heat)
+    if (lvl >= 4) {
+      const wideLeft = gapL - 4.9 + reach > reach - (gapR + 4.9);
+      for (let k = pieces.length - 1; k >= 0; k--) {
+        const pc = pieces[k];
+        if (pc[0] !== 'jersey') continue;
+        const onWide = wideLeft ? pc[1] < gapL : pc[1] > gapR;
+        const onRoad = Math.abs(pc[1]) < this.world.halfWidth + 0.5;
+        if (!onWide || !onRoad) continue;
+        // a run of sawhorses over the same stretch
+        const n = Math.max(1, Math.ceil((pc[2] * 2) / 1.9));
+        const step = (pc[2] * 2) / n;
+        pieces.splice(k, 1);
+        for (let i = 0; i < n; i++) pieces.push(['saw', pc[1] - pc[2] + step * (i + 0.5), Math.min(0.95, step / 2)]);
+      }
+    }
     for (const [kind, off, hl] of pieces) {
       const [x, z] = across(off);
-      this.newObstacle(kind, 'roadblock', x, z, p.nx, p.nz, hl, kind === 'blockCar' ? 1.05 : 0.32, POLICE.roadblockLife);
+      this.newObstacle(kind, 'roadblock', x, z, p.nx, p.nz, hl, kind === 'blockCar' ? 1.05 : kind === 'saw' ? 0.25 : 0.32, POLICE.roadblockLife);
     }
     this.rebuildPseudo();
     return true;
@@ -788,9 +1011,11 @@ export class Pursuit {
         }
         this.events.push({ type: 'smash', kind: o.kind, mine });
         if (mine && o.kind !== 'cone') this.addHeat(POLICE.heatBarrier);
+        if (mine && o.group === 'roadblock') this.hitBlockT = 3;
         return true;
       }
       if (remote) return false;
+      if (mine && o.group === 'roadblock') this.hitBlockT = 3;
       // solid (or a slow nudge): push out and bounce
       const pen = r - d;
       s.x += nx * pen;
@@ -944,28 +1169,51 @@ export class Pursuit {
       this.bustedT = POLICE.bustPenalty;
       this.arresting = close;
       const fine = POLICE.bustFine * this.level;
-      this.events.push({ type: 'busted', fine });
+      // 4F: a bust costs a quarter of the bounty you'd built up
+      const lost = Math.round(this.bounty * POLICE.bustBountyLoss);
+      this.bounty -= lost;
+      this.events.push({ type: 'busted', fine, lost });
       this.radio('Dispatch: suspect in custody. Nice work, all units.');
       this.evade = 0;
+      this.boxedFor = 0;
       return;
     }
     // ── Evade ──
     const seen = this.units.some((u) => u.active && u.sees && (u.target === me || !u.target)) || (this.heli.active && this.heli.sees);
+    this.bountyChecks(dt, seen);
     if (this.cooldown > 0) {
       this.evade = 0;
       this.hot = false;
+      this.searching = false;
       return;
     }
     if (seen) this.hot = true;
     if (!this.hot) {
       this.evade = 0; // still searching for you: nothing to evade yet
+      this.searching = false;
       return;
     }
+    // 4F: the search: they last saw you here, and widen the search the longer they look
+    if (seen) {
+      this.lastSeenX = s.x;
+      this.lastSeenZ = s.z;
+      this.searchR = 0;
+      this.searching = false;
+    } else {
+      if (!this.searching) this.searchR = POLICE.searchStart;
+      this.searching = true;
+      this.searchR = Math.min(POLICE.searchMax, this.searchR + POLICE.searchGrow * dt);
+    }
+    this.hiding = this.hideSpots.some((h) => Math.hypot(s.x - h.x, s.z - h.z) < h.r);
+    const outside = this.searching && Math.hypot(s.x - this.lastSeenX, s.z - this.lastSeenZ) > this.searchR;
+    const fill = POLICE.evadeFill * (1 + (outside ? POLICE.evadeOutside : 0) + (this.hiding && !seen ? POLICE.evadeHiding : 0));
     const anyOut = this.units.some((u) => u.active);
-    this.evade = clamp(this.evade + (seen || !anyOut ? -POLICE.evadeDrain : POLICE.evadeFill) * dt, 0, 1);
+    this.evade = clamp(this.evade + (seen || !anyOut ? -POLICE.evadeDrain : fill) * dt, 0, 1);
     if (this.evade >= 1) {
       this.evade = 0;
       const bounty = POLICE.evadeBounty * this.level;
+      this.bounty += bounty;
+      this.bountyLog.set('Evaded', (this.bountyLog.get('Evaded') ?? 0) + bounty);
       this.events.push({ type: 'evaded', bounty });
       this.radio("We've lost them. All units, fall back and search.");
       if (!this.mirror) {
@@ -974,7 +1222,79 @@ export class Pursuit {
         this.air.breakOff();
       }
       this.hot = false;
+      this.searching = false;
     }
+  }
+
+  /** 4F: bounty for the local player (both on the host and on guests) */
+  private award(amount: number, why: string): void {
+    amount = Math.round(amount);
+    if (amount <= 0) return;
+    this.bounty += amount;
+    const key = why || 'Time in the chase';
+    this.bountyLog.set(key, (this.bountyLog.get(key) ?? 0) + amount);
+    this.events.push({ type: 'bounty', amount, why });
+  }
+
+  private bountyChecks(dt: number, seen: boolean): void {
+    const me = this.race.player;
+    const s = me.s;
+    const lvl = this.level;
+    // time in the chase: a steady trickle while they're on you
+    if (seen && this.cooldown <= 0) {
+      this.bountyAcc += dt * POLICE.bountyPerSecond * lvl;
+      if (this.bountyAcc >= 100) {
+        this.award(this.bountyAcc, '');
+        this.bountyAcc = 0;
+      }
+    }
+    // broke out of a box
+    if (this.boxedIn(me)) this.boxedFor += dt;
+    else {
+      if (this.boxedFor > 1.2 && s.speed > 22) this.award(POLICE.bountyBox, 'Broke out of the box');
+      if (this.boxedFor > 0 && s.speed > 22) this.boxedFor = 0;
+      else if (this.boxedFor > 0) this.boxedFor = Math.max(0, this.boxedFor - dt * 0.5);
+    }
+    // through a roadblock's gap, past a spike strip without a flat
+    this.hitBlockT = Math.max(0, this.hitBlockT - dt);
+    const L = this.world.trackLength;
+    for (const o of this.obstacles) {
+      if ((o.kind !== 'blockCar' && o.kind !== 'spikes') || this.passedObs.has(o.id)) continue;
+      let at = this.obsS.get(o.id);
+      if (!at) {
+        const hit = this.world.nearestTrack(o.x, o.z);
+        if (!hit) continue;
+        at = { s: hit.s, offset: hit.offset };
+        this.obsS.set(o.id, at);
+      }
+      let g = me.trackS - at.s;
+      if (g > L / 2) g -= L;
+      if (g < -L / 2) g += L;
+      if (g < 0 || g > 25) continue;
+      // just went past it
+      this.passedObs.add(o.id);
+      if (o.kind === 'blockCar') {
+        // count each roadblock once (its two cruisers share it)
+        for (const q of this.obstacles) if (q.kind === 'blockCar' && Math.hypot(q.x - o.x, q.z - o.z) < 16) this.passedObs.add(q.id);
+        if (this.hitBlockT <= 0 && s.speed > 12 && this.bustedT <= 0) this.award(POLICE.bountyGap * Math.max(1, lvl - 2), 'Through a roadblock');
+      } else if (!this.spiked.has(`${o.id}:${me.netId || me.id}`) && Math.abs(me.trackOffset - at.offset) < 7) this.award(POLICE.bountySpikes, 'Dodged spikes');
+    }
+    // hid from the helicopter
+    this.hiddenAwardT = Math.max(0, this.hiddenAwardT - dt);
+    const h = this.heli;
+    if (h.active && h.mode === 'chase') {
+      if (this.heliSaw && !h.sees && this.hiddenAwardT <= 0 && !this.units.some((u) => u.active && u.sees && u.target === me)) {
+        this.award(POLICE.bountyHide, 'Hid from Air One');
+        this.hiddenAwardT = 25;
+      }
+      this.heliSaw = h.sees;
+    } else this.heliSaw = false;
+  }
+
+  /** a shock charge went off near the local player without hitting them */
+  private nearMissCharge(x: number, z: number): void {
+    const s = this.race.player.s;
+    if (Math.hypot(s.x - x, s.z - z) < 14) this.award(POLICE.bountyCharge, 'Dodged a shock charge');
   }
 
   /** Busted penalty served: back in behind the whole field, rolling. */
@@ -1037,6 +1357,10 @@ export class Pursuit {
         }
         const bounty = POLICE.breakerBounty * Math.max(1, wrecked);
         this.events.push({ type: 'breaker', index: k, wrecked, bounty });
+        if (h === this.race.player) {
+          this.bounty += bounty;
+          this.bountyLog.set('Pursuit breakers', (this.bountyLog.get('Pursuit breakers') ?? 0) + bounty);
+        }
         this.radio(wrecked ? `Units down at the ${b.kind === 'scaffold' ? 'scaffolding' : b.kind === 'containers' ? 'container stack' : 'timing tower'}! We need recovery out here.` : 'Dispatch: debris on the circuit, watch yourselves.');
         this.breakerFall.push({ index: b.index, t: 4 });
         if (!this.mirror) this.heat = Math.min(5.99, this.heat + 0.15);
@@ -1139,22 +1463,26 @@ export class Pursuit {
       for (const e of o.o.slice(0, 40)) {
         if (!Array.isArray(e) || e.length < 7 || e.some((v) => typeof v !== 'number' || !Number.isFinite(v))) continue;
         const [ki, x, z, ax, az, hl, id] = e as number[];
-        const kind = (['jersey', 'blockCar', 'spikes'] as ObstacleKind[])[ki];
+        const kind = (['jersey', 'blockCar', 'spikes', 'saw'] as ObstacleKind[])[ki];
         if (!kind || Math.abs(x) > 5000 || Math.abs(z) > 5000) continue;
         const nid = 100000 + id;
         keep.add(nid);
         if (this.obstacles.some((ob) => ob.id === nid)) continue;
-        const ob = this.newObstacle(kind, kind === 'spikes' ? 'spikes' : 'roadblock', x, z, ax, az, clamp(hl, 0.1, 6), kind === 'blockCar' ? 1.05 : kind === 'spikes' ? 0.3 : 0.32, 1e9);
+        const ob = this.newObstacle(kind, kind === 'spikes' ? 'spikes' : 'roadblock', x, z, ax, az, clamp(hl, 0.1, 6), kind === 'blockCar' ? 1.05 : kind === 'spikes' ? 0.3 : kind === 'saw' ? 0.25 : 0.32, 1e9);
         ob.id = nid;
         if (e.length > 7 && e[7] === 1) ob.lapLong = true;
         this.obstacleId--;
-        if (kind === 'blockCar' && !this.obstacles.some((q) => q.kind === 'blockCar' && q.id !== nid)) this.events.push({ type: 'roadblock' });
+        if (kind === 'blockCar' && !this.obstacles.some((q) => q.kind === 'blockCar' && q.id !== nid)) this.roadblockNew = true;
       }
       for (let i = this.obstacles.length - 1; i >= 0; i--) {
         const ob = this.obstacles[i];
         if (ob.group !== 'zone' && !keep.has(ob.id)) this.obstacles.splice(i, 1);
       }
       this.rebuildPseudo();
+      if (this.roadblockNew && this.obstacles.filter((q) => q.kind === 'blockCar').length >= 2) {
+        this.roadblockNew = false;
+        this.events.push({ type: 'roadblock', gap: this.roadblockGap()?.side });
+      }
     }
     if (Array.isArray(o.b)) this.breakerDown = o.b.slice(0, 3).map((v) => num(v, -1, 999, -1));
     this.air.unpack(o.x, o.ad);
@@ -1174,6 +1502,15 @@ export class Pursuit {
     this.chaseTime = 0;
     this.air.reset();
     this.punctLap.clear();
+    this.bounty = 0;
+    this.bountyLog.clear();
+    this.bountyAcc = 0;
+    this.boxedFor = 0;
+    this.passedObs.clear();
+    this.obsS.clear();
+    this.searching = false;
+    this.hiding = false;
+    this.searchR = 0;
     this.spiked.clear();
     this.lastIndex.clear();
     this.breakerDown = this.world.breakers.map(() => -1);

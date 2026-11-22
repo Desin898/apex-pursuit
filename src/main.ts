@@ -178,7 +178,8 @@ class Game {
       resultInfo: () => {
         const p = this.race.player;
         const rows = this.race.results();
-        return { place: p.place, field: rows.length, time: p.finishTime, best: p.lap.best, earned: this.raceEarned, laps: this.race.targetLaps, over: this.race.over };
+        const pz = this.race.pursuit;
+        return { place: p.place, field: rows.length, time: p.finishTime, best: p.lap.best, earned: this.raceEarned, laps: this.race.targetLaps, over: this.race.over, bounty: pz ? pz.bounty : 0, bountyLog: pz ? [...pz.bountyLog.entries()].sort((a, b) => b[1] - a[1]) : [] };
       },
       trackShape: () => {
         const S = this.world.samples;
@@ -222,6 +223,7 @@ class Game {
     this.props = new PropSystem(this.scene, this.world);
     this.particles = new Particles(this.scene);
     this.pview = new PursuitView(this.scene, this.world, this.particles);
+    this.pview.carsForShadow = () => this.race.cars.filter((c) => !c.gone).map((c) => ({ x: c.s.x, z: c.s.z, yaw: c.s.yaw }));
     this.pview.attach(this.race.pursuit, this.settings.quality);
     // 4B.2: rain, particles and decals on the road are main-camera only (not in reflections / mirrors)
     for (const o of [this.env.rain.lines, this.env.rain.splashes, ...this.particles.objects(), ...this.env.roadDecals()]) mainOnly(o);
@@ -498,6 +500,19 @@ class Game {
     });
     // police light bars, from the actual flash pattern of each unit
     if (this.race.pursuit) for (const g of this.pview.glowList) if (g.d < 70) list.push({ ...g, d: g.d + 2 });
+    // 4F: your headlights and Air One's searchlight light the smoke at night
+    const me = this.race.player.s;
+    const head = p.carLights * this.env.headScale;
+    if (head > 0.1) {
+      const hx = me.x + Math.sin(me.yaw) * 7;
+      const hz = me.z + Math.cos(me.yaw) * 7;
+      list.push({ d: -1, x: hx, y: 1.1, z: hz, r: 5 * head, g: 5.2 * head, b: 5.6 * head });
+    }
+    const heli = this.race.pursuit?.heli;
+    if (heli?.active) {
+      const k = Math.max(p.carLights, p.wet * 0.5);
+      if (k > 0.1) list.push({ d: -1, x: heli.lx, y: 2.2, z: heli.lz, r: 14 * k, g: 13.3 * k, b: 11.8 * k });
+    }
     this.env.streakExtras = this.race.pursuit ? this.pview.glowList : [];
     list.sort((a, b) => a.d - b.d);
     this.glows.length = 0;
@@ -2218,7 +2233,11 @@ class Game {
           this.haptics.pulse(0.3, 0.8, 0.2);
           break;
         case 'roadblock':
-          this.hud.toast('Roadblock ahead · find the gap');
+          this.hud.toast(e.gap ? `Roadblock ahead · the gap is ${e.gap === 'centre' ? 'in the middle' : `on the ${e.gap}`}` : 'Roadblock ahead · find the gap');
+          break;
+        case 'bounty':
+          this.earn(e.amount);
+          if (e.why) this.hud.pop(`+${e.amount.toLocaleString('en-US')}`, e.why, true, 1.4);
           break;
         case 'spikes':
           this.hud.toast('Spike strip ahead');
@@ -2275,7 +2294,7 @@ class Game {
           this.haptics.pulse(0.8, 0.6, 0.25);
           break;
         case 'busted': {
-          const fine = Math.min(this.settings.speedPoints, e.fine);
+          const fine = Math.min(this.settings.speedPoints, e.fine + (e.lost ?? 0));
           this.settings.speedPoints -= fine;
           this.raceEarned -= fine;
           this.bustedFine = fine;
@@ -2365,7 +2384,8 @@ class Game {
         : `${units} unit${units === 1 ? '' : 's'}${p.obstacles.some((o) => o.group === 'roadblock') ? ' · roadblock' : ''}`;
     const h = p.heli;
     const air = h.active && h.mode === 'chase' ? (h.sees ? 'spotted' : 'hidden') : h.active && h.mode === 'inbound' ? 'inbound' : '';
-    this.hud.setPursuit({ on: true, joined: p.joined, heat: p.heat, status, cool: p.cooldown > 0, bust: p.bust, evade: p.evade, air });
+    const status2 = p.searching ? (p.hiding ? 'Hiding · they\'re searching' : 'They lost sight of you · searching') : status;
+    this.hud.setPursuit({ on: true, joined: p.joined, heat: p.heat, status: status2, cool: p.cooldown > 0, bust: p.bust, evade: p.evade, air, bounty: p.bounty });
     this.updateAirOne(p, dt);
     // Busted card
     const busted = p.bustedT > 0;

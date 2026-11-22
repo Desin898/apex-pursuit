@@ -855,9 +855,12 @@ import { policeVehicle } from '../src/game/Pursuit';
     return { race, p };
   };
   const bot = (race: Race) => new AIDriver(world, race.line, 'clean', AI.levels.hard, 5);
-  // a) the helicopter launches at Heat 3, flies in and keeps up with a car lapping hard
+  // a) the helicopter launches, flies in and keeps up with a car lapping hard (Heat 2, so no
+  //    roadblocks or spikes stop the car: this is about the flying)
   {
     const { race, p } = freshAir();
+    p.heat = 2.2;
+    p.air.from = 2;
     const b = bot(race);
     let t = 0;
     let onScene = -1;
@@ -981,5 +984,103 @@ import { policeVehicle } from '../src/game/Pursuit';
     const vG = coast(gx, gz);
     const vGrass = coast(-20, 500);
     check('gravel trap', surf === 4 && vG < vGrass - 2, `surface ${surf}; 90 km/h coasting 1.2 s: gravel ${(vG * 3.6).toFixed(0)} km/h, grass ${(vGrass * 3.6).toFixed(0)} km/h`);
+  }
+}
+
+// 18. Phase 4F: squad tactics, roadblock gap bounty, search and hiding
+{
+  const S = world.samples;
+  const N = S.length;
+  const fresh = (heat: number) => {
+    const race = new Race(world, Race.soloSpecs(0, defaultLoadout()), 'medium', 0);
+    race.targetLaps = 3;
+    const p = race.enablePursuit(31);
+    race.countdown = 0;
+    p.joined = true;
+    p.heat = heat;
+    p.air.from = 0;
+    return { race, p };
+  };
+  // a) at Heat 2+ the units take squad roles round you: one out front, others beside or behind
+  {
+    const { race, p } = fresh(2.6);
+    (p as unknown as { roadblockT: number }).roadblockT = 1e9;
+    const b = new AIDriver(world, race.line, 'clean', AI.levels.medium, 3);
+    let t = 0;
+    let lead = 0;
+    let flank = 0;
+    let boxed = 0;
+    let calls = 0;
+    while (t < 60) {
+      const me = race.player;
+      b.update(me, race.cars.concat(p.traffic()), DT, 50, 0);
+      me.input.throttle *= 0.8; // a car that can be caught
+      race.step({ ...me.input }, DT);
+      for (const c of race.cars) c.s.impacts.length = 0;
+      if (p.bustedT > 0) p.bustedT = 0.01;
+      for (const e of p.events) if (e.type === 'radio' && /box them in|get out in front/.test(e.text)) calls++;
+      p.events.length = 0;
+      t += DT;
+      if (Math.round(t / DT) % 60 === 0) {
+        if (p.units.some((u) => u.active && u.role === 'lead')) lead++;
+        if (p.units.some((u) => u.active && (u.role === 'left' || u.role === 'right'))) flank++;
+        if (p.boxedIn(me)) boxed++;
+      }
+    }
+    check('police squad', lead > 3 && flank > 3 && calls > 0, `checks with a lead car ${lead}, with a car beside you ${flank}, boxed in ${boxed}; dispatch formation calls ${calls}`);
+  }
+  // b) straight through a roadblock's gap: bounty; and the HUD knows which side the gap is
+  {
+    const { race, p } = fresh(3.2);
+    const me = race.player;
+    const i0 = 1200;
+    me.physics.reset(S[i0].x, S[i0].z, Math.atan2(S[i0].tx, S[i0].tz));
+    race.step({ ...me.input }, DT);
+    p.placeRoadblock(me, 90);
+    const gap = p.roadblockGap();
+    let award = '';
+    if (gap) {
+      const hit = world.nearestTrack(gap.x, gap.z)!;
+      const j = (hit.index - 20 + N) % N;
+      const q = S[j];
+      me.physics.reset(q.x + q.nx * hit.offset, q.z + q.nz * hit.offset, Math.atan2(q.tx, q.tz));
+      me.s.vx = q.tx * 30;
+      me.s.vz = q.tz * 30;
+      for (let i = 0; i < 3 / DT && !award; i++) {
+        // hold the line through the gap
+        const k = world.nearestTrack(me.s.x, me.s.z)!;
+        const steer = Math.max(-1, Math.min(1, (k.offset - hit.offset) * 0.4));
+        race.step({ throttle: 0.6, brake: 0, steer, handbrake: false, nitro: false, analog: true, shiftUp: false, shiftDown: false }, DT);
+        for (const c of race.cars) c.s.impacts.length = 0;
+        for (const e of p.events) if (e.type === 'bounty' && e.why === 'Through a roadblock') award = `+${e.amount}`;
+        p.events.length = 0;
+      }
+    }
+    check('roadblock gap', !!gap && !!award && p.bounty > 0, `gap ${gap ? `on the ${gap.side} (${gap.offset.toFixed(1)} m)` : 'missing'}; through it: ${award || 'no bounty'}; bounty ${p.bounty}`);
+  }
+  // c) lost them: a search circle grows round the last sighting; Evade fills faster in a hiding spot
+  {
+    const run = (hide: boolean) => {
+      const { race, p } = fresh(2.2);
+      const me = race.player;
+      const spot = p.hideSpots.find((h) => h.name === 'car park') ?? p.hideSpots[0];
+      // a unit far away (so someone is out looking), the player either in the car park or out on the grass
+      const u = p.units[0];
+      (p as unknown as { deploy: (u: unknown, r: unknown, b: number) => void }).deploy(u, null, 0);
+      const x = hide ? spot.x : spot.x + 120;
+      me.physics.reset(x, spot.z, 0);
+      p.hot = true;
+      let maxR = 0;
+      for (let i = 0; i < 3 / DT; i++) {
+        race.step({ throttle: 0, brake: 1, steer: 0, handbrake: true, nitro: false, analog: true, shiftUp: false, shiftDown: false }, DT);
+        for (const c of race.cars) c.s.impacts.length = 0;
+        p.events.length = 0;
+        maxR = Math.max(maxR, p.searchR);
+      }
+      return { evade: p.evade, searching: p.searching, hiding: p.hiding, maxR };
+    };
+    const hid = run(true);
+    const open = run(false);
+    check('search and hiding', hid.searching && hid.hiding && !open.hiding && hid.evade > open.evade * 1.3 && hid.maxR > POLICE.searchStart, `in the car park: hiding ${hid.hiding}, Evade ${(hid.evade * 100).toFixed(0)}% in 3 s; out in the open ${(open.evade * 100).toFixed(0)}%; search circle grew to ${hid.maxR.toFixed(0)} m`);
   }
 }

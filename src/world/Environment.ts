@@ -211,6 +211,11 @@ export class Environment {
   /** the player's headlight spot strength (lower from the hood and bumper cameras) */
   headScale = 1;
   private lampSpots: THREE.SpotLight[] = [];
+  private floodSpots: THREE.SpotLight[] = [];
+  /** brightness scale for the real floodlight spots (tests and tuning) */
+  floodMul = 1;
+  /** 4F: where each floodlight's pool lies (its aim point) */
+  private floodAim: { x: number; z: number }[] = [];
   /** tail lights and police bars near the camera, set by the game each frame (they light the rain) */
   rainCarLights: { x: number; y: number; z: number; r: number; g: number; b: number; falloff: number }[] = [];
   private rainLights: { x: number; y: number; z: number; r: number; g: number; b: number; falloff: number }[] = [];
@@ -361,7 +366,13 @@ export class Environment {
     {
       const g = new THREE.PlaneGeometry(1, 1);
       g.rotateX(-Math.PI / 2);
-      this.floodMat = new THREE.MeshBasicMaterial({ map: tex.poolTexture(), color: 0x000000, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 });
+      // 4F: the pool brightens what's under it (dst × (1 + light)) instead of adding flat white,
+      // so dark asphalt stays asphalt and grass stays green, just lit
+      this.floodMat = new THREE.MeshBasicMaterial({
+        map: tex.poolTexture(), color: 0x000000, transparent: true, premultipliedAlpha: true, depthWrite: false, fog: false,
+        blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor, blendDst: THREE.OneFactor,
+        polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8,
+      });
       const fl = world.floodlights;
       this.floodPools = new THREE.InstancedMesh(g, this.floodMat, Math.max(1, fl.length));
       const m = new THREE.Matrix4();
@@ -376,11 +387,14 @@ export class Environment {
         const d = Math.hypot(dx, dz) || 1;
         const cx = f.x + (dx / d) * (d + 4);
         const cz = f.z + (dz / d) * (d + 4);
+        this.floodAim[i] = { x: cx, z: cz };
         q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(dx, dz));
         m.compose(new THREE.Vector3(cx, 0.045, cz), q, new THREE.Vector3(52, 1, 74));
         this.floodPools.setMatrixAt(i, m);
       });
       this.floodPools.count = fl.length;
+      // per-tower brightness: a tower that has a real spot light on it drops its painted pool
+      for (let i = 0; i < fl.length; i++) this.floodPools.setColorAt(i, new THREE.Color(1, 1, 1));
       this.floodPools.renderOrder = 6;
       this.floodPools.frustumCulled = false;
       this.floodPools.visible = false;
@@ -524,7 +538,7 @@ export class Environment {
     // floodlights: on at dusk, full at night (a little more in the rain, where they reflect)
     const fk = Math.max(0, Math.min(1, (p.lamps - 2) / 4));
     this.floodPools.visible = fk > 0.01 && this.floodPools.count > 0;
-    this.floodMat.color.setRGB(0.46 * fk, 0.45 * fk, 0.42 * fk);
+    this.floodMat.color.setRGB(5.0 * fk, 5.0 * fk, 4.7 * fk);
     this.renderer.toneMappingExposure = p.exposure * this.exposureK;
   }
 
@@ -551,6 +565,24 @@ export class Environment {
       const l = new THREE.SpotLight(0xffd29a, 0, 46, 1.0, 0.8, 2);
       scene.add(l, l.target);
       this.lampSpots.push(l);
+    }
+    // 4F: real lights for the floodlight towers nearest the camera (High: 1, Ultra: 2), so the
+    // cars passing under them are lit too, not just the ground
+    const floodCount = sp.lamps > 2 && this.world.floodlights.length ? ({ low: 0, medium: 0, high: 1, ultra: 2 } as Record<string, number>)[q] ?? 0 : 0;
+    while (this.floodSpots.length > floodCount) {
+      const l = this.floodSpots.pop()!;
+      scene.remove(l, l.target);
+      l.dispose();
+    }
+    if (!floodCount && this.floodPools.instanceColor) {
+      // no real lights any more: every tower paints its own pool again
+      this.floodPools.instanceColor.array.fill(1);
+      this.floodPools.instanceColor.needsUpdate = true;
+    }
+    while (this.floodSpots.length < floodCount) {
+      const l = new THREE.SpotLight(0xf2f4ff, 0, 190, 0.62, 0.65, 1.3);
+      scene.add(l, l.target);
+      this.floodSpots.push(l);
     }
     const wantHead = sp.carLights > 0.5 && q !== 'low';
     if (wantHead && !this.headSpot) {
@@ -680,6 +712,38 @@ export class Environment {
       // the farthest spot of the set fades as it hands over, so lamps don't pop on and off
       const fade = k === this.lampSpots.length - 1 && near[k + 1] ? Math.min(1, (near[k + 1].d - n.d) / 400) : 1;
       l.intensity = 380 * p.pools * fade;
+    }
+    // floodlights: the nearest towers to the camera get the real lights
+    if (this.floodSpots.length && this.floodPools.instanceColor) {
+      const fl = this.world.floodlights;
+      const lit = new Array<number>(fl.length).fill(0);
+      const order = fl.map((f, i) => ({ i, d: (f.x - cam.x) ** 2 + (f.z - cam.z) ** 2 })).sort((a, b) => a.d - b.d);
+      const fk = Math.max(0, Math.min(1, (p.lamps - 2) / 4));
+      this.floodSpots.forEach((l, k) => {
+        const n = order[k];
+        if (!n || n.d > 260 * 260 || !this.floodAim[n.i]) {
+          l.intensity = 0;
+          return;
+        }
+        const f = fl[n.i];
+        const a = this.floodAim[n.i];
+        l.position.set(f.x, f.h, f.z);
+        l.target.position.set(a.x, 0, a.z);
+        l.target.updateMatrixWorld();
+        const fade = k === this.floodSpots.length - 1 && order[k + 1] ? Math.min(1, (order[k + 1].d - n.d) / 3000) : 1;
+        l.intensity = 140 * fk * fade * this.floodMul;
+        lit[n.i] = fade * Math.min(1, this.floodMul);
+      });
+      const c = this.floodPools.instanceColor;
+      let changed = false;
+      for (let i = 0; i < fl.length; i++) {
+        const v = 1 - lit[i];
+        if (Math.abs(c.getX(i) - v) > 0.01) {
+          c.setXYZ(i, v, v, v);
+          changed = true;
+        }
+      }
+      if (changed) c.needsUpdate = true;
     }
     if (this.headSpot && player) {
       player.updateMatrixWorld();

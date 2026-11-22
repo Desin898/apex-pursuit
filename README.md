@@ -1,7 +1,9 @@
 # Apex Pursuit
 
 Open-world arcade street racer, built in stages from the Phantom X1 concept sketch. **This is
-Phase 4E, Air One:** a live police helicopter that chases you from Heat 3 with a real
+Phase 4F, smarter police:** squads that box you in, roadblocks with a gap to aim for, a pursuit
+bounty, and a search you can hide from; plus searchlight shadows and floodlights that light the
+cars. Before that, **Phase 4E, Air One:** a live police helicopter that chases you from Heat 3 with a real
 searchlight, rotor wash and sound, and drops smoke, spike strips and shock charges; plus gravel
 traps that drive like gravel and floodlights that light the track. Before that, **Phase 4D / 4D.1:**
 background detail round the circuit, venues, and built-in music. Before that, **Phase 4C, the big visual upgrade:** GPU-painted road, kerb, grass, concrete and rock materials, real hills and mountain ranges around the circuit, three kinds of swaying trees, hillside forests, grass along the track edges, cooler aerial haze, a Natural (AgX) tone-mapping option, SMAA on Medium and a slight lens fringe. Before that, **Phase 4B.2:** rain that changes from showers to downpours, realistic lens drops, and a smoother frame rate (F3 timing breakdown, F4 benchmark, far fewer draw calls, dynamic resolution). Before that, **Phase 4B:** realistic police cars (patrol sedan, unmarked car, heavy pickup, light patterns, sirens, damage) and realistic rain (lit streaks, spray, no lens bubbles). Before that, **Phase 4A:** HUD layout fixes, rain on the lens redone, and a full camera set with a modelled cockpit (wheel, hands, live dash, mirrors, wipers). Before that, Phase 3B added the in-race HUD from the reference image: an analog rev dial with boost and nitrous
@@ -118,6 +120,47 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
 
+## New in Phase 4F: smarter police
+
+**They work as a squad.** From Heat 2, the units round you take jobs: one gets out in front and
+slows you down (a rolling block), one or two come alongside to box you in (and now and then try
+a PIT), and a heavy pickup rams from behind. Dispatch calls the formation ("Unit four, get out in
+front and slow them down. Six and seven, box them in."). Break out of a box at speed for a bounty.
+
+**Roadblocks have a gap to aim for.** Two cruisers park either side of it; the minimap shows it as
+a green dot and the warning tells you which side it's on ("the gap is on the left"). From Heat 4
+the wider side is sawhorses instead of concrete: a second way through if you don't mind smashing
+it (it slows you and raises the Heat). At Heat 5 the gap is tighter.
+
+**Pursuit bounty.** Shown in the pursuit box and on the results, banked as Speed Points as you go:
+- time in the chase (12 × Heat per second while they're on you)
+- through a roadblock's gap without touching it: 800 × (Heat − 2)
+- past a spike strip without a flat: 300 · a shock charge that missed you: 400
+- broke out of a box: 500 · broke Air One's line of sight: 250
+- evades and pursuit breakers, as before
+A bust costs a quarter of the bounty you'd built up (on top of the fine).
+
+**The search, and places to hide.** When nobody can see you, a red search circle grows on the
+minimap round where they last saw you, the units slow to a search pace, and the hiding spots
+light up in green: **the pit garages, the car park, and behind each grandstand**. Evade fills 60%
+faster outside the circle and twice as fast in a hiding spot (both: 2.6×).
+
+**From 4E's "not done" list:**
+- **Searchlight shadows:** cars in Air One's light throw a soft shadow away from the helicopter.
+- **Floodlights light the cars:** on High (1) and Ultra (2) the towers nearest you are real lights,
+  so cars passing under them are lit, not just the road.
+- **Smoke at night:** your headlights and the searchlight now light the smoke screens and tyre
+  smoke, so they read as smoke instead of dark fog.
+- **Floodlight pools fixed:** the painted pool under each tower now brightens what's beneath it
+  instead of adding flat white, so the road stays tarmac and the grass stays green. A tower that
+  has a real light on it drops its painted pool, so it isn't lit twice.
+- **Searchlight on a low pass:** when Air One drops low, its light is held to its normal
+  brightness, so the car under it isn't burned white.
+- A picture of the gravel traps: `docs/4f/gravel.jpg`.
+
+Pictures in `docs/4f/`: `gravel.jpg`, `searchlight-shadow.jpg`, `floodlight-high.jpg`,
+`floodlight-medium.jpg`, `search-hud.jpg`.
+
 ## New in Phase 4E: Air One, a live police helicopter
 
 **When it comes.** Settings → **Air support**: *From Heat 3* (new default), *From Heat 5* or
@@ -179,9 +222,7 @@ own car takes its own hits.
 Pictures: `docs/4e/` (dusk chase, overhead, close-up, night rain searchlight, drop markers, a
 floodlight pool).
 
-**Not done in 4E:** the searchlight casts no shadows (a moving shadowed light costs too much).
-The floodlight pools are flat pools of light on the ground, not real lights, so cars aren't lit
-by them.
+**Not done in 4E** (both done in 4F): searchlight shadows, and floodlights lighting the cars.
 
 ## New in Phase 4D: background detail around the circuit, and venues
 
@@ -909,8 +950,10 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
      lines, a town and a highway at night, birds) and the venue system (done)**
    - 4D.1. Built-in music instead of Spotify: music packs, Add music, a Now playing line on
      home, and the music page with ticks, play-now, all on/off and its own volume (done)
-   - **4E. Air One: a live police helicopter (searchlight, rotor wash, sound, smoke, spike
+   - 4E. Air One: a live police helicopter (searchlight, rotor wash, sound, smoke, spike
      strips, shock charges), gravel traps that drive like gravel, floodlights that light the
-     track (this build)**
+     track (done)
+   - **4F. Smarter police: squads, roadblock gaps, a pursuit bounty, the search and hiding
+     spots; searchlight shadows, floodlights that light the cars (this build)**
    - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

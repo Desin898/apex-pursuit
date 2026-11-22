@@ -51,7 +51,7 @@ export interface ScreenHooks {
   eventName(): string;
   gridRows(): BoardRow[];
   resultRows(): BoardRow[];
-  resultInfo(): { place: number; field: number; time: number; best: number; earned: number; laps: number; over: boolean };
+  resultInfo(): { place: number; field: number; time: number; best: number; earned: number; laps: number; over: boolean; bounty?: number; bountyLog?: [string, number][] };
   trackShape(): { pts: [number, number][]; start: number; length: number };
   /** weather or time changed on the event card: show it behind the menus */
   conditionsChanged(): void;
@@ -470,7 +470,10 @@ export class Screens {
       `<div class="stat-card"><span class="label">Position</span><b class="num">${info.place} / ${info.field}</b></div>` +
       `<div class="stat-card"><span class="label">Race time</span><b class="num">${total(info.time)}</b></div>` +
       `<div class="stat-card"><span class="label">Best lap</span><b class="num">${info.best > 0 ? formatLap(info.best) : '—'}</b></div>` +
-      `<div class="stat-card"><span class="label">Speed points</span><b class="num" style="color:var(--accent)">+${Math.round(info.earned).toLocaleString('en-US')}</b></div>`;
+      `<div class="stat-card"><span class="label">Speed points</span><b class="num" style="color:var(--accent)">+${Math.round(info.earned).toLocaleString('en-US')}</b></div>` +
+      (info.bounty && info.bounty > 0
+        ? `<div class="stat-card bounty"><span class="label">Pursuit bounty</span><b class="num">${Math.round(info.bounty).toLocaleString('en-US')}</b><small>${(info.bountyLog ?? []).slice(0, 4).map(([k, v]) => `${k} ${Math.round(v).toLocaleString('en-US')}`).join(' · ')}</small></div>`
+        : '');
     this.renderBoard($('results-table'), this.h.resultRows(), true);
   }
 

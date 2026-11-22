@@ -432,9 +432,22 @@ export const POLICE = {
   breakerRadius: 30, // police this close behind a collapsing pursuit breaker are wrecked
   breakerBounty: 1500,
   breakerReset: 2, // laps before a breaker stands again
+  // ── 4F: bounty, search and hiding ──
+  bustBountyLoss: 0.25, // a bust costs this share of the bounty built up
+  bountyPerSecond: 12, // × Heat while they're on you
+  bountyGap: 800, // × (Heat − 2): through a roadblock's gap without touching it
+  bountySpikes: 300, // past a spike strip without a flat
+  bountyCharge: 400, // a shock charge went off close by and missed you
+  bountyBox: 500, // broke out of a box (lead car in front, one beside)
+  bountyHide: 250, // broke Air One's line of sight
+  searchStart: 70, // m: the search circle round where they last saw you...
+  searchGrow: 9, // ...grows this fast (m/s)...
+  searchMax: 240, // ...up to this
+  evadeOutside: 0.6, // Evade fills this much faster outside the search circle...
+  evadeHiding: 1.0, // ...and this much faster in a hiding spot (they add up)
   // ── Air One (4E) ──
-  heliSpeed: 66, // m/s top speed (it cuts corners, so it keeps up)
-  heliAccel: 11, // m/s² it can change its velocity by
+  heliSpeed: 74, // m/s top speed (more when it has fallen behind; it cuts across the infield)
+  heliAccel: 22, // m/s² it can change its velocity by
   heliClimb: 8, // m/s up or down
   heliHeight: 34, // usual altitude
   heliLeadHeight: 27, // lower when it sits ahead of you, facing you
