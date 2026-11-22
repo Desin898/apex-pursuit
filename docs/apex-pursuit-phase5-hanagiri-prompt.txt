@@ -1,0 +1,45 @@
+APEX PURSUIT — Phase 5: Hanagiri Pass (the mountain venue)
+
+Goal
+Add the second venue, Hanagiri Pass: a Japanese mountain road with real height, tight
+hairpins, guard rails and cherry blossom, raced as a full circuit, as point-to-point sprints
+and as 1-vs-1 touge battles. The Proving Grounds stays exactly as it is.
+
+1. The road and its height
+- A closed loop of about 6-7 km climbing about 180 m: a fast valley straight, an uphill
+  section of esses, three or four hairpins, a summit ridge with a view, then a long downhill
+  with a tunnel and a river bridge back to the start village.
+- Every road sample gets a height (y). heightAt(x, z) returns the road surface on the road
+  and the slope beside it, so the car's wheels, the AI and the camera follow it.
+- Physics: a slope term (gravity along the road), so uphill slows you and downhill pulls.
+  Only venues with height use it, so the Proving Grounds' lap times don't change.
+- Road, kerbs, lines, shoulders and run-off all follow the height; a camber on corners.
+- The physics test gets new checks: a climb, a descent and a hairpin at speed.
+
+2. Terrain and world around it
+- Venue-specific terrain: the mountain the road is cut into, cliffs above, drops below,
+  distant ranges, a valley with a river. Bounds and the far shadow cover the new area.
+- Guard rails (steel, with posts) on every drop; retaining walls and rock cuts on the
+  mountain side; a tunnel (lit at night); the river bridge.
+- Dressing: cherry blossom trees and falling petals, cedar forest, a shrine gate and stone
+  lanterns, a small village at the start (wooden houses, vending machine lights, invented
+  shop signs only), rice terraces in the valley, spectators at the hairpins, a car park at
+  the summit, snow poles and road signs (invented, no real brands).
+- Weather and time of day work as at the Proving Grounds (fog in the valley is welcome).
+
+3. Racing at Hanagiri
+- Circuit race: laps of the loop (8 cars), as today.
+- Sprint: start village → summit (uphill) or summit → village (downhill); finish by
+  distance, not laps.
+- Touge battle: 1 vs 1, two runs, leader and chaser swap; gap at the line decides it.
+- Pursuit works too (police from the village and the summit car park).
+- Online: the host's venue and mode are sent to everyone, as in 4D.
+- Event card: the Venue row offers Hanagiri Pass (no longer "coming in Phase 5"), with
+  the new modes; the track map shows height as shading.
+
+4. Checks and delivery
+- Physics test passes (old + new checks); HUD check passes; net test passes.
+- Before/after pictures in docs/5/, F4 benchmark numbers for both venues.
+- Draw calls at Hanagiri within about 10% of the Proving Grounds at the same quality.
+- Commit and push the code; refresh play/ApexPursuit.html; publish the artifact (it keeps
+  your music); source zip; README "New in Phase 5"; report what's done and what isn't.
