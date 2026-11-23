@@ -214,6 +214,8 @@ class Game {
 
     this.visuals = buildWorld(this.scene, this.renderer, this.world);
     this.env = new Environment(this.scene, this.renderer, this.world, this.visuals);
+    // 4G: thunder, after the flash (sound travels about 340 m a second)
+    this.env.sky.onThunder = (dist, delay) => this.audio.thunder(dist, delay);
     // Phase 3D: wet-road mirror and distant shadows on the ground materials
     patchGround(this.visuals.mats.road, true);
     patchGround(this.visuals.mats.kerb, true);
@@ -371,6 +373,8 @@ class Game {
       this.renderer.toneMappingExposure = this.env.p.exposure * ek;
     }
     this.post.lensCA = s.lensFx ? 1 : 0;
+    this.env.sky.lightning = s.lightning;
+    this.env.sky.meteorsOn = s.meteors;
     this.haptics.enabled = s.vibration;
     this.haptics.intensity = s.vibrationStrength;
     this.input.settings.deadzone = s.deadzone;
@@ -439,6 +443,7 @@ class Game {
 
   private applyConditions(c: Conditions): void {
     this.env.apply(c, this.settings.quality);
+    this.visuals.dressing?.setSun?.(this.visuals.sunDir);
     const p = this.env.p;
     this.race.setWet(p.wet);
     this.audio.setRain(p.rain);
@@ -1669,7 +1674,17 @@ class Game {
           },
         },
         { label: 'Tone mapping', value: () => (s.toneMap === 'natural' ? 'Natural (AgX)' : 'Filmic (ACES)'), adjust: () => ((s.toneMap = s.toneMap === 'natural' ? 'filmic' : 'natural'), done()) },
-        { label: 'Lens fringe (edges)', value: () => (s.lensFx ? 'On' : 'Off'), adjust: () => ((s.lensFx = !s.lensFx), done()) },
+        { label: 'Lens fringe and dirt', value: () => (s.lensFx ? 'On' : 'Off'), adjust: () => ((s.lensFx = !s.lensFx), done()) },
+        {
+          label: 'Lightning (rain)',
+          value: () => ({ on: 'On', soft: 'Soft (gentler flashes)', off: 'Off' })[s.lightning],
+          adjust: (d) => {
+            const o: Settings['lightning'][] = ['on', 'soft', 'off'];
+            s.lightning = o[(o.indexOf(s.lightning) + (d < 0 ? o.length - 1 : 1)) % o.length];
+            done();
+          },
+        },
+        { label: 'Shooting stars (clear nights)', value: () => (s.meteors ? 'On' : 'Off'), adjust: () => ((s.meteors = !s.meteors), done()) },
         { label: 'Lens drops (outside views)', value: () => (s.lensDrops === 'auto' ? 'Auto (follow the rain)' : 'Off'), adjust: () => ((s.lensDrops = s.lensDrops === 'auto' ? 'off' : 'auto'), done()) },
         {
           label: 'Rain strength',

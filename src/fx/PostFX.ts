@@ -33,13 +33,17 @@ const SpeedShader = {
     uDropLayers: { value: 1 },
     uDropDensity: { value: 0.12 }, // (unused since 4B.2)
     uFlick: { value: 0 }, // 0..1 a gust or nitrous flicking drops off
+    // 4G: lens dirt: smudges and specks that light up where the bloom is (sun, floodlights, lightning)
+    tBloom: { value: null as THREE.Texture | null },
+    tDirt: { value: null as THREE.Texture | null },
+    uDirt: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse;
-    uniform float uLensCA;
+    uniform sampler2D tDiffuse, tBloom, tDirt;
+    uniform float uLensCA, uDirt;
     uniform float uTime, uSpeed, uBoost, uImpact, uAspect, uBlur, uSat, uDrops, uDropRun, uDropLayers, uDropDensity, uFlick;
     uniform vec3 uShadowTint, uHighTint;
     varying vec2 vUv;
@@ -156,6 +160,11 @@ const SpeedShader = {
       if (ca > 0.0002) {
         col.r = mix(col.r, texture2D(tDiffuse, uv + dir * ca).r, 0.85);
         col.b = mix(col.b, texture2D(tDiffuse, uv - dir * ca).b, 0.85);
+      }
+      // Lens dirt: only shows where bright light reaches the lens
+      if (uDirt > 0.001) {
+        vec3 bl = texture2D(tBloom, vUv).rgb;
+        col += bl * texture2D(tDirt, vUv).rgb * uDirt;
       }
       // Speed lines: thin radial streaks flickering at the screen edges
       float ang = atan(c.y, c.x);
@@ -350,6 +359,74 @@ export const QUALITY: Record<Quality, { pixelRatio: number; shadows: number; blo
   ultra: { pixelRatio: 1.5, shadows: 4096, bloom: true, blur: true, msaa: 4, composer: true, reflect: 0.6, probe: 256, farShadow: true, ao: true, motionBlur: true, aniso: 16, smoke: 1.5 },
 };
 
+/** 4G: a lens with a few smudges, specks and soft bokeh rings on it (made once, on a canvas). */
+function lensDirtTexture(): THREE.CanvasTexture {
+  const W = 512;
+  const H = 288;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const g = cv.getContext('2d')!;
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, W, H);
+  let seed = 1234;
+  const r = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  g.globalCompositeOperation = 'lighter';
+  // big soft smudges (fingerprints, dried rain), heavier towards the edges
+  for (let i = 0; i < 26; i++) {
+    const x = r() * W;
+    const y = r() * H;
+    const edge = Math.min(1, Math.hypot(x / W - 0.5, y / H - 0.5) * 2.2);
+    const rad = 20 + r() * 70;
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    const a = (0.05 + r() * 0.1) * (0.35 + edge);
+    gr.addColorStop(0, `rgba(255,248,235,${a})`);
+    gr.addColorStop(1, 'rgba(255,248,235,0)');
+    g.fillStyle = gr;
+    g.beginPath();
+    g.ellipse(x, y, rad, rad * (0.5 + r() * 0.6), r() * 3.14, 0, Math.PI * 2);
+    g.fill();
+  }
+  // bokeh rings: brighter edge, faint middle
+  for (let i = 0; i < 40; i++) {
+    const x = r() * W;
+    const y = r() * H;
+    const rad = 3 + r() * 12;
+    const a = 0.08 + r() * 0.18;
+    const gr = g.createRadialGradient(x, y, rad * 0.55, x, y, rad);
+    gr.addColorStop(0, `rgba(230,240,255,${a * 0.35})`);
+    gr.addColorStop(0.85, `rgba(230,240,255,${a})`);
+    gr.addColorStop(1, 'rgba(230,240,255,0)');
+    g.fillStyle = gr;
+    g.beginPath();
+    g.arc(x, y, rad, 0, Math.PI * 2);
+    g.fill();
+  }
+  // specks of dust
+  for (let i = 0; i < 260; i++) {
+    g.fillStyle = `rgba(255,255,255,${0.1 + r() * 0.35})`;
+    g.fillRect(r() * W, r() * H, 1 + r() * 1.5, 1 + r() * 1.5);
+  }
+  // a couple of wiped streaks
+  g.lineCap = 'round';
+  for (let i = 0; i < 5; i++) {
+    g.strokeStyle = `rgba(255,250,240,${0.04 + r() * 0.05})`;
+    g.lineWidth = 6 + r() * 14;
+    g.beginPath();
+    const x = r() * W;
+    const y = r() * H;
+    g.moveTo(x, y);
+    g.quadraticCurveTo(x + (r() - 0.5) * 200, y + (r() - 0.5) * 80, x + (r() - 0.5) * 300, y + (r() - 0.5) * 120);
+    g.stroke();
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.NoColorSpace;
+  return t;
+}
+
 export class PostFX {
   private composer: EffectComposer | null = null;
   private scenePass: ScenePass | null = null;
@@ -373,6 +450,9 @@ export class PostFX {
   private bloomBase = 0.42;
   /** 0/1: the slight edge fringe (Settings → Lens fringe) */
   lensCA = 1;
+  /** 4G: how much the lens dirt shows (0 = clean lens); the scene sets it by time of day */
+  lensDirt = 0.6;
+  private dirtTex: THREE.CanvasTexture | null = null;
   /** Settings → Ambient occlusion (only used on Ultra) */
   aoOn = false;
   private grade = { shadow: new THREE.Vector3(0.86, 1.0, 1.1), high: new THREE.Vector3(1.1, 1.0, 0.88), sat: 1.12 };
@@ -443,6 +523,9 @@ export class PostFX {
     } else this.bloom = null;
     this.speed = new ShaderPass(SpeedShader);
     this.speed.uniforms.uBlur.value = cfg.blur ? 1 : 0;
+    this.dirtTex ??= lensDirtTexture();
+    this.speed.uniforms.tDirt.value = this.dirtTex;
+    this.speed.uniforms.tBloom.value = this.bloom ? (this.bloom as unknown as { renderTargetsHorizontal: THREE.WebGLRenderTarget[] }).renderTargetsHorizontal[0].texture : null;
     this.speed.uniforms.uAspect.value = width / height;
     composer.addPass(this.speed);
     composer.addPass(new OutputPass());
@@ -475,6 +558,7 @@ export class PostFX {
       (u.uHighTint.value as THREE.Vector3).copy(this.grade.high);
       u.uSat.value = this.grade.sat;
       u.uLensCA.value = this.lensCA * (this.quality === 'medium' ? 0.0006 : 0.0009);
+      u.uDirt.value = this.bloom && this.lensCA > 0 ? this.lensDirt : 0;
       u.uDrops.value = this.dropAmount;
       u.uDropRun.value = this.dropRun;
       u.uDropLayers.value = this.quality === 'medium' ? 1 : 2;

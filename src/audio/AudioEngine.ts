@@ -431,6 +431,50 @@ export class AudioEngine {
     this.tone(60, 24, 0.7 * a + 0.04, 0.7);
     this.burst(6000, 3000, 1, 0.16 * a, 0.12, 'highpass'); // the crack
   }
+  /**
+   * 4G: thunder from a lightning strike `dist` m away, heard `delay` s after the flash: a sharp
+   * crack when it's close, then a low rumble that rolls on for a few seconds.
+   */
+  thunder(dist: number, delay: number): void {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running') return;
+    const t0 = ctx.currentTime + delay;
+    const near = 1 / (1 + (dist / 1100) ** 2);
+    const play = (f0: number, f1: number, type: BiquadFilterType, q: number, gain: number, attack: number, dur: number, roll: number) => {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const f = ctx.createBiquadFilter();
+      f.type = type;
+      f.Q.value = q;
+      f.frequency.setValueAtTime(f0, t0);
+      f.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(gain, t0 + attack);
+      g.gain.exponentialRampToValueAtTime(0.0006, t0 + dur);
+      src.connect(f).connect(g);
+      if (roll > 0) {
+        // the rolling: the loudness swells and sags as the sound comes off different clouds
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = 0.7 + Math.random() * 0.9;
+        const lg = ctx.createGain();
+        lg.gain.value = roll;
+        const m = ctx.createGain();
+        m.gain.value = 1 - roll * 0.5;
+        lfo.connect(lg).connect(m.gain);
+        g.connect(m).connect(this.fxBus);
+        lfo.start(t0);
+        lfo.stop(t0 + dur + 0.1);
+      } else g.connect(this.fxBus);
+      src.start(t0, Math.random() * 1.5);
+      src.stop(t0 + dur + 0.1);
+    };
+    if (dist < 1500) play(5200, 1400, 'highpass', 0.7, 0.22 * near, 0.006, 0.35, 0);
+    play(220, 55, 'lowpass', 0.8, 0.55 * (0.35 + 0.65 * near), 0.18 + (dist / 3000) * 0.5, 3.2 + Math.random() * 2.5, 0.45);
+    play(90, 40, 'lowpass', 1.2, 0.4 * (0.4 + 0.6 * near), 0.3, 4 + Math.random() * 2, 0.3);
+  }
+
   /** A smoke canister landing and starting to hiss. */
   canister(dist: number): void {
     const a = 1 / (1 + (dist / 30) ** 2);

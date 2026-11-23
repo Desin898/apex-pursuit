@@ -39,6 +39,8 @@ export interface Dressing {
   /** once per frame: crowd reactions, flags, birds, traffic; `night` 0..1, `rain` 0..1 */
   update(dt: number, time: number, cars: readonly CarDot[], night: number, rain: number): void;
   setQuality(q: 'low' | 'medium' | 'high' | 'ultra'): void;
+  /** 4G: where the sun is (the crows fly home across it at dusk) */
+  setSun?(dir: THREE.Vector3): void;
 }
 
 type Quality = 'low' | 'medium' | 'high' | 'ultra';
@@ -926,33 +928,43 @@ export function buildProvingGroundsDressing(ctx: DressingContext): Dressing {
     });
   }
 
-  // ── Birds by day ────────────────────────────────────────────────────────────
+  // ── Crows (4D birds, 4G crows): two flocks wheeling over the circuit, and at dusk a long
+  //    loose line flying home across the setting sun ──────────────────────────────────────
+  const sunDir = new THREE.Vector3(0, 0.15, -1).normalize();
   {
     const parts = [
-      new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.35, -0.08, 0, -0.25, 0.08, 0, -0.25], 3)),
-      new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([-0.05, 0, 0.12, -0.6, 0.05, -0.02, -0.05, 0, -0.1, 0.05, 0, 0.12, 0.05, 0, -0.1, 0.6, 0.05, -0.02], 3)),
+      // body and a wedge tail
+      new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.38, -0.07, 0, -0.18, 0.07, 0, -0.18, -0.12, 0, -0.42, 0.12, 0, -0.42, 0, 0, -0.16], 3)),
+      // wings with ragged tips
+      new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([-0.05, 0, 0.14, -0.62, 0.04, 0.02, -0.05, 0, -0.12, 0.05, 0, 0.14, 0.05, 0, -0.12, 0.62, 0.04, 0.02, -0.62, 0.04, 0.02, -0.7, 0.04, -0.06, -0.4, 0.02, -0.08, 0.62, 0.04, 0.02, 0.4, 0.02, -0.08, 0.7, 0.04, -0.06], 3)),
     ];
     const bird = mergeGeometries(parts)!;
     bird.computeVertexNormals();
-    const mat = new THREE.MeshBasicMaterial({ color: 0x1b1d20, side: THREE.DoubleSide });
+    const mat = new THREE.MeshBasicMaterial({ color: 0x0c0c0e, side: THREE.DoubleSide });
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uTime = uTime;
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;').replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-        { vec3 ipB = instanceMatrix[3].xyz; float w = abs(position.x); transformed.y += sin(uTime * 11.0 + ipB.x * 0.7 + ipB.z) * w * 0.8; }`,
+        { vec3 ipB = instanceMatrix[3].xyz; float w = abs(position.x);
+          float ph = ipB.x * 0.37 + ipB.z * 0.21;
+          // crows row steadily, with the odd glide
+          float glide = 0.35 + 0.65 * smoothstep(-0.3, 0.4, sin(uTime * 0.45 + ph));
+          transformed.y += sin(uTime * 7.5 + ph) * w * 0.85 * glide; }`,
       );
     };
-    mat.customProgramCacheKey = () => 'birds-4d';
+    mat.customProgramCacheKey = () => 'crows-4g';
     const FLOCKS = 2;
     const PER = 14;
-    const im = new THREE.InstancedMesh(bird, mat, FLOCKS * PER);
+    const HOME = 26; // the line flying home at dusk
+    const im = new THREE.InstancedMesh(bird, mat, FLOCKS * PER + HOME);
     im.frustumCulled = false;
     im.name = 'birds';
     mainOnly(im);
     scene.add(im);
     const br = rng(99);
-    const birds = Array.from({ length: FLOCKS * PER }, () => ({ ox: (br() - 0.5) * 30, oy: (br() - 0.5) * 8, oz: (br() - 0.5) * 30, ph: br() * 6.28, sc: 1.3 + br() * 0.5 }));
+    const birds = Array.from({ length: FLOCKS * PER }, () => ({ ox: (br() - 0.5) * 30, oy: (br() - 0.5) * 8, oz: (br() - 0.5) * 30, ph: br() * 6.28, sc: 1.7 + br() * 0.6 }));
+    const home = Array.from({ length: HOME }, (_, i) => ({ along: -i * (3 + br() * 4) - br() * 6, side: (br() - 0.5) * 30, up: (br() - 0.5) * 8 + Math.sin(i * 0.7) * 3, ph: br() * 6.28, sc: 2.9 + br() * 1.0 }));
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
@@ -960,6 +972,8 @@ export function buildProvingGroundsDressing(ctx: DressingContext): Dressing {
     const sv = new THREE.Vector3();
     let enabled = true;
     qualityHooks.push((qq) => (enabled = qq !== 'low'));
+    const HOME_EVERY = 55; // s between dusk flights
+    const HOME_SPEED = 13;
     updaters.push((_dt, t, _c, night, rain) => {
       im.visible = enabled && night < 0.3 && rain < 0.5;
       if (!im.visible) return;
@@ -979,6 +993,35 @@ export function buildProvingGroundsDressing(ctx: DressingContext): Dressing {
           m.compose(v, q, sv.set(b.sc, b.sc, b.sc));
           im.setMatrixAt(f * PER + k, m);
         }
+      }
+      // the flight home: a line crossing in front of the sun, seen from the middle of the circuit
+      const sunLow = sunDir.y < 0.35;
+      const cyc = (t % HOME_EVERY) * HOME_SPEED - 420;
+      const sx = sunDir.x;
+      const sz = sunDir.z;
+      const hl = Math.hypot(sx, sz) || 1;
+      const fx = sx / hl;
+      const fz = sz / hl;
+      const across = { x: -fz, z: fx }; // flying across the sun's direction
+      const dist = 120;
+      const baseY = Math.max(22, Math.tan(Math.asin(Math.min(0.9, sunDir.y)) + 0.06) * dist);
+      for (let i = 0; i < HOME; i++) {
+        const b = home[i];
+        const a = cyc + b.along;
+        const on = sunLow && Math.abs(a) < 460;
+        if (!on) {
+          m.makeScale(0, 0, 0);
+          im.setMatrixAt(FLOCKS * PER + i, m);
+          continue;
+        }
+        v.set(
+          WORLD.boundsCenterX + fx * (dist + b.side) + across.x * a,
+          baseY + b.up + Math.sin(t * 0.8 + b.ph) * 1.5,
+          WORLD.boundsCenterZ + fz * (dist + b.side) + across.z * a,
+        );
+        q.setFromEuler(e.set(0, Math.atan2(across.x, across.z), Math.sin(t * 0.6 + b.ph) * 0.2));
+        m.compose(v, q, sv.set(b.sc, b.sc, b.sc));
+        im.setMatrixAt(FLOCKS * PER + i, m);
       }
       im.instanceMatrix.needsUpdate = true;
     });
@@ -1002,6 +1045,9 @@ export function buildProvingGroundsDressing(ctx: DressingContext): Dressing {
     },
     setQuality(q) {
       for (const h of qualityHooks) h(q);
+    },
+    setSun(dir) {
+      sunDir.copy(dir);
     },
   };
 }

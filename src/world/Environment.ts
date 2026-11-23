@@ -12,6 +12,7 @@ import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { WEATHER } from '../config';
 import { Quality } from '../fx/PostFX';
 import { Rain } from '../fx/Rain';
+import { SkyDome } from './SkyDome';
 import * as tex from './textures';
 import { WorldVisuals } from './WorldBuilder';
 import { WorldData } from './WorldData';
@@ -48,6 +49,12 @@ interface Preset {
   envLamps: number; // bright spots in the reflection map (lamps around the horizon)
   cloud: number;
   cloudO: number;
+  /** 4G sky: how bright the sun's disc is, how much cloud, and the clouds' colours */
+  sunDisc: number;
+  cover: number;
+  cloudLit: number;
+  cloudDark: number;
+  cloudRim: number;
   ridge: number;
   windows: number;
   glass: number;
@@ -64,12 +71,14 @@ interface Preset {
   rain: number;
 }
 
+// 4G: a sunset: the sun low over the hills, orange sky, clouds lit gold underneath purple
 const DUSK: Preset = {
-  sky: 'sky', top: 0x3a5f8a, horizon: 0xd9a878, glow: 0x000000, stars: 0, moon: false,
-  sunColor: 0xffc995, sunI: 3.6, sunElev: 13, sunAz: -42,
-  hemiSky: 0xa9c4ff, hemiGround: 0x4d3a26, hemiI: 0.75,
-  fog: 0xd9a878, fogD: 0.00105, envI: 0.95, envGround: 0x1c1a17, envLamps: 0,
-  cloud: 0xffc9a8, cloudO: 0.8, ridge: 0xffffff,
+  sky: 'dome', top: 0x1f2c5c, horizon: 0xff9a52, glow: 0xff6a24, stars: 0, moon: false,
+  sunColor: 0xffb877, sunI: 3.4, sunElev: 8, sunAz: -42,
+  hemiSky: 0xa4b4e8, hemiGround: 0x4d3a26, hemiI: 0.75,
+  fog: 0xb07a62, fogD: 0.00105, envI: 0.95, envGround: 0x1c1a17, envLamps: 0,
+  cloud: 0xffc9a8, cloudO: 0.8, ridge: 0x5c4c68,
+  sunDisc: 26, cover: 0.52, cloudLit: 0xff8a48, cloudDark: 0x3c2240, cloudRim: 0xffd98a,
   windows: 1.6, glass: 0.55, signs: 0.55, lamps: 3.2, pools: 0, carLights: 0,
   exposure: 0.8, bloom: 0.42,
   shadowTint: [0.86, 1.0, 1.1], highTint: [1.1, 1.0, 0.88], sat: 1.12, wet: 0, rain: 0,
@@ -79,7 +88,7 @@ const lerpHex = (a: number, b: number, t: number) => new THREE.Color(a).lerp(new
 /** Between two presets: numbers and colours blend; the sky is the gradient dome throughout. */
 function lerpPreset(a: Preset, b: Preset, t: number): Preset {
   const out = { ...b } as Record<string, unknown>;
-  const colourKeys = new Set(['top', 'horizon', 'glow', 'sunColor', 'hemiSky', 'hemiGround', 'fog', 'envGround', 'cloud', 'ridge']);
+  const colourKeys = new Set(['top', 'horizon', 'glow', 'sunColor', 'hemiSky', 'hemiGround', 'fog', 'envGround', 'cloud', 'ridge', 'cloudLit', 'cloudDark', 'cloudRim']);
   for (const k of Object.keys(a) as (keyof Preset)[]) {
     const va = a[k];
     const vb = b[k];
@@ -93,6 +102,10 @@ function lerpPreset(a: Preset, b: Preset, t: number): Preset {
   out.sunElev = t < 0.5 ? a.sunElev * (1 - t * 1.6) : b.sunElev * ((t - 0.5) * 2);
   out.sunAz = t < 0.5 ? a.sunAz : b.sunAz;
   out.sunI = t < 0.5 ? a.sunI * (1 - t * 2) + 0.05 : b.sunI * (t - 0.5) * 2 + 0.05;
+  // 4G: the sun's disc sets with it; the moon (which takes over sunDir) has no sun disc
+  out.sunDisc = t < 0.5 ? a.sunDisc * Math.max(0, 1 - t * 2.2) : 0;
+  // the sun's glow fades as it sets, before the moon's (same direction slot) comes up
+  out.glow = t < 0.5 ? lerpHex(a.glow, 0x000000, t * 2) : lerpHex(0x000000, b.glow, (t - 0.5) * 2);
   return out as unknown as Preset;
 }
 
@@ -100,9 +113,7 @@ function lerpPreset(a: Preset, b: Preset, t: number): Preset {
 export function presetFor(c: Conditions, t = 0): Preset {
   if (c.time === 'dynamic') {
     const dusk = presetFor({ weather: c.weather, time: 'dusk' });
-    // the dusk end as a gradient sky: deep blue overhead, warm at the horizon, a sun glow
-    const a = dusk.sky === 'sky' ? { ...dusk, top: 0x355a86, horizon: 0xe0a070, glow: 0x7a4418 } : dusk;
-    return lerpPreset(a, presetFor({ weather: c.weather, time: 'night' }), clamp01(t));
+    return lerpPreset(dusk, presetFor({ weather: c.weather, time: 'night' }), clamp01(t));
   }
   const night = c.time === 'night';
   if (!night) {
@@ -127,6 +138,11 @@ export function presetFor(c: Conditions, t = 0): Preset {
       envGround: rain ? 0x101112 : 0x1a1a1a,
       cloud: rain ? 0x4e545a : 0x7c8288,
       cloudO: 1,
+      sunDisc: 0,
+      cover: rain ? 1 : 0.86,
+      cloudLit: rain ? 0x6a7078 : 0xb4aca0,
+      cloudDark: rain ? 0x2a2f35 : 0x4c5058,
+      cloudRim: rain ? 0x3a3a3a : 0xffbf7a,
       ridge: rain ? 0x585e64 : 0x8c9296,
       windows: rain ? 2.2 : 1.5,
       glass: rain ? 0.9 : 0.5,
@@ -151,8 +167,9 @@ export function presetFor(c: Conditions, t = 0): Preset {
     top: cloudy ? 0x07080a : 0x02040b,
     horizon: cloudy ? (rain ? 0x1d1a18 : 0x2a231d) : 0x101a2c,
     glow: cloudy ? 0x000000 : 0x1c2a44,
-    stars: cloudy ? 0 : 1,
-    moon: !cloudy,
+    // a cloudy night still has gaps with stars and the moon; rain is one heavy deck
+    stars: rain ? 0 : cloudy ? 0.85 : 1,
+    moon: !rain,
     sunColor: 0x8ea6ff,
     sunI: cloudy ? 0.12 : 0.42,
     sunElev: 38,
@@ -167,6 +184,11 @@ export function presetFor(c: Conditions, t = 0): Preset {
     envLamps: 1,
     cloud: cloudy ? 0x2c2622 : 0x1a2133,
     cloudO: cloudy ? 1 : 0.2,
+    sunDisc: 0,
+    cover: rain ? 1 : cloudy ? 0.7 : 0.24,
+    cloudLit: rain ? 0x1c1e22 : cloudy ? 0x2c2e36 : 0x37415a,
+    cloudDark: rain ? 0x070809 : cloudy ? 0x08090c : 0x0a0d15,
+    cloudRim: rain ? 0x2a2e34 : cloudy ? 0x8f9ab4 : 0xbfcbe8,
     ridge: cloudy ? 0x111215 : 0x121a2a,
     windows: 3.2,
     glass: 1.4,
@@ -190,12 +212,8 @@ const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 export class Environment {
   conditions: Conditions = { weather: 'clear', time: 'dusk' };
   p: Preset = DUSK;
-  private dome: THREE.Mesh;
-  private domeMat: THREE.ShaderMaterial;
-  private stars: THREE.Points;
-  private starMat: THREE.ShaderMaterial;
-  private moon: THREE.Sprite;
-  private moonHalo: THREE.Sprite;
+  /** 4G: the sky (clouds, stars, moon, shooting stars, lightning) */
+  readonly sky: SkyDome;
   private pools: THREE.InstancedMesh;
   private floodPools: THREE.InstancedMesh;
   private floodMat: THREE.MeshBasicMaterial;
@@ -233,108 +251,8 @@ export class Environment {
     private world: WorldData,
     private v: WorldVisuals,
   ) {
-    // ── Gradient dome for overcast and night skies ──
-    this.domeMat = new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      depthWrite: false,
-      fog: false,
-      uniforms: {
-        uTop: { value: new THREE.Color() },
-        uHorizon: { value: new THREE.Color() },
-        uGlow: { value: new THREE.Color() },
-        uGlowDir: { value: new THREE.Vector3(0, 1, 0) },
-      },
-      vertexShader: /* glsl */ `
-        varying vec3 vDir;
-        void main() {
-          vDir = position;
-          vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          gl_Position = p.xyww; // always on the far plane
-        }`,
-      fragmentShader: /* glsl */ `
-        uniform vec3 uTop, uHorizon, uGlow, uGlowDir;
-        varying vec3 vDir;
-        void main() {
-          vec3 d = normalize(vDir);
-          float h = d.y;
-          vec3 c = mix(uHorizon, uTop, pow(smoothstep(-0.02, 0.9, h), 0.6));
-          c = mix(c, uHorizon * 0.55, smoothstep(0.0, -0.3, h));
-          float g = max(0.0, dot(d, uGlowDir));
-          c += uGlow * (pow(g, 40.0) * 2.0 + pow(g, 6.0) * 0.5);
-          gl_FragColor = vec4(c, 1.0);
-          #include <tonemapping_fragment>
-          #include <colorspace_fragment>
-        }`,
-    });
-    this.dome = new THREE.Mesh(new THREE.SphereGeometry(8500, 48, 24), this.domeMat);
-    this.dome.renderOrder = -10;
-    this.dome.frustumCulled = false;
-    this.dome.visible = false;
-    scene.add(this.dome);
-
-    // ── Stars ──
-    {
-      const n = 2400;
-      const pos = new Float32Array(n * 3);
-      const size = new Float32Array(n);
-      const phase = new Float32Array(n);
-      let seed = 4242;
-      const r = () => {
-        seed = (seed * 16807) % 2147483647;
-        return seed / 2147483647;
-      };
-      for (let i = 0; i < n; i++) {
-        const y = 0.04 + Math.pow(r(), 0.8) * 0.96;
-        const a = r() * Math.PI * 2;
-        const rr = Math.sqrt(1 - y * y);
-        pos.set([Math.cos(a) * rr * 8000, y * 8000, Math.sin(a) * rr * 8000], i * 3);
-        size[i] = 0.8 + Math.pow(r(), 6) * 2.6;
-        phase[i] = r() * 100;
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
-      g.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
-      this.starMat = new THREE.ShaderMaterial({
-        transparent: true,
-        depthWrite: false,
-        fog: false,
-        blending: THREE.AdditiveBlending,
-        uniforms: { uTime: { value: 0 }, uK: { value: 1 }, uPx: { value: 1 } },
-        vertexShader: /* glsl */ `
-          attribute float aSize, aPhase;
-          uniform float uTime, uPx;
-          varying float vA;
-          void main() {
-            vA = (0.55 + 0.45 * sin(uTime * (1.3 + fract(aPhase) * 2.0) + aPhase)) * min(1.0, aSize * 0.6);
-            gl_PointSize = (1.2 + aSize) * uPx;
-            vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            gl_Position = p.xyww;
-          }`,
-        fragmentShader: /* glsl */ `
-          uniform float uK;
-          varying float vA;
-          void main() {
-            float d = length(gl_PointCoord - 0.5) * 2.0;
-            float a = pow(max(0.0, 1.0 - d), 2.0) * vA * uK;
-            gl_FragColor = vec4(vec3(0.85, 0.9, 1.0) * a * 2.2, 1.0);
-          }`,
-      });
-      this.stars = new THREE.Points(g, this.starMat);
-      this.stars.frustumCulled = false;
-      this.stars.renderOrder = -9;
-      this.stars.visible = false;
-      scene.add(this.stars);
-    }
-
-    // ── Moon ──
-    this.moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex.moonTexture(), fog: false, depthWrite: false, color: 0xdfe6f2 }));
-    this.moon.scale.setScalar(260);
-    this.moonHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex.poolTexture(), fog: false, depthWrite: false, color: 0x1e2c48, blending: THREE.AdditiveBlending, transparent: true }));
-    this.moonHalo.scale.setScalar(2400);
-    this.moon.renderOrder = this.moonHalo.renderOrder = -8;
-    this.moon.visible = this.moonHalo.visible = false;
-    scene.add(this.moonHalo, this.moon);
+    // ── The sky (4G): one shader for every weather and time ──
+    this.sky = new SkyDome(scene);
 
     // ── Pools of light under every street lamp ──
     {
@@ -467,6 +385,7 @@ export class Environment {
     this.rainApplied = true;
     if (!this.p) return;
     this.scaleRain();
+    if (this.conditions.weather === 'rain') this.sky.setStorm(0.35 + 0.65 * k);
     (this.scene.fog as THREE.FogExp2).density = this.p.fogD;
     this.wetSurfaces();
     this.configureRain();
@@ -496,20 +415,12 @@ export class Environment {
     this.scaleRain();
     const v = this.v;
     const scene = this.scene;
-    v.sky.visible = p.sky === 'sky';
-    this.dome.visible = p.sky === 'dome';
-    const du = this.domeMat.uniforms;
-    (du.uTop.value as THREE.Color).setHex(p.top);
-    (du.uHorizon.value as THREE.Color).setHex(p.horizon);
-    (du.uGlow.value as THREE.Color).setHex(p.glow);
+    v.sky.visible = false;
     v.sunDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - Math.max(2, p.sunElev)), THREE.MathUtils.degToRad(p.sunAz));
-    (du.uGlowDir.value as THREE.Vector3).copy(v.sunDir);
     (v.sky.material.uniforms.sunPosition.value as THREE.Vector3).copy(v.sunDir);
-    this.stars.visible = p.stars > 0.02;
-    this.starMat.uniforms.uK.value = p.stars;
-    this.moon.visible = this.moonHalo.visible = p.moon;
-    this.moon.position.copy(v.sunDir).multiplyScalar(7600);
-    this.moonHalo.position.copy(v.sunDir).multiplyScalar(7700);
+    this.sky.setLook({ top: p.top, horizon: p.horizon, glow: p.glow, sunCol: 0xffe2a8, sunDisc: p.sunDisc, moon: p.moon ? 1 : 0, cover: p.cover, cloudLit: p.cloudLit, cloudDark: p.cloudDark, cloudRim: p.cloudRim, stars: p.stars }, v.sunDir);
+    this.sky.setStorm(c.weather === 'rain' ? 0.35 + 0.65 * this.rainK : 0);
+    this.sky.setQuality(this.quality);
 
     // lights and fog
     v.sun.color.setHex(p.sunColor);
@@ -523,9 +434,8 @@ export class Environment {
     // a dusk-to-night race steps its reflection map in quarters (each one is cached)
     scene.environment = this.envMap(c.time === 'dynamic' ? presetFor(c, Math.round(this.dynT * 4) / 4) : p);
     scene.environmentIntensity = p.envI;
-    const cm = v.clouds.material as THREE.MeshBasicMaterial;
-    cm.color.setHex(p.cloud);
-    cm.opacity = p.cloudO;
+    // the old flat cloud deck gives way to the sky's own clouds (4G)
+    v.clouds.visible = false;
     for (const m of v.mats.ridges) m.color.setHex(p.ridge);
 
     // emissive things
@@ -624,7 +534,7 @@ export class Environment {
 
   /** Reflection map for a preset: its sky, a dark ground and (at night) lamp glows round the horizon. */
   private envMap(p: Preset): THREE.Texture {
-    const key = `${p.sky}|${p.top}|${p.horizon}|${p.envGround}|${p.envLamps}|${p.sunElev}`;
+    const key = `${p.sky}|${p.top}|${p.horizon}|${p.envGround}|${p.envLamps}|${p.sunElev}|${p.cover}|${p.cloudLit}|${p.stars}`;
     const hit = this.envCache.get(key);
     if (hit) return hit;
     const envScene = new THREE.Scene();
@@ -636,7 +546,7 @@ export class Environment {
       }
       envScene.add(this.envSky);
     } else {
-      envScene.add(new THREE.Mesh(this.dome.geometry, this.domeMat));
+      envScene.add(new THREE.Mesh(this.sky.mesh.geometry, this.sky.mat));
     }
     const ground = new THREE.Mesh(new THREE.CircleGeometry(4000, 24), new THREE.MeshBasicMaterial({ color: p.envGround }));
     ground.rotation.x = -Math.PI / 2;
@@ -657,7 +567,7 @@ export class Environment {
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const prevExposure = this.renderer.toneMappingExposure;
     this.renderer.toneMappingExposure = 0.5;
-    const t = pmrem.fromScene(envScene, 0.02, 1, 10000).texture;
+    const t = this.sky.quiet(() => pmrem.fromScene(envScene, 0.02, 1, 10000).texture);
     this.renderer.toneMappingExposure = prevExposure;
     pmrem.dispose();
     envScene.remove(this.envSky);
@@ -666,6 +576,8 @@ export class Environment {
   }
 
   private heads: { i: number; d: number }[] = [];
+  private flashWas = false;
+  private flashCol = new THREE.Color(0xc8d6ff);
   private tmpV = new THREE.Vector3();
   private tmpM = new THREE.Matrix4();
   private tmpQ = new THREE.Quaternion();
@@ -683,10 +595,16 @@ export class Environment {
       if (this.camVel.lengthSq() > 150 * 150) this.camVel.set(0, 0, 0); // a camera cut, not motion
     }
     this.lastCam.copy(cam);
-    this.dome.position.copy(cam);
-    this.stars.position.copy(cam);
-    this.starMat.uniforms.uTime.value = time % 1000;
-    this.starMat.uniforms.uPx.value = pxScale;
+    // the sky: clouds drift, shooting stars, lightning (which lights the whole scene for a moment)
+    const flash = this.sky.update(dt, time, cam);
+    const v = this.v;
+    if (flash > 0.002 || this.flashWas) {
+      const night = this.conditions.time === 'dusk' ? 0.35 : 1;
+      v.hemi.intensity = this.p.hemiI + flash * 1.1 * night;
+      v.hemi.color.setHex(this.p.hemiSky).lerp(this.flashCol, Math.min(1, flash * 1.5));
+      this.flashWas = flash > 0.002;
+    }
+    void pxScale;
     this.rain.update(time, cam, this.camVel, player ? player.position.y : cam.y - 1.5);
 
     // nearest lamp heads to the camera

@@ -120,6 +120,34 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
 
+## New in Phase 4G: the sky
+
+One new sky for every weather and time of day, drawn by a single shader (`src/world/SkyDome.ts`).
+
+- **Sunsets.** At dusk the sun sits low and big over the hills, the sky runs from deep blue
+  overhead to orange at the horizon, and the clouds are lit gold on the sun side and purple
+  underneath. Cars, paint and wet roads pick it up through the reflections.
+- **Clouds that move.** They drift on the wind and are lit by the sun or the moon, with bright
+  edges facing it. A clear night has a few; a cloudy night has big banks with gaps where the
+  stars and moon show through; rain is one heavy deck.
+- **Night sky.** A dense star field (several layers, twinkling, warmer and cooler stars) with the
+  Milky Way band and its dust lanes, fading towards the horizon. A crescent moon with a halo.
+- **Shooting stars** on clear nights, every few seconds, and now and then a shower of several
+  streaking together. Settings → Shooting stars.
+- **Lightning in the rain.** Forked bolts far off over the hills, the clouds round them lighting
+  up, the whole circuit flashing for a moment, and the thunder arriving later the further away
+  it struck (sound covers about 340 m a second): a crack when it's close, then a rolling rumble.
+  It comes more often the harder it rains. **Settings → Lightning: On, Soft (gentler flashes)
+  or Off**, for anyone who'd rather not have flashing.
+- **Crows.** The birds are now black crows that row and glide, and at dusk a long loose line of
+  them flies home across the setting sun.
+- **Lens dirt.** Smudges and specks on the lens light up round bright lights: the sun, the
+  floodlights, lightning, the searchlight. Settings → Lens fringe and dirt.
+
+Online, each player sees their own shooting stars and lightning (they are scenery, not shared).
+Pictures in `docs/4g/`: `sunset-chase.jpg`, `sunset-crows.jpg`, `sunset-sky.jpg`, `milky-way.jpg`,
+`meteor-shower.jpg`, `cloudy-night-moon.jpg`, `lightning.jpg`.
+
 ## New in Phase 4F.1: realism pass on the 4F leftovers
 
 **Real searchlight shadows (High and Ultra).** Cars, police and roadblocks in Air One's light now
@@ -986,10 +1014,11 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
      track (done)
    - 4F. Smarter police: squads, roadblock gaps, a pursuit bounty, the search and hiding
      spots; searchlight shadows, floodlights that light the cars (done)
-   - **4F.1. Real searchlight shadows, the Medium haze fixed, Air One smooth and steady
-     online, its lights at night (this build)**
-   - 4G. Graphics for this map: a new night and dusk sky with clouds, TAA, lens dirt, better
-     car paint and glass, wet tarmac puddles, and the trackside closer up (next)
+   - 4F.1. Real searchlight shadows, the Medium haze fixed, Air One smooth and steady
+     online, its lights at night (done)
+   - **4G. The sky: sunsets, moving clouds, stars and the Milky Way, a crescent moon,
+     shooting stars, lightning and thunder, crows, lens dirt (this build)**
+   - 4G.2. Temporal anti-aliasing, better car paint and glass, the trackside closer up (next)
    - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder
    - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

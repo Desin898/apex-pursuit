@@ -58,6 +58,10 @@ export interface Settings {
   airDrops: boolean;
   /** 4E: a short shot from the helicopter when it arrives */
   airCutIn: boolean;
+  /** 4G: lightning in the rain: full flashes, soft (gentler on the eyes), or none */
+  lightning: 'on' | 'soft' | 'off';
+  /** 4G: shooting stars on clear nights */
+  meteors: boolean;
   /** 4D.1: music plays (starts on the first click or key) */
   music: boolean;
   /** 4D.1: keep the music going during races */
@@ -128,6 +132,8 @@ export const defaults: Settings = {
   airSupport: 'heat3',
   airDrops: true,
   airCutIn: true,
+  lightning: 'on',
+  meteors: true,
   music: true,
   musicRaces: true,
   musicVolume: 0.6,
