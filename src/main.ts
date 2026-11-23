@@ -93,6 +93,8 @@ class Game {
   private input = new InputManager();
   private haptics = new Haptics();
   private audio = new AudioEngine();
+  /** 4G.2: music paused by "music in races: off" (shared online as stopped) */
+  private musicHeld = false;
   private hud = new HUD(this.world);
   private menu = new Menu();
   private screens: Screens;
@@ -320,6 +322,14 @@ class Game {
     };
     this.online.onToast = (t) => this.hud.toast(t);
     this.online.getConditions = () => this.env.conditions;
+    // 4G.2: the host shares what its music is playing; friends with the same track play it in time
+    this.online.getMusic = () => {
+      const m = this.music;
+      if (this.settings.onlineMusic !== 'host' || !m.current || m.followingHost) return null;
+      return { id: m.current.id, title: m.current.title, artist: m.current.artist, pos: m.position, on: m.state === 'playing' && !this.musicHeld };
+    };
+    this.music.onBlocked = () => this.hud.toast("The host picks the music online · Settings → Online music to play your own");
+    this.online.onHostMusic = (m, late) => this.music.follow(this.settings.onlineMusic === 'host' ? m : null, late);
     this.online.onPursuit = (d) => {
       let p = this.race.pursuit;
       if (!p) {
@@ -419,6 +429,7 @@ class Game {
       if (m) for (const mm of Array.isArray(m) ? m : [m]) mm.needsUpdate = true;
     });
     this.post.aoOn = this.settings.ao; // 4C.1: GTAO is opt-in (it re-renders the whole scene)
+    this.post.taa = this.settings.antiAlias === 'taa';
     this.post.configure(q, window.innerWidth, window.innerHeight);
     this.post.beforeScene = () => this.beforeScene();
     this.resize();
@@ -748,7 +759,8 @@ class Game {
       else m.next();
     }
     // "music in races: off" pauses it while driving, then it carries on in the menus
-    m.hold(!this.settings.musicRaces && (this.state === 'playing' || this.state === 'paused' || this.state === 'photo'));
+    this.musicHeld = !this.settings.musicRaces && (this.state === 'playing' || this.state === 'paused' || this.state === 'photo');
+    m.hold(this.musicHeld);
   }
 
   // ── 4C.2: Online panel (join / host) ──
@@ -1651,6 +1663,11 @@ class Game {
         { label: 'Skip track (M · L3 + R3)', value: () => (this.music.current ? this.music.current.artist : '—'), adjust: () => this.music.next() },
         { label: 'Music volume', value: () => pct(s.musicVolume), adjust: (d) => ((s.musicVolume = step(s.musicVolume, d, 0, 1, 0.05)), done()) },
         { label: 'Music in races', value: () => (s.musicRaces ? 'On' : 'Off (menus only)'), adjust: () => ((s.musicRaces = !s.musicRaces), done()) },
+        {
+          label: 'Online music',
+          value: () => (s.onlineMusic === 'host' ? "Everyone hears the host's" : 'Everyone plays their own'),
+          adjust: () => ((s.onlineMusic = s.onlineMusic === 'host' ? 'mine' : 'host'), done()),
+        },
         { label: 'Engine volume', value: () => pct(s.mixEngine), adjust: (d) => ((s.mixEngine = step(s.mixEngine, d, 0, 1, 0.1)), done()) },
         { label: 'Effects volume (tyres, rain, crashes)', value: () => pct(s.mixFx), adjust: (d) => ((s.mixFx = step(s.mixFx, d, 0, 1, 0.1)), done()) },
         { label: 'Sirens volume', value: () => pct(s.mixSiren), adjust: (d) => ((s.mixSiren = step(s.mixSiren, d, 0, 1, 0.1)), done()) },
@@ -1669,6 +1686,15 @@ class Game {
           value: () => (s.quality !== 'ultra' ? 'Ultra only' : s.ao ? 'On' : 'Off'),
           adjust: () => {
             s.ao = !s.ao;
+            this.applyQuality(s.quality);
+            done();
+          },
+        },
+        {
+          label: 'Edge smoothing',
+          value: () => (s.quality === 'low' ? 'Medium and up' : s.antiAlias === 'taa' ? 'TAA (smoothest, least shimmer)' : s.quality === 'medium' ? 'SMAA (sharp)' : 'MSAA (sharp)'),
+          adjust: () => {
+            s.antiAlias = s.antiAlias === 'taa' ? 'msaa' : 'taa';
             this.applyQuality(s.quality);
             done();
           },
@@ -2035,6 +2061,8 @@ class Game {
 
     // ── Online: read everyone's latest state, publish ours ──
     this.online.update(rawDt);
+    // 4G.2: hosting, offline or not sharing: our own music again
+    if (this.music.followingHost && (this.online.status !== 'online' || this.online.isHost || this.settings.onlineMusic !== 'host')) this.music.unfollow();
     if (this.online.status === 'online') this.refreshOnlineUi();
     const netLive = this.online.status === 'online' && this.state !== 'menu';
 

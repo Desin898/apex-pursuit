@@ -120,6 +120,53 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
 
+## New in Phase 4G.2: friends hear the host's music, thunder you can hear, sharper edges
+
+**Online: everyone hears the host's music.** When you host, the track you're playing is shared
+with your friends (just its name and where it is: about 40 bytes per update, no audio is sent).
+A friend who has the same song in their music plays it in time with you, from their own copy
+(matched by title and artist, so their file can have a different name). A friend who doesn't
+have it hears no music and sees what you're playing ("not in your music"), so they can add it.
+While you host, their skip and play buttons wait (the host picks the music). Settings → Online
+music: *Everyone hears the host's* (default) or *Everyone plays their own*. If the host has no
+music, or picks *Everyone plays their own*, each friend plays their own as before. Tested with
+three players (`tools/musictest.py`): a friend with the song stays within 0.1 s of the host.
+
+**Thunder you can hear.** It was there, but nearly all of it was deep rumble below 150 Hz,
+which laptop speakers, phones and most headphones can't play, under the engine and the rain.
+Now it's a tearing crack when the strike is close, then rolling booms in the 100–700 Hz range
+that come back two or three times, with the deep rumble underneath, about 9 dB louder. Far
+strikes sound duller (the air soaks up the high notes), and strikes are a little closer, so
+the thunder comes 1.5 to 6 seconds after the flash.
+
+**A cheaper sky.** The sky is now drawn after the scenery, so its shader only runs where the
+sky actually shows (in a normal race view, hills, stands and cars cover much of the screen),
+and its broad shapes use cheaper noise. About two-thirds less work for the same look.
+
+**Smoother edges: TAA.** Settings → Edge smoothing → TAA (Medium and up). The camera shifts by a
+fraction of a pixel every frame, and each pixel blends with where it was last frame (found from
+the depth and the camera, with cars moved by their own motion); last frame's colour is held
+inside this frame's local colour range so moving things don't leave trails. It smooths what
+MSAA can't: the wire in the catch fences, thin lines, shimmering highlights. The default stays
+MSAA (Medium: SMAA), which is a little sharper.
+
+**Car paint and glass.**
+- The clear coat now has a gentle *orange peel* ripple, like real paint, so reflections aren't
+  a perfect mirror.
+- *Pearl* paint shifts colour with the angle (iridescence).
+- Glass is smoked green-blue with a true glass reflection.
+- **In the rain, water beads on the paint and glass**: little domes that bend the reflections,
+  coming and going with how wet the track is.
+
+**The trackside, close up.**
+- **Concrete barriers** are 16 m of hand-worn panels: black tyre rubber where cars have
+  scraped along, chipped paint, rain streaks from the top, grime at the foot, dark joints.
+- **Tyre walls** are real tyres, hollow in the middle with a grooved face, stacked a little
+  unevenly.
+- **Braking boards** (150, 100, 50) on the run up to every corner after a straight.
+
+Pictures in `docs/4g2/`.
+
 ## New in Phase 4G: the sky
 
 One new sky for every weather and time of day, drawn by a single shader (`src/world/SkyDome.ts`).
@@ -1016,9 +1063,10 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
      spots; searchlight shadows, floodlights that light the cars (done)
    - 4F.1. Real searchlight shadows, the Medium haze fixed, Air One smooth and steady
      online, its lights at night (done)
-   - **4G. The sky: sunsets, moving clouds, stars and the Milky Way, a crescent moon,
-     shooting stars, lightning and thunder, crows, lens dirt (this build)**
-   - 4G.2. Temporal anti-aliasing, better car paint and glass, the trackside closer up (next)
-   - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder
+   - 4G. The sky: sunsets, moving clouds, stars and the Milky Way, a crescent moon,
+     shooting stars, lightning and thunder, crows, lens dirt (done)
+   - **4G.2. Online music from the host, audible thunder, a cheaper sky, TAA, paint and glass
+     with rain beads, trackside detail (this build)**
+   - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder (next)
    - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

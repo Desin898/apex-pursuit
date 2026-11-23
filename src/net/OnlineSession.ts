@@ -23,6 +23,7 @@ import { Settings } from '../core/Settings';
 import { CarSpec, NetCar, packCar, Race, validNetCar } from '../game/Race';
 import { EDITIONS, lookFromPaint, lookOf } from '../vehicle/Cars';
 import { openTransport, Transport, TransportOptions } from './Transport';
+import type { SharedTrack } from '../audio/MusicLibrary';
 
 export type OnlineStatus = 'off' | 'connecting' | 'online' | 'unavailable';
 export const MAX_HUMANS = 4;
@@ -74,6 +75,15 @@ interface HostBlock {
   t: number; // time of day index (TIMES)
   /** police state in a Pursuit Race (untrusted: Pursuit.unpack checks it) */
   pz: unknown;
+  /** 4G.2: the host's music: [track id, title, artist, seconds in, playing 0/1] (absent: not shared) */
+  mu?: SharedTrack | null;
+}
+
+function parseMusic(v: unknown): SharedTrack | null {
+  if (!Array.isArray(v) || v.length < 5) return null;
+  const str = (x: unknown, n: number) => (typeof x === 'string' ? x.slice(0, n) : '');
+  const pos = typeof v[3] === 'number' && Number.isFinite(v[3]) ? Math.max(0, Math.min(36000, v[3])) : 0;
+  return { id: str(v[0], 80), title: str(v[1], 80), artist: str(v[2], 60), pos, on: v[4] === 1 };
 }
 
 const cleanName = (v: unknown): string => {
@@ -99,7 +109,7 @@ function parseHost(h: unknown): HostBlock | null {
     a.push(e[2] === -1 ? [e[0], e[1], -1, `${cleanName(e[3])}`] : [e[0], e[1], e[2]]);
   }
   const q = Array.isArray(o.q) ? (o.q.filter((x) => typeof x === 'string').slice(0, 8) as string[]) : [];
-  return { vn: typeof o.vn === 'string' ? o.vn.slice(0, 32) : undefined, ph: o.ph === 0 ? 0 : 1, q, st: typeof o.st === 'number' && Number.isFinite(o.st) ? o.st : -1, id: o.id, cd: Math.max(0, Math.min(10, o.cd)), r, a, ai: o.ai as number[][], pz: o.pz, l: isInt(o.l, 0, 20) ? (o.l as number) : 3, w: isInt(o.w, 0, WEATHERS.length - 1) ? (o.w as number) : 0, t: isInt(o.t, 0, TIMES.length - 1) ? (o.t as number) : 0 };
+  return { vn: typeof o.vn === 'string' ? o.vn.slice(0, 32) : undefined, ph: o.ph === 0 ? 0 : 1, q, st: typeof o.st === 'number' && Number.isFinite(o.st) ? o.st : -1, id: o.id, cd: Math.max(0, Math.min(10, o.cd)), r, a, ai: o.ai as number[][], pz: o.pz, mu: parseMusic(o.mu), l: isInt(o.l, 0, 20) ? (o.l as number) : 3, w: isInt(o.w, 0, WEATHERS.length - 1) ? (o.w as number) : 0, t: isInt(o.t, 0, TIMES.length - 1) ? (o.t as number) : 0 };
 }
 
 export class OnlineSession {
@@ -151,6 +161,10 @@ export class OnlineSession {
   onConditions: (c: Conditions) => void = () => {};
   /** guests: the host's police state arrived */
   onPursuit: (d: unknown) => void = () => {};
+  /** 4G.2 host: what our music is playing (null = not sharing) */
+  getMusic: () => SharedTrack | null = () => null;
+  /** 4G.2 guests: the host's music every update (null = the host isn't sharing); `late` in s */
+  onHostMusic: (m: SharedTrack | null, late: number) => void = () => {};
   private heatSeen = new Map<string, number>();
   private myHeat = 0;
 
@@ -371,6 +385,8 @@ export class OnlineSession {
           w: WEATHERS.indexOf(this.getConditions().weather),
           t: TIMES.indexOf(this.getConditions().time),
         };
+        const mu = this.getMusic();
+        if (mu) (state.h as Record<string, unknown>).mu = [mu.id, mu.title, mu.artist, Math.round(mu.pos * 10) / 10, mu.on ? 1 : 0];
       }
       t.publish(state);
     }
@@ -494,6 +510,7 @@ export class OnlineSession {
     if (typeof hb.ri === 'number') r.rainK = Math.max(0, Math.min(1, hb.ri / 100));
     r.targetLaps = hb.l;
     if (hb.pz) this.onPursuit(hb.pz);
+    this.onHostMusic(hb.mu ?? null, Math.max(0, this.ping) / 2000);
     const cw = WEATHERS[hb.w];
     const ct = TIMES[hb.t];
     const now = this.getConditions();

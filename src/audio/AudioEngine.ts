@@ -432,47 +432,71 @@ export class AudioEngine {
     this.burst(6000, 3000, 1, 0.16 * a, 0.12, 'highpass'); // the crack
   }
   /**
-   * 4G: thunder from a lightning strike `dist` m away, heard `delay` s after the flash: a sharp
-   * crack when it's close, then a low rumble that rolls on for a few seconds.
+   * 4G: thunder from a lightning strike `dist` m away, heard `delay` s after the flash.
+   * 4G.2: rebuilt so it carries on any speaker: a tearing crack when it's close, a body in the
+   * 100-700 Hz range (what laptop and phone speakers can play), then rolls that come back two
+   * or three times as the sound bounces off the clouds; the deep rumble is only underneath.
+   * Far strikes lose their top end (the air soaks up high notes over distance).
    */
   thunder(dist: number, delay: number): void {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;
     const t0 = ctx.currentTime + delay;
-    const near = 1 / (1 + (dist / 1100) ** 2);
-    const play = (f0: number, f1: number, type: BiquadFilterType, q: number, gain: number, attack: number, dur: number, roll: number) => {
+    const near = 1 / (1 + (dist / 1400) ** 2);
+    const top = Math.max(900, 6000 - dist * 1.6); // the far ones are duller
+    const out = ctx.createGain();
+    out.gain.value = 2.8; // it has to carry over the engine and the rain
+    // all of it through one low-pass that dulls with distance
+    const air = ctx.createBiquadFilter();
+    air.type = 'lowpass';
+    air.frequency.value = top;
+    air.Q.value = 0.5;
+    out.connect(air).connect(this.fxBus);
+    const noise = (start: number, dur: number) => {
       const src = ctx.createBufferSource();
       src.buffer = this.noise;
       src.loop = true;
+      src.start(start, Math.random() * 1.8);
+      src.stop(start + dur + 0.1);
+      return src;
+    };
+    const band = (src: AudioNode, type: BiquadFilterType, f0: number, f1: number, q: number, start: number, dur: number) => {
       const f = ctx.createBiquadFilter();
       f.type = type;
       f.Q.value = q;
-      f.frequency.setValueAtTime(f0, t0);
-      f.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(gain, t0 + attack);
-      g.gain.exponentialRampToValueAtTime(0.0006, t0 + dur);
-      src.connect(f).connect(g);
-      if (roll > 0) {
-        // the rolling: the loudness swells and sags as the sound comes off different clouds
-        const lfo = ctx.createOscillator();
-        lfo.frequency.value = 0.7 + Math.random() * 0.9;
-        const lg = ctx.createGain();
-        lg.gain.value = roll;
-        const m = ctx.createGain();
-        m.gain.value = 1 - roll * 0.5;
-        lfo.connect(lg).connect(m.gain);
-        g.connect(m).connect(this.fxBus);
-        lfo.start(t0);
-        lfo.stop(t0 + dur + 0.1);
-      } else g.connect(this.fxBus);
-      src.start(t0, Math.random() * 1.5);
-      src.stop(t0 + dur + 0.1);
+      f.frequency.setValueAtTime(f0, start);
+      f.frequency.exponentialRampToValueAtTime(f1, start + dur);
+      src.connect(f);
+      return f;
     };
-    if (dist < 1500) play(5200, 1400, 'highpass', 0.7, 0.22 * near, 0.006, 0.35, 0);
-    play(220, 55, 'lowpass', 0.8, 0.55 * (0.35 + 0.65 * near), 0.18 + (dist / 3000) * 0.5, 3.2 + Math.random() * 2.5, 0.45);
-    play(90, 40, 'lowpass', 1.2, 0.4 * (0.4 + 0.6 * near), 0.3, 4 + Math.random() * 2, 0.3);
+    const env = (node: AudioNode, start: number, peak: number, attack: number, dur: number) => {
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.exponentialRampToValueAtTime(peak, start + attack);
+      g.gain.exponentialRampToValueAtTime(peak * 0.35, start + attack + dur * 0.35);
+      g.gain.exponentialRampToValueAtTime(0.0003, start + dur);
+      node.connect(g).connect(out);
+    };
+    // the crack: a fast tearing run of bright bursts (close strikes only)
+    if (dist < 1600) {
+      const k = 0.6 * near;
+      for (let i = 0; i < 6; i++) {
+        const st = t0 + i * (0.025 + Math.random() * 0.05);
+        env(band(noise(st, 0.25), 'bandpass', 3800 - i * 300, 1200, 0.9, st, 0.22), st, k * (1 - i * 0.12), 0.004, 0.2 + i * 0.03);
+      }
+    }
+    // the body and its rolls: each roll a swell of 120-700 Hz noise, later ones softer and duller
+    const rolls = 3 + Math.floor(Math.random() * 3);
+    let at = t0 + (dist < 1600 ? 0.12 : 0.05);
+    for (let i = 0; i < rolls; i++) {
+      const dur = 1.1 + Math.random() * 1.6;
+      const peak = (0.55 + 0.45 * near) * (1 - i * 0.16) * (0.8 + Math.random() * 0.3);
+      env(band(noise(at, dur), 'bandpass', 720 - i * 70, 260, 0.55, at, dur), at, peak * 1.3, 0.08 + Math.random() * 0.15, dur);
+      at += dur * (0.45 + Math.random() * 0.35);
+    }
+    // the deep rumble underneath it all (felt more than heard on small speakers)
+    const total = at - t0 + 1.5;
+    env(band(noise(t0, total), 'lowpass', 140, 50, 0.7, t0, total), t0 + 0.1, 0.22 * (0.5 + 0.5 * near), 0.4, total);
   }
 
   /** A smoke canister landing and starting to hiss. */

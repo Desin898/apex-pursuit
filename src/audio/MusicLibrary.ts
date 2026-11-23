@@ -39,6 +39,28 @@ interface PackEntry {
 
 export type MusicState = 'empty' | 'stopped' | 'playing' | 'paused';
 
+/** 4G.2: what the host is playing in an online session (sent with the host's race state) */
+export interface SharedTrack {
+  id: string;
+  title: string;
+  artist: string;
+  /** seconds into the track when it was sent */
+  pos: number;
+  /** playing (false: the host stopped the music) */
+  on: boolean;
+}
+
+/** the same song in two libraries: tidy lowercase title + artist, no punctuation */
+export function trackKey(title: string, artist: string): string {
+  const k = (x: string) =>
+    x
+      .toLowerCase()
+      .replace(/\(.*?\)|\[.*?\]/g, '')
+      .replace(/feat\.?.*$/, '')
+      .replace(/[^a-z0-9]+/g, '');
+  return `${k(artist)}|${k(title)}`;
+}
+
 /** "Artist - Title (SPOTISAVER).mp3" → names, and tidy leftovers like "#U00ae" */
 export function cleanName(s: string): string {
   return s
@@ -150,6 +172,12 @@ export class MusicLibrary {
   private wantPlay = false;
   private paused = false; // paused by the game (e.g. music off in races)
   private urls: string[] = [];
+  // 4G.2: following the host's music online
+  private following = false;
+  /** the host's track when this library doesn't have it ('' = we have it, or not following) */
+  hostMissing = '';
+  /** a skip / play / stop the player asked for while the music follows the host */
+  onBlocked: () => void = () => {};
 
   constructor(off: string[] = []) {
     this.off = new Set(off);
@@ -263,7 +291,7 @@ export class MusicLibrary {
     if (this.unlocked) return;
     this.unlocked = true;
     this.wantPlay = autoplay;
-    if (autoplay && this.tracks.length) this.next();
+    if (autoplay && this.tracks.length && !this.following) this.next();
   }
 
   setOn(id: string, on: boolean): void {
@@ -294,8 +322,78 @@ export class MusicLibrary {
     this.order = ids;
   }
 
+  /** online: the music follows the host (the player's own controls wait until it ends) */
+  get followingHost(): boolean {
+    return this.following;
+  }
+
+  /**
+   * 4G.2: play what the host plays. `m` is the host's track (null = the host isn't sharing:
+   * back to our own music); `late` = how old the message is (s). Cheap: call every frame.
+   */
+  follow(m: SharedTrack | null, late = 0): void {
+    if (!m) {
+      if (this.following) this.unfollow();
+      return;
+    }
+    if (!this.following) {
+      this.following = true;
+      this.onChange();
+    }
+    const t = this.tracks.find((x) => x.id === m.id) ?? this.tracks.find((x) => trackKey(x.title, x.artist) === trackKey(m.title, m.artist));
+    const missing = t ? '' : m.on && m.title ? (m.artist ? `${m.title} · ${m.artist}` : m.title) : '';
+    if (missing !== this.hostMissing) {
+      this.hostMissing = missing;
+      this.onChange();
+    }
+    if (!t || !m.on) {
+      // nothing to play (we don't have it, or the host stopped): stay quiet
+      if (this.audio && !this.audio.paused) this.audio.pause();
+      if (this.state === 'playing') {
+        this.state = this.current ? 'paused' : 'stopped';
+        this.onChange();
+      }
+      return;
+    }
+    const want = m.pos + late + 0.08;
+    if (this.current !== t || !this.audio) {
+      this.wantPlay = true;
+      this.start(t);
+      const a = this.audio!;
+      const seek = () => {
+        try {
+          a.currentTime = Math.max(0, want + (performance.now() - asked) / 1000);
+        } catch {
+          /* not seekable yet */
+        }
+      };
+      const asked = performance.now();
+      if (a.readyState >= 1) seek();
+      else a.addEventListener('loadedmetadata', seek, { once: true });
+      return;
+    }
+    const a = this.audio;
+    if (a.readyState >= 1 && Math.abs(a.currentTime - want) > 1.2) a.currentTime = Math.max(0, want);
+    if (a.paused && !this.paused) {
+      this.wantPlay = true;
+      void a.play().catch(() => {});
+      this.state = 'playing';
+      this.onChange();
+    }
+  }
+
+  /** leave the host's music: back to our own rotation */
+  unfollow(): void {
+    if (!this.following) return;
+    this.following = false;
+    this.hostMissing = '';
+    if (this.wantPlay || this.state === 'playing') this.next();
+    this.onChange();
+  }
+
   /** ✕: play this track now; afterwards the rotation carries on */
   playTrack(id: string): void {
+    if (this.following) return this.onBlocked();
     const t = this.tracks.find((x) => x.id === id);
     if (!t) return;
     this.wantPlay = true;
@@ -304,7 +402,9 @@ export class MusicLibrary {
 
   /** L3 + R3 / M: next in the rotation */
   next(): void {
+    if (this.following) return this.onBlocked();
     if (!this.tracks.length) return;
+    if (!this.order.length && this.enabled.length) this.reshuffle();
     let ids = this.order;
     if (!ids.length) {
       // everything switched off: nothing to rotate, but a chosen track can still play
@@ -328,6 +428,7 @@ export class MusicLibrary {
 
   /** △: play / stop */
   toggle(): void {
+    if (this.following) return this.onBlocked();
     if (this.state === 'playing') this.stop();
     else if (this.current && this.audio) {
       this.wantPlay = true;
@@ -381,11 +482,12 @@ export class MusicLibrary {
     a.src = t.src;
     a.volume = this.volume;
     a.addEventListener('ended', () => {
-      if (this.audio === a) this.next();
+      // following the host: its next track comes from the host
+      if (this.audio === a && !this.following) this.next();
     });
     a.addEventListener('error', () => {
       // a missing or unreadable file: skip it (once), don't stall the music
-      if (this.audio === a) setTimeout(() => this.audio === a && this.next(), 400);
+      if (this.audio === a && !this.following) setTimeout(() => this.audio === a && this.next(), 400);
     });
     a.addEventListener('loadedmetadata', () => {
       if (Number.isFinite(a.duration)) t.dur = a.duration;
@@ -393,7 +495,14 @@ export class MusicLibrary {
     this.audio = a;
     this.current = t;
     this.state = 'playing';
-    if (!this.paused) void a.play().catch(() => (this.state = 'paused'));
+    if (!this.paused)
+      void a.play().catch(() => {
+        // an interrupted play() fails late: only count it if this track really isn't playing
+        if (this.audio === a && a.paused) {
+          this.state = 'paused';
+          this.onChange();
+        }
+      });
     this.onTrack(t);
     this.onChange();
   }

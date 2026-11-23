@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { rng } from '../../core/math';
+import * as tex from '../textures';
 import { mainOnly } from '../../core/layers';
 import { WORLD } from '../../config';
 import type { WorldData } from '../WorldData';
@@ -451,19 +452,87 @@ export function buildProvingGroundsDressing(ctx: DressingContext): Dressing {
             spots.push([t.x + tx * along + ox * j * 0.62, 0.13 + l * 0.25, t.z + tz * along + oz * j * 0.62, l === 2 && k % 3 === 0 ? 1 : 0]);
           }
     }
-    const tg = new THREE.CylinderGeometry(0.31, 0.31, 0.24, 12);
-    const tm = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
+    // 4G.2: a real tyre, hollow in the middle, with shoulders, a grooved face and sidewall rings
+    const prof = [
+      [0.19, 0.09], [0.205, 0.115], [0.24, 0.12], [0.285, 0.115], [0.305, 0.095], [0.314, 0.05], [0.316, 0], [0.314, -0.05], [0.305, -0.095], [0.285, -0.115], [0.24, -0.12], [0.205, -0.115], [0.19, -0.09], [0.185, 0], [0.19, 0.09],
+    ].map(([x, y]) => new THREE.Vector2(x, y));
+    const tg = new THREE.LatheGeometry(prof, 16);
+    const tyreTex = tex.tyreTexture();
+    tyreTex.repeat.set(1, 1);
+    const tm = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, map: tyreTex });
     const im = new THREE.InstancedMesh(tg, tm, spots.length);
     const m = new THREE.Matrix4();
     const c = new THREE.Color();
+    const tr = rng(321);
+    const tq = new THREE.Quaternion();
+    const te = new THREE.Euler();
+    const ts = new THREE.Vector3(1, 1, 1);
+    const tp = new THREE.Vector3();
     spots.forEach(([x, y, z, painted], i) => {
-      im.setMatrixAt(i, m.makeTranslation(x, y, z));
+      // stacked by hand: a little off-centre and not quite level
+      tq.setFromEuler(te.set((tr() - 0.5) * 0.06, tr() * 6.28, (tr() - 0.5) * 0.06));
+      im.setMatrixAt(i, m.compose(tp.set(x + (tr() - 0.5) * 0.03, y, z + (tr() - 0.5) * 0.03), tq, ts));
       im.setColorAt(i, c.set(painted ? (i % 2 ? 0xe9e9e9 : 0xc22a2a) : 0x121314));
     });
     im.receiveShadow = true;
     im.name = 'tyre-walls';
     mainOnly(im);
     scene.add(im);
+  }
+
+  // ── 4G.2: braking boards (150 / 100 / 50 m) on the run up to each real corner ─────────────
+  {
+    const CORNER = 1 / 140; // same as the barriers
+    const boards: { x: number; z: number; yaw: number; k: number }[] = [];
+    let quiet = 0; // metres of straight-ish track before this sample
+    for (let i = 0; i < N * 2; i++) {
+      const sm = S[i % N];
+      if (Math.abs(sm.curv) <= CORNER) {
+        quiet += WORLD.sampleSpacing;
+        continue;
+      }
+      if (quiet >= 170 && i >= N) {
+        // the first sample of a corner after a real straight: boards back down the straight
+        const side = sm.curv > 0 ? -1 : 1; // outside of the turn
+        const off = WORLD.trackHalfWidth + WORLD.kerbWidth + WORLD.runoffWidth + 1.6;
+        [150, 100, 50].forEach((d, k) => {
+          const b = S[(i - Math.round(d / WORLD.sampleSpacing) + N * 2) % N];
+          boards.push({ x: b.x + b.nx * off * side, z: b.z + b.nz * off * side, yaw: Math.atan2(-b.tx, -b.tz), k });
+        });
+      }
+      quiet = 0;
+    }
+    if (boards.length) {
+      const postG = new THREE.BoxGeometry(0.08, 1.4, 0.08);
+      postG.translate(0, 0.7, 0);
+      const posts = new THREE.InstancedMesh(postG, new THREE.MeshStandardMaterial({ color: 0x5c5f63, metalness: 0.6, roughness: 0.5 }), boards.length * 2);
+      const faceG = new THREE.PlaneGeometry(1.3, 0.95);
+      faceG.translate(0, 1.55, 0.05);
+      const labels = ['150', '100', '50'];
+      const faces = labels.map((l) => new THREE.InstancedMesh(faceG, new THREE.MeshStandardMaterial({ map: tex.distanceBoardTexture(l), roughness: 0.6, side: THREE.DoubleSide }), boards.filter((b) => b.k === labels.indexOf(l)).length));
+      const used = [0, 0, 0];
+      const bm = new THREE.Matrix4();
+      const bq = new THREE.Quaternion();
+      const by = new THREE.Vector3(0, 1, 0);
+      const bp = new THREE.Vector3();
+      const one = new THREE.Vector3(1, 1, 1);
+      boards.forEach((b, i) => {
+        bq.setFromAxisAngle(by, b.yaw);
+        const sx = Math.cos(b.yaw);
+        const sz = -Math.sin(b.yaw);
+        posts.setMatrixAt(i * 2, bm.compose(bp.set(b.x + sx * 0.55, 0, b.z + sz * 0.55), bq, one));
+        posts.setMatrixAt(i * 2 + 1, bm.compose(bp.set(b.x - sx * 0.55, 0, b.z - sz * 0.55), bq, one));
+        faces[b.k].setMatrixAt(used[b.k]++, bm.compose(bp.set(b.x, 0, b.z), bq, one));
+      });
+      posts.castShadow = true;
+      posts.name = 'braking-boards';
+      scene.add(posts);
+      for (const f of faces) {
+        f.castShadow = true;
+        f.name = 'braking-boards';
+        scene.add(f);
+      }
+    }
   }
 
   // ── Gravel traps ────────────────────────────────────────────────────────────

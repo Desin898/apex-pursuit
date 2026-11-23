@@ -134,18 +134,113 @@ export function kerbTexture(): THREE.CanvasTexture {
   return finish(c);
 }
 
+/**
+ * Concrete barrier paint (4G.2: close-up detail). 16 m of barrier in one texture, eight 2 m
+ * panels, red and white, each one used differently: black tyre rubber smeared where cars have
+ * leaned on it, paint chipped back to concrete, rain streaks running down from the top, grime
+ * at the foot, and the dark joints between the panels.
+ */
 export function barrierTexture(): THREE.CanvasTexture {
-  const [c, ctx] = canvas(256, 64);
-  ctx.fillStyle = '#b9b7b0';
-  ctx.fillRect(0, 0, 256, 64);
-  ctx.fillStyle = '#b3161b';
-  ctx.fillRect(0, 0, 128, 64);
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.fillRect(0, 52, 256, 12); // grime along the base
-  ctx.fillRect(0, 0, 3, 64);
-  ctx.fillRect(126, 0, 3, 64);
-  grain(ctx, 256, 64, 1400, 8, 0, 70, 0.25);
+  const W = 2048;
+  const H = 128;
+  const [c, ctx] = canvas(W, H);
+  const r = rng(77);
+  const P = W / 8;
+  for (let k = 0; k < 8; k++) {
+    const x0 = k * P;
+    ctx.fillStyle = k % 2 ? '#bcbab3' : '#b3161b';
+    ctx.fillRect(x0, 0, P, H);
+    // a slightly different shade per panel (repainted at different times)
+    ctx.fillStyle = `rgba(${r() < 0.5 ? '0,0,0' : '255,255,255'},${0.03 + r() * 0.05})`;
+    ctx.fillRect(x0, 0, P, H);
+  }
+  // fine concrete grain over everything
+  grain(ctx, W, H, 26000, 8, 0, 80, 0.16, 1.2);
+  // chips: paint knocked off back to grey concrete
+  for (let i = 0; i < 260; i++) {
+    const x = r() * W;
+    const y = H * (0.15 + r() * 0.75);
+    ctx.fillStyle = `rgba(${150 + r() * 40},${148 + r() * 40},${140 + r() * 40},${0.6 + r() * 0.4})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 1 + r() * 4, 0.8 + r() * 2.5, r() * 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // tyre rubber: long dark smears at wheel height where cars have scraped along
+  for (let i = 0; i < 26; i++) {
+    const x = r() * W;
+    const y = H * (0.42 + r() * 0.3);
+    const len = 40 + r() * 260;
+    const g = ctx.createLinearGradient(x, 0, x + len, 0);
+    const a = 0.25 + r() * 0.45;
+    g.addColorStop(0, 'rgba(12,12,12,0)');
+    g.addColorStop(0.2 + r() * 0.3, `rgba(12,12,12,${a})`);
+    g.addColorStop(1, 'rgba(12,12,12,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(x + len / 2, y, len / 2, 3 + r() * 9, (r() - 0.5) * 0.06, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // rain streaks down from the top edge
+  for (let i = 0; i < 220; i++) {
+    const x = r() * W;
+    const len = H * (0.15 + r() * 0.55);
+    const g = ctx.createLinearGradient(0, 0, 0, len);
+    g.addColorStop(0, `rgba(40,36,30,${0.12 + r() * 0.18})`);
+    g.addColorStop(1, 'rgba(40,36,30,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, 0, 1 + r() * 2.5, len);
+  }
+  // grime and splashed mud along the foot
+  const foot = ctx.createLinearGradient(0, H * 0.62, 0, H);
+  foot.addColorStop(0, 'rgba(30,26,20,0)');
+  foot.addColorStop(1, 'rgba(30,26,20,0.55)');
+  ctx.fillStyle = foot;
+  ctx.fillRect(0, H * 0.62, W, H * 0.38);
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = `rgba(35,30,24,${0.2 + r() * 0.4})`;
+    ctx.fillRect(r() * W, H * (0.7 + r() * 0.3), 1 + r() * 2, 1 + r() * 2);
+  }
+  // panel joints and their shadow
+  for (let k = 0; k <= 8; k++) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(k * P - 2, 0, 4, H);
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(k * P + 2, 0, 6, H);
+  }
   return finish(c);
+}
+
+/** 4G.2: a tyre's tread and sidewall: grooves across the face, lettering-free sidewall rings. */
+export function tyreTexture(): THREE.CanvasTexture {
+  const [c, ctx] = canvas(256, 64);
+  ctx.fillStyle = '#9a9a9a';
+  ctx.fillRect(0, 0, 256, 64);
+  // v runs inner wall → bottom sidewall → tread → top sidewall → inner wall
+  for (let x = 0; x < 256; x += 8) {
+    ctx.fillStyle = '#4a4a4a';
+    ctx.fillRect(x, 26, 3, 12); // tread grooves on the face
+  }
+  ctx.fillStyle = '#7a7a7a';
+  for (const y of [10, 14, 50, 54]) ctx.fillRect(0, y, 256, 1); // sidewall rings
+  grain(ctx, 256, 64, 2500, 5, 60, 170, 0.35, 1.2);
+  return finish(c, true, false);
+}
+
+/** 4G.2: a braking-distance board: white, a black edge, the number. */
+export function distanceBoardTexture(label: string): THREE.CanvasTexture {
+  const [c, ctx] = canvas(128, 96);
+  ctx.fillStyle = '#f2f2ee';
+  ctx.fillRect(0, 0, 128, 96);
+  ctx.strokeStyle = '#111';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, 122, 90);
+  ctx.fillStyle = '#111';
+  ctx.font = '900 54px "Arial Black", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, 64, 51);
+  grain(ctx, 128, 96, 500, 3, 120, 200, 0.12, 1);
+  return finish(c, false);
 }
 
 export function hazardTexture(): THREE.CanvasTexture {

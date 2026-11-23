@@ -17,6 +17,7 @@ import { CarLook, FINISHES } from './Cars';
 import { clamp, curve1, smoothstep } from '../core/math';
 import { VehicleState, WHEEL_X, WHEEL_Z } from './VehiclePhysics';
 import { beamTexture, poolTexture } from '../world/textures';
+import { groundUniforms } from '../fx/Reflections';
 
 /** The cabin volume cut out of the body skin in the cockpit view (car-body space). */
 const COCKPIT_CUT = { halfW: 0.6, y0: 0.3, z0: -0.92, z1: 0.8 };
@@ -517,6 +518,92 @@ function flakeNormalMap(): THREE.CanvasTexture {
   return t;
 }
 
+/** 4G.2: "orange peel": the gentle waviness every real clear coat has, so reflections ripple a little. */
+function peelNormalMap(): THREE.CanvasTexture {
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d')!;
+  // smooth height field from a few soft blobs, then its slope as the normal
+  const h = new Float32Array(S * S);
+  let seed = 11;
+  const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let k = 0; k < 220; k++) {
+    const cx = r() * S;
+    const cy = r() * S;
+    const rad = 4 + r() * 9;
+    const a = (r() - 0.5) * 2;
+    for (let y = -16; y <= 16; y++)
+      for (let x = -16; x <= 16; x++) {
+        const d = (x * x + y * y) / (rad * rad);
+        if (d > 4) continue;
+        const px = (Math.floor(cx + x) + S) % S;
+        const py = (Math.floor(cy + y) + S) % S;
+        h[py * S + px] += a * Math.exp(-d);
+      }
+  }
+  const img = ctx.createImageData(S, S);
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      const dx = h[y * S + ((x + 1) % S)] - h[y * S + ((x + S - 1) % S)];
+      const dy = h[((y + 1) % S) * S + x] - h[((y + S - 1) % S) * S + x];
+      const i = (y * S + x) * 4;
+      img.data[i] = Math.max(0, Math.min(255, 128 - dx * 90));
+      img.data[i + 1] = Math.max(0, Math.min(255, 128 - dy * 90));
+      img.data[i + 2] = 255;
+      img.data[i + 3] = 255;
+    }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(4, 4);
+  return t;
+}
+
+/**
+ * 4G.2: rain beads on the paint and glass. Water stands in round drops on a waxed car: each one
+ * a little dome (it bends the reflections), glossy, a touch darker underneath. They come with the
+ * wetness of the track and dry off with it. `q` is the shader expression for 2D surface coords.
+ */
+function addBeads(m: THREE.MeshPhysicalMaterial, key: string, q: string, objectPos: boolean): void {
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uBeadWet = groundUniforms.uWet;
+    if (objectPos) {
+      sh.vertexShader = 'varying vec3 vBeadP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vBeadP = position;');
+    }
+    sh.fragmentShader = (objectPos ? 'varying vec3 vBeadP;\n' : '') + 'uniform float uBeadWet;\n' + sh.fragmentShader
+      .replace(
+        '#include <clearcoat_normal_fragment_maps>',
+        `#include <clearcoat_normal_fragment_maps>
+        if (uBeadWet > 0.02) {
+          vec2 bq = ${q};
+          vec2 bc = floor(bq);
+          vec2 bf = fract(bq);
+          float bh = fract(sin(dot(bc, vec2(127.1, 311.7))) * 43758.5453);
+          // a wet car is glossier all over
+          roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.55, uBeadWet);
+          if (bh < uBeadWet * 0.45) {
+            vec2 cc = vec2(fract(bh * 13.7), fract(bh * 71.3)) * 0.5 + 0.25;
+            float rr = 0.08 + 0.16 * fract(bh * 37.1);
+            vec2 d = (bf - cc) / rr;
+            float l = dot(d, d);
+            if (l < 1.0) {
+              mat3 btb = getTangentFrame(-vViewPosition, nonPerturbedNormal, bq);
+              vec3 bn = normalize(btb * vec3(d * 0.9, sqrt(1.0 - l)));
+              normal = normalize(mix(normal, bn, 0.85));
+              #ifdef USE_CLEARCOAT
+                clearcoatNormal = bn;
+              #endif
+              roughnessFactor = min(roughnessFactor, 0.04);
+              diffuseColor.rgb *= 0.96;
+            }
+          }
+        }`,
+      );
+  };
+  m.customProgramCacheKey = () => key;
+}
+
 function blobShadowTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 64;
@@ -698,6 +785,7 @@ interface SharedMaterials {
   disc: THREE.Material;
   caliper: THREE.MeshStandardMaterial;
   flake: THREE.Texture;
+  peel: THREE.Texture;
   blob: THREE.Texture;
 }
 let matCache: SharedMaterials | null = null;
@@ -713,7 +801,8 @@ function sharedMaterials(): SharedMaterials {
     gloss: new THREE.MeshPhysicalMaterial({ color: 0x08090b, metalness: 0.6, roughness: 0.28, clearcoat: 0.8, clearcoatRoughness: 0.2 }),
     matte: new THREE.MeshStandardMaterial({ color: 0x070708, metalness: 0.1, roughness: 0.9 }),
     carbon: new THREE.MeshStandardMaterial({ color: 0x101114, metalness: 0.55, roughness: 0.42 }),
-    glass: new THREE.MeshPhysicalMaterial({ color: 0x05080b, metalness: 0.3, roughness: 0.03, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.7 }),
+    // 4G.2: smoked glass: a little green-blue in the tint, a true glass reflection (IOR 1.5)
+    glass: new THREE.MeshPhysicalMaterial({ color: 0x040a0c, metalness: 0.15, roughness: 0.02, ior: 1.52, specularIntensity: 1, clearcoat: 1, clearcoatRoughness: 0.015, envMapIntensity: 1.9 }),
     head: new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xdcebff, emissiveIntensity: 5 }),
     steel: new THREE.MeshStandardMaterial({ color: 0x2a2b2f, metalness: 1, roughness: 0.25, side: THREE.DoubleSide }),
     rim: new THREE.MeshStandardMaterial({ color: 0x1b1c20, metalness: 1, roughness: 0.3, side: THREE.DoubleSide }),
@@ -721,8 +810,13 @@ function sharedMaterials(): SharedMaterials {
     disc: new THREE.MeshStandardMaterial({ color: 0x7d8086, metalness: 1, roughness: 0.42 }),
     caliper: new THREE.MeshStandardMaterial({ color: 0xc8141c, metalness: 0.3, roughness: 0.4 }),
     flake: flakeNormalMap(),
+    peel: peelNormalMap(),
     blob: blobShadowTexture(),
   };
+  const g = matCache.glass as THREE.MeshPhysicalMaterial;
+  g.clearcoatNormalMap = matCache.peel;
+  g.clearcoatNormalScale = new THREE.Vector2(0.015, 0.015);
+  addBeads(g, 'glass-4g2', 'vBeadP.xz * 34.0 + vBeadP.y * 9.0', true);
   return matCache;
 }
 const wheelCache = new Map<number, ReturnType<typeof buildWheelParts>>();
@@ -785,7 +879,13 @@ export class PhantomX1 {
       envMapIntensity: 1.15,
       normalMap: M.flake,
       normalScale: new THREE.Vector2(0.08, 0.08),
+      // 4G.2: the clear coat ripples a little (orange peel), so reflections aren't a perfect mirror
+      clearcoatNormalMap: M.peel,
+      clearcoatNormalScale: new THREE.Vector2(0.05, 0.05),
+      iridescenceIOR: 1.35,
+      iridescenceThicknessRange: [220, 520],
     });
+    addBeads(this.paint, 'paint-4g2', 'vNormalMapUv * vec2(3.2, 4.0)', false);
     this.tailMat = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff1508, emissiveIntensity: 2.2 });
     this.reverseMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffffff, emissiveIntensity: 0 });
     const mats: Record<PartKey, THREE.Material> = { paint: this.paint, gloss: M.gloss, matte: M.matte, carbon: M.carbon, glass: M.glass, head: M.head, tail: this.tailMat, reverse: this.reverseMat, steel: M.steel };
@@ -1002,6 +1102,9 @@ export class PhantomX1 {
     this.paint.clearcoat = f.clearcoat;
     this.paint.normalScale.set(look.finish === 'metallic' || look.finish === 'pearl' ? 0.1 : 0.03, look.finish === 'metallic' || look.finish === 'pearl' ? 0.1 : 0.03);
     this.paint.sheen = look.finish === 'pearl' ? 0.6 : 0;
+    // 4G.2: pearl shifts colour with the angle, like real pearlescent paint
+    this.paint.iridescence = look.finish === 'pearl' ? 0.55 : 0;
+    this.paint.clearcoatNormalScale.setScalar(look.finish === 'matte' ? 0 : 0.05);
     this.paint.sheenColor.setHex(0xbfe8ff);
     this.rimMat.color.setHex(look.rim);
     this.caliperMat.color.setHex(look.caliper);

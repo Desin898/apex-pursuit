@@ -285,10 +285,14 @@ export class MusicMenu {
     const l = this.lib;
     const t = l.current;
     const mk = musicKeys(this.device);
-    const k = `${t?.id ?? ''}#${l.state}#${l.tracks.length}#${this.device}`;
+    const k = `${t?.id ?? ''}#${l.state}#${l.tracks.length}#${this.device}#${l.followingHost}#${l.hostMissing}`;
     if (el.dataset.k !== k) {
       el.dataset.k = k;
-      const line = t && l.state === 'playing' ? `<span class="label">Now playing</span><b>${esc(t.title)}</b><span class="by">${esc(t.artist)}</span>` : l.tracks.length ? `<span class="label">Music</span><b>${t ? 'Stopped' : 'Not playing'}</b>` : `<span class="label">Music</span><b>Add your music</b>`;
+      // 4G.2 online: the host's music (or what it is, if we don't have it)
+      const label = l.followingHost ? "Host's music" : 'Now playing';
+      const line = l.followingHost && l.hostMissing
+        ? `<span class="label">Host's music</span><b>${esc(l.hostMissing)}</b><span class="by">not in your music</span>`
+        : t && l.state === 'playing' ? `<span class="label">${label}</span><b>${esc(t.title)}</b><span class="by">${esc(t.artist)}</span>` : l.tracks.length ? `<span class="label">Music</span><b>${t ? 'Stopped' : 'Not playing'}</b>` : `<span class="label">Music</span><b>Add your music</b>`;
       el.innerHTML = `<i class="note">♪</i>${line}<kbd>${mk.open}</kbd>`;
       this.shownAt = performance.now();
     }

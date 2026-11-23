@@ -79,6 +79,14 @@ const FRAG = /* glsl */ `
     for (int i = 0; i < OCT; i++) { s += a * vnoise(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; }
     return s;
   }
+  // a cheaper three-octave one for the broad shapes (the warp, the Milky Way's glow)
+  float fbm3(vec2 p) {
+    float s = 0.5 * vnoise(p);
+    p = p * 2.03 + vec2(17.1, 9.2);
+    s += 0.25 * vnoise(p);
+    p = p * 2.03 + vec2(17.1, 9.2);
+    return s + 0.125 * vnoise(p);
+  }
 
   // one layer of stars: a star in some cells of a 3D grid, drawn at its own direction
   vec3 starLayer(vec3 d, float scale, float keep, float px, float gain) {
@@ -119,8 +127,8 @@ const FRAG = /* glsl */ `
       float u = atan(dot(d, e1), dot(d, e2));
       float band = exp(-b * b * 20.0);
       vec2 bp = vec2(u * 5.0, b * 22.0);
-      float glowB = fbm(bp * 0.8 + 3.0);
-      float dust = smoothstep(0.4, 0.8, fbm(bp * vec2(0.7, 1.1) + vec2(9.0, 1.0))) * exp(-b * b * 90.0);
+      float glowB = fbm3(bp * 0.8 + 3.0);
+      float dust = smoothstep(0.4, 0.8, fbm3(bp * vec2(0.7, 1.1) + vec2(9.0, 1.0))) * exp(-b * b * 90.0);
       float core = pow(max(0.0, dot(d, normalize(e2 * 0.2 + e1 * 0.98))), 6.0);
       vec3 mw = mix(vec3(0.5, 0.58, 0.78), vec3(0.9, 0.78, 0.66), core) * band * (0.35 + glowB) * (1.0 - dust * 0.6);
       vec3 st = starLayer(d, 520.0, 0.955 - band * 0.05, px, 0.55)
@@ -163,7 +171,7 @@ const FRAG = /* glsl */ `
         vec3 nn = vec3(q, sqrt(max(0.0, 1.0 - r2)));
         vec3 L = normalize(vec3(-0.92, -0.3, -0.2));
         float lit = smoothstep(-0.03, 0.1, dot(nn, L));
-        float maria = 0.82 + 0.18 * fbm(q * 3.0 + 4.0);
+        float maria = 0.82 + 0.18 * fbm3(q * 3.0 + 4.0);
         vec3 face = mix(vec3(0.05, 0.06, 0.08), vec3(1.25, 1.22, 1.12) * maria * 2.2, lit);
         c = mix(c, face, edge * uMoon);
       }
@@ -184,7 +192,7 @@ const FRAG = /* glsl */ `
       float y = max(h, 0.0) + 0.07;
       vec2 uv = d.xz / y * 0.75 + uWind * uTime;
       #ifdef WARP
-        vec2 w = vec2(fbm(uv * 0.45 + 3.1), fbm(uv * 0.45 + 7.7));
+        vec2 w = vec2(fbm3(uv * 0.45 + 3.1), fbm3(uv * 0.45 + 7.7));
         uv += (w - 0.5) * 1.8;
       #endif
       float n = fbm(uv * 1.05);
@@ -291,7 +299,9 @@ export class SkyDome {
       fragmentShader: FRAG,
     });
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(8500, 64, 32), this.mat);
-    this.mesh.renderOrder = -10;
+    // 4G.2: drawn after everything solid, so the (fairly heavy) sky shader only runs on pixels
+    // where sky actually shows; the hills, stands and cars in front are skipped by the depth test
+    this.mesh.renderOrder = 100000;
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
 
@@ -434,7 +444,7 @@ export class SkyDome {
       if (!this.strike && this.nextStrike <= 0) {
         this.nextStrike = 6 + this.rand() * 14;
         const az = this.aim ? Math.atan2(this.aim.x, this.aim.z) : this.rand() * Math.PI * 2;
-        const dist = this.aim ? 1300 : 700 + this.rand() * 2400;
+        const dist = this.aim ? 1300 : 500 + this.rand() * 1700;
         const bolt = this.aim ? true : dist < 2600 && this.rand() < 0.75;
         this.aim = null;
         const strokes = [0];

@@ -62,6 +62,13 @@ export interface Settings {
   lightning: 'on' | 'soft' | 'off';
   /** 4G: shooting stars on clear nights */
   meteors: boolean;
+  /**
+   * 4G.2 online music: 'host' = everyone hears what the host plays (a friend who has the same
+   * track hears it in time; one who doesn't hears none); 'mine' = everyone plays their own
+   */
+  onlineMusic: 'host' | 'mine';
+  /** 4G.2: edge smoothing: 'msaa' (MSAA on High/Ultra, SMAA on Medium) or 'taa' (temporal: smoothest, least shimmer) */
+  antiAlias: 'msaa' | 'taa';
   /** 4D.1: music plays (starts on the first click or key) */
   music: boolean;
   /** 4D.1: keep the music going during races */
@@ -134,6 +141,8 @@ export const defaults: Settings = {
   airCutIn: true,
   lightning: 'on',
   meteors: true,
+  onlineMusic: 'host',
+  antiAlias: 'msaa',
   music: true,
   musicRaces: true,
   musicVolume: 0.6,

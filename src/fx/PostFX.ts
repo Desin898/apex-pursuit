@@ -313,11 +313,26 @@ class ScenePass extends Pass {
   setSize(w: number, h: number): void {
     this.rt.setSize(w, h);
   }
+  /** 4G.2 TAA: this frame's sub-pixel nudge in pixels (null = none) */
+  jitter: readonly [number, number] | null = null;
+  private saved = new THREE.Matrix4();
   render(renderer: THREE.WebGLRenderer, _w: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget): void {
     this.before?.();
     renderer.setRenderTarget(this.rt);
     renderer.clear();
+    const cam = this.camera as THREE.PerspectiveCamera;
+    if (this.jitter) {
+      this.saved.copy(cam.projectionMatrix);
+      const e = cam.projectionMatrix.elements;
+      e[8] += (this.jitter[0] * 2) / this.rt.width;
+      e[9] += (this.jitter[1] * 2) / this.rt.height;
+      cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+    }
     renderer.render(this.scene, this.camera);
+    if (this.jitter) {
+      cam.projectionMatrix.copy(this.saved);
+      cam.projectionMatrixInverse.copy(this.saved).invert();
+    }
     (this.copy.material as THREE.ShaderMaterial).uniforms.tDiffuse.value = this.rt.texture;
     renderer.setRenderTarget(readBuffer);
     this.copy.render(renderer);
@@ -327,6 +342,146 @@ class ScenePass extends Pass {
     this.copy.dispose();
   }
 }
+
+/**
+ * 4G.2: temporal anti-aliasing. Every frame the camera is nudged by a fraction of a pixel (a
+ * Halton pattern), and each pixel blends with where it was last frame (found from the depth and
+ * last frame's camera, cars moved by their own motion). Edges, fences and thin lines settle
+ * instead of shimmering. Last frame's colour is held inside the range of this frame's
+ * neighbours (variance clipping), so moving things don't leave ghosts behind.
+ */
+const TaaShader = {
+  uniforms: {
+    tCurrent: { value: null as THREE.Texture | null },
+    tHistory: { value: null as THREE.Texture | null },
+    tDepth: { value: null as THREE.Texture | null },
+    uInvViewProj: { value: new THREE.Matrix4() },
+    uPrevViewProj: { value: new THREE.Matrix4() },
+    uCars: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, -999, 0, 0)) },
+    uCarDelta: { value: Array.from({ length: 12 }, () => new THREE.Vector3()) },
+    uTexel: { value: new THREE.Vector2(1, 1) },
+    uJitter: { value: new THREE.Vector2() },
+    uReset: { value: 1 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tCurrent, tHistory, tDepth;
+    uniform mat4 uInvViewProj, uPrevViewProj;
+    uniform vec4 uCars[12];
+    uniform vec3 uCarDelta[12];
+    uniform vec2 uTexel, uJitter;
+    uniform float uReset;
+    varying vec2 vUv;
+    vec3 toYCoCg(vec3 c) { return vec3(dot(c, vec3(0.25, 0.5, 0.25)), dot(c, vec3(0.5, 0.0, -0.5)), dot(c, vec3(-0.25, 0.5, -0.25))); }
+    vec3 fromYCoCg(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
+    // work on a compressed range so a few very bright pixels don't dominate
+    vec3 squash(vec3 c) { return c / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722))); }
+    vec3 unsquash(vec3 c) { return c / max(1e-4, 1.0 - dot(c, vec3(0.2126, 0.7152, 0.0722))); }
+    void main() {
+      // this frame, un-nudged (sample where the jitter put the pixel centre)
+      vec2 uv = vUv;
+      vec3 cur = squash(texture2D(tCurrent, uv).rgb);
+      // neighbours: mean and spread, and the nearest depth (keeps edges on the right object)
+      vec3 m1 = vec3(0.0), m2 = vec3(0.0);
+      float dn = 1.0;
+      vec2 dnUv = uv;
+      for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++) {
+          vec2 o = vec2(float(x), float(y)) * uTexel;
+          vec3 c = toYCoCg(squash(texture2D(tCurrent, uv + o).rgb));
+          m1 += c;
+          m2 += c * c;
+          float d = texture2D(tDepth, uv + o).r;
+          if (d < dn) { dn = d; dnUv = uv + o; }
+        }
+      m1 /= 9.0;
+      vec3 sigma = sqrt(max(vec3(0.0), m2 / 9.0 - m1 * m1));
+      vec3 lo = m1 - sigma * 1.25;
+      vec3 hi = m1 + sigma * 1.25;
+      // where this pixel was last frame
+      vec4 w = uInvViewProj * vec4(dnUv * 2.0 - 1.0, dn * 2.0 - 1.0, 1.0);
+      vec3 world = w.xyz / w.w;
+      if (dn < 0.99999) {
+        for (int i = 0; i < 12; i++) {
+          vec4 c = uCars[i];
+          if (c.w > 0.0 && distance(world, c.xyz) < c.w) { world -= uCarDelta[i]; break; }
+        }
+      }
+      vec4 p = uPrevViewProj * vec4(world, 1.0);
+      vec2 prev = p.xy / p.w * 0.5 + 0.5 + (uv - dnUv);
+      vec3 hist = toYCoCg(squash(texture2D(tHistory, prev).rgb));
+      hist = clamp(hist, lo, hi);
+      // more of the new frame when things move fast or the history is off screen
+      float moved = length((uv - prev) / uTexel);
+      float k = 0.9 - clamp(moved / 60.0, 0.0, 0.25);
+      if (uReset > 0.5 || prev.x < 0.0 || prev.y < 0.0 || prev.x > 1.0 || prev.y > 1.0) k = 0.0;
+      vec3 outc = mix(toYCoCg(cur), hist, k);
+      gl_FragColor = vec4(unsquash(fromYCoCg(outc)), 1.0);
+    }`,
+};
+
+class TaaPass extends Pass {
+  private a: THREE.WebGLRenderTarget;
+  private b: THREE.WebGLRenderTarget;
+  private quad = new FullScreenQuad(new THREE.ShaderMaterial({ ...TaaShader, uniforms: THREE.UniformsUtils.clone(TaaShader.uniforms), depthTest: false, depthWrite: false }));
+  private copy = new FullScreenQuad(new THREE.ShaderMaterial({ ...CopyShader, uniforms: THREE.UniformsUtils.clone(CopyShader.uniforms), depthTest: false, depthWrite: false }));
+  fresh = true;
+  constructor(w: number, h: number, depth: THREE.Texture) {
+    super();
+    const o = { type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false };
+    this.a = new THREE.WebGLRenderTarget(w, h, o);
+    this.b = new THREE.WebGLRenderTarget(w, h, o);
+    this.u.tDepth.value = depth;
+    this.u.uTexel.value.set(1 / w, 1 / h);
+  }
+  get u(): Record<string, THREE.IUniform> {
+    return (this.quad.material as THREE.ShaderMaterial).uniforms;
+  }
+  setSize(w: number, h: number): void {
+    this.a.setSize(w, h);
+    this.b.setSize(w, h);
+    this.u.uTexel.value.set(1 / w, 1 / h);
+    this.fresh = true;
+  }
+  render(renderer: THREE.WebGLRenderer, writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget): void {
+    const u = this.u;
+    u.tCurrent.value = readBuffer.texture;
+    u.tHistory.value = this.a.texture;
+    u.uReset.value = this.fresh ? 1 : 0;
+    this.fresh = false;
+    renderer.setRenderTarget(this.b);
+    this.quad.render(renderer);
+    (this.copy.material as THREE.ShaderMaterial).uniforms.tDiffuse.value = this.b.texture;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.copy.render(renderer);
+    const t = this.a;
+    this.a = this.b;
+    this.b = t;
+  }
+  dispose(): void {
+    this.a.dispose();
+    this.b.dispose();
+    this.quad.dispose();
+    this.copy.dispose();
+  }
+}
+
+/** Halton (2, 3): an even spread of sub-pixel offsets that repeats every 8 frames. */
+const HALTON = Array.from({ length: 8 }, (_, i) => {
+  const h = (b: number, n: number) => {
+    let f = 1;
+    let r = 0;
+    while (n > 0) {
+      f /= b;
+      r += f * (n % b);
+      n = Math.floor(n / b);
+    }
+    return r;
+  };
+  return [h(2, i + 1) - 0.5, h(3, i + 1) - 0.5] as const;
+});
 
 const SanitizeShader = {
   uniforms: { tDiffuse: { value: null as THREE.Texture | null } },
@@ -435,6 +590,10 @@ export class PostFX {
   private gtao: GTAOPass | null = null;
   private prevViewProj = new THREE.Matrix4();
   private hasPrev = false;
+  /** 4G.2: Settings → Anti-aliasing: TAA instead of MSAA / SMAA */
+  taa = false;
+  private taaPass: TaaPass | null = null;
+  private frameN = 0;
   /** photo mode depth of field (null = off) */
   photoDof: { focus: number; aperture: number } | null = null;
   /** cars for the motion blur: centre + radius, and how far each moved since last frame */
@@ -496,7 +655,8 @@ export class PostFX {
     composer.setPixelRatio(pr);
     composer.setSize(width, height);
     this.scenePass?.dispose();
-    this.scenePass = new ScenePass(this.scene, this.camera, W, H, cfg.msaa);
+    const useTaa = this.taa && q !== 'low';
+    this.scenePass = new ScenePass(this.scene, this.camera, W, H, useTaa ? 0 : cfg.msaa);
     this.scenePass.before = () => this.beforeScene?.();
     composer.addPass(this.scenePass);
     if (cfg.ao && this.aoOn) {
@@ -507,6 +667,9 @@ export class PostFX {
       composer.addPass(this.gtao);
     } else this.gtao = null;
     composer.addPass(new ShaderPass(SanitizeShader));
+    this.taaPass?.dispose();
+    this.taaPass = useTaa ? new TaaPass(W, H, this.scenePass.rt.depthTexture!) : null;
+    if (this.taaPass) composer.addPass(this.taaPass);
     if (cfg.motionBlur) {
       this.motion = new ShaderPass(MotionBlurShader);
       this.motion.uniforms.tDepth.value = this.scenePass.rt.depthTexture;
@@ -530,7 +693,7 @@ export class PostFX {
     composer.addPass(this.speed);
     composer.addPass(new OutputPass());
     // 4C: Medium has no MSAA, so smooth the edges after tone mapping with SMAA
-    if (cfg.msaa === 0) composer.addPass(new SMAAPass(W, H));
+    if (cfg.msaa === 0 && !useTaa) composer.addPass(new SMAAPass(W, H));
     this.composer = composer;
   }
 
@@ -542,6 +705,7 @@ export class PostFX {
       this.composer.setPixelRatio(pr);
       this.composer.setSize(width, height);
       this.scenePass?.setSize(Math.max(2, Math.floor(width * pr)), Math.max(2, Math.floor(height * pr)));
+      this.taaPass?.setSize(Math.max(2, Math.floor(width * pr)), Math.max(2, Math.floor(height * pr)));
       this.gtao?.setSize(Math.max(2, Math.floor(width * pr)), Math.max(2, Math.floor(height * pr)));
     }
     if (this.speed) this.speed.uniforms.uAspect.value = width / height;
@@ -569,6 +733,22 @@ export class PostFX {
       const cam = this.camera as THREE.PerspectiveCamera;
       cam.updateMatrixWorld();
       const vp = this.vpTmp.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      if (this.taaPass && this.scenePass) {
+        const j = HALTON[this.frameN++ % 8];
+        this.scenePass.jitter = j;
+        const tu = this.taaPass.u;
+        (tu.uInvViewProj.value as THREE.Matrix4).copy(vp).invert();
+        (tu.uPrevViewProj.value as THREE.Matrix4).copy(this.hasPrev ? this.prevViewProj : vp);
+        const cars = tu.uCars.value as THREE.Vector4[];
+        const del = tu.uCarDelta.value as THREE.Vector3[];
+        for (let i = 0; i < 12; i++) {
+          const c = this.carMotion[i];
+          if (c) {
+            cars[i].set(c.x, c.y, c.z, c.r);
+            del[i].set(c.dx, c.dy, c.dz);
+          } else cars[i].w = 0;
+        }
+      } else if (this.scenePass) this.scenePass.jitter = null;
       if (this.motion) {
         const mu = this.motion.uniforms;
         (mu.uInvViewProj.value as THREE.Matrix4).copy(vp).invert();

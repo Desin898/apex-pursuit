@@ -338,7 +338,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
         const nx = tz / l;
         const nz = -tx / l;
         if (i > 0) dist += Math.hypot(p.x - run.pts[i - 1].x, p.z - run.pts[i - 1].z);
-        const u = dist / 4;
+        const u = dist / 16; // 4G.2: one 16 m texture (eight panels, each worn differently)
         // cross-section: inner foot, inner top, outer top, outer foot (slightly splayed like a Jersey barrier)
         v.push(p.x + nx * (T + 0.1), 0, p.z + nz * (T + 0.1), p.x + nx * T * 0.5, H, p.z + nz * T * 0.5, p.x - nx * T * 0.5, H, p.z - nz * T * 0.5, p.x - nx * (T + 0.1), 0, p.z - nz * (T + 0.1));
         uv.push(u, 0, u, 0.82, u, 1, u, 0);
