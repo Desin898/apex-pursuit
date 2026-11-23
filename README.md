@@ -120,6 +120,37 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
 
+## New in Phase 4F.1: realism pass on the 4F leftovers
+
+**Real searchlight shadows (High and Ultra).** Cars, police and roadblocks in Air One's light now
+cast real shadows in the shape of the car, and the cars shade themselves too. It costs about
+0.3 ms a frame: the shadow is drawn with only what's near the beam, never the whole map. Medium
+keeps the painted shadow.
+
+**No more white haze on Medium.** The haze was the painted floodlight pool brightening your own
+headlights about six times over, which the bloom then spread across the screen. The pool now
+draws before the car light cards and is gentler, and Medium gets one real floodlight too (the
+tower nearest you), so cars under it are lit on Medium as well.
+
+**Air One looks right online.** A guest used to see the helicopter jump to each new update
+(20 a second, a few metres at a time). It now glides between them. In a real two-player test
+race the guest saw it within 3.5 m of where the host had it, 95% of the time, and moving as
+smoothly as on the host's screen (`tools/airtest.py`).
+
+**Air One sticks with one car.** With two players it used to swap between them every few
+seconds, flying 100–200 m back and forth. It now stays on its car, and only moves to the other
+one after the ground units have been on them for about 20 s (sooner if it has lost sight of its
+own).
+
+**Air One at night.** Its lights now show from far off, the way an aircraft's do: the red
+beacon, the white strobe, red and green nav lights, and the red and blue flashers. Look up the
+beam and the searchlight flares, blinding head-on.
+
+**The "AIR ONE" tag** no longer sits on top of the race board or other HUD panels.
+
+Pictures in `docs/4f1/`: `searchlight-real-shadow.jpg`, `floodlight-medium-fixed.jpg`,
+`searchlight-glare.jpg`, `air-one-lights.jpg`, `online-guest-view.jpg`.
+
 ## New in Phase 4F: smarter police
 
 **They work as a squad.** From Heat 2, the units round you take jobs: one gets out in front and
@@ -953,7 +984,12 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
    - 4E. Air One: a live police helicopter (searchlight, rotor wash, sound, smoke, spike
      strips, shock charges), gravel traps that drive like gravel, floodlights that light the
      track (done)
-   - **4F. Smarter police: squads, roadblock gaps, a pursuit bounty, the search and hiding
-     spots; searchlight shadows, floodlights that light the cars (this build)**
+   - 4F. Smarter police: squads, roadblock gaps, a pursuit bounty, the search and hiding
+     spots; searchlight shadows, floodlights that light the cars (done)
+   - **4F.1. Real searchlight shadows, the Medium haze fixed, Air One smooth and steady
+     online, its lights at night (this build)**
+   - 4G. Graphics for this map: a new night and dusk sky with clouds, TAA, lens dirt, better
+     car paint and glass, wet tarmac puddles, and the trackside closer up (next)
+   - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder
    - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

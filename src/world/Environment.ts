@@ -395,7 +395,8 @@ export class Environment {
       this.floodPools.count = fl.length;
       // per-tower brightness: a tower that has a real spot light on it drops its painted pool
       for (let i = 0; i < fl.length; i++) this.floodPools.setColorAt(i, new THREE.Color(1, 1, 1));
-      this.floodPools.renderOrder = 6;
+      // before the car light cards (6): the pool brightens the lit road, not the cards on top
+      this.floodPools.renderOrder = 5;
       this.floodPools.frustumCulled = false;
       this.floodPools.visible = false;
       scene.add(this.floodPools);
@@ -538,7 +539,7 @@ export class Environment {
     // floodlights: on at dusk, full at night (a little more in the rain, where they reflect)
     const fk = Math.max(0, Math.min(1, (p.lamps - 2) / 4));
     this.floodPools.visible = fk > 0.01 && this.floodPools.count > 0;
-    this.floodMat.color.setRGB(5.0 * fk, 5.0 * fk, 4.7 * fk);
+    this.floodMat.color.setRGB(3.6 * fk, 3.6 * fk, 3.4 * fk);
     this.renderer.toneMappingExposure = p.exposure * this.exposureK;
   }
 
@@ -568,7 +569,7 @@ export class Environment {
     }
     // 4F: real lights for the floodlight towers nearest the camera (High: 1, Ultra: 2), so the
     // cars passing under them are lit too, not just the ground
-    const floodCount = sp.lamps > 2 && this.world.floodlights.length ? ({ low: 0, medium: 0, high: 1, ultra: 2 } as Record<string, number>)[q] ?? 0 : 0;
+    const floodCount = sp.lamps > 2 && this.world.floodlights.length ? ({ low: 0, medium: 1, high: 1, ultra: 2 } as Record<string, number>)[q] ?? 0 : 0;
     while (this.floodSpots.length > floodCount) {
       const l = this.floodSpots.pop()!;
       scene.remove(l, l.target);

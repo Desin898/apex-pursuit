@@ -119,6 +119,11 @@ export class AirOne {
   private aimZ = 0;
   private side = 1;
   private time = 0;
+  /**
+   * 4F.1, online guests: the last state heard from the host and when. The helicopter on a guest's
+   * screen glides towards where that state says it is now, instead of jumping 20 times a second.
+   */
+  private net: { x: number; y: number; z: number; yaw: number; lx: number; lz: number; vx: number; vy: number; vz: number; lvx: number; lvz: number; t: number } | null = null;
   private radioT = 0;
   private target: RaceCar | null = null;
   private wasSeen = false;
@@ -248,9 +253,28 @@ export class AirOne {
       if (joined && h.mode === 'off' && level >= want && cooldown <= 0 && this.backT <= 0 && target) this.launch(target);
       if (h.active && (cooldown > 0 || this.from === 0) && h.mode !== 'leaving') this.leave(this.from === 0 ? '' : 'Air One, breaking off. I lost them under the cover.');
       if (h.active) this.fly(dt, target, level, cooldown);
-    }
+    } else if (h.active && this.net) this.glide(dt);
     this.sight(dt);
     this.stepDrops(dt);
+  }
+
+  /** Online guest: move towards where the host's last state says the helicopter is by now. */
+  private glide(dt: number): void {
+    const h = this.heli;
+    const n = this.net!;
+    // carry the last state forward by its age (a late packet doesn't freeze it in the air)
+    const age = Math.min(0.3, Math.max(0, this.time - n.t));
+    // move with its speed, then ease out what's left of the error (no lag at a steady speed)
+    const k = 1 - Math.exp(-dt * 7);
+    const ease = (now: number, at: number, rate: number) => now + rate * dt + (at + rate * age - (now + rate * dt)) * k;
+    h.x = ease(h.x, n.x, n.vx);
+    h.y = ease(h.y, n.y, n.vy);
+    h.z = ease(h.z, n.z, n.vz);
+    h.lx = ease(h.lx, n.lx, n.lvx);
+    h.lz = ease(h.lz, n.lz, n.lvz);
+    let dy = n.yaw - h.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    h.yaw += dy * k;
   }
 
   private launch(t: RaceCar): void {
@@ -697,15 +721,33 @@ export class AirOne {
     if (Array.isArray(x) && x.length >= 6 && x.every(fin)) {
       const v = x as number[];
       const was = h.active ? h.mode : 'off';
+      const n = {
+        x: clamp(v[0], -6000, 6000), y: clamp(v[1], -100, 400), z: clamp(v[2], -6000, 6000), yaw: v[3],
+        lx: clamp(v[4], -6000, 6000), lz: clamp(v[5], -6000, 6000),
+        vx: v.length > 7 ? clamp(v[6], -200, 200) : 0, vy: 0, vz: v.length > 7 ? clamp(v[7], -200, 200) : 0,
+        lvx: 0, lvz: 0, t: this.time,
+      };
+      const prev = this.net;
+      if (prev && h.active) {
+        // how fast the height and the searchlight's aim are moving (the host sends no rate for them)
+        const gap = Math.max(0.03, n.t - prev.t);
+        n.vy = clamp((n.y - prev.y) / gap, -40, 40);
+        n.lvx = clamp((n.lx - prev.lx) / gap, -120, 120);
+        n.lvz = clamp((n.lz - prev.lz) / gap, -120, 120);
+      }
+      this.net = n;
+      if (!h.active || Math.hypot(n.x - h.x, n.z - h.z) > 60) {
+        // first sight (or far off): put it straight there
+        h.x = n.x;
+        h.y = n.y;
+        h.z = n.z;
+        h.yaw = n.yaw;
+        h.lx = n.lx;
+        h.lz = n.lz;
+      }
       h.active = true;
-      h.x = clamp(v[0], -6000, 6000);
-      h.y = clamp(v[1], -100, 400);
-      h.z = clamp(v[2], -6000, 6000);
-      h.yaw = v[3];
-      h.lx = clamp(v[4], -6000, 6000);
-      h.lz = clamp(v[5], -6000, 6000);
-      h.vx = v.length > 7 ? clamp(v[6], -200, 200) : 0;
-      h.vz = v.length > 7 ? clamp(v[7], -200, 200) : 0;
+      h.vx = n.vx;
+      h.vz = n.vz;
       h.low = v.length > 8 ? clamp(v[8] / 100, 0, 1) : 0;
       h.mode = v.length > 9 ? MODES[clamp(Math.round(v[9]), 0, 3)] : 'chase';
       h.tactic = v.length > 10 ? TACTICS[clamp(Math.round(v[10]), 0, 3)] : 'trail';
@@ -715,6 +757,7 @@ export class AirOne {
       h.active = false;
       h.mode = 'off';
       h.sees = false;
+      this.net = null;
     }
     if (Array.isArray(d)) {
       const keep = new Set<number>();
@@ -749,5 +792,6 @@ export class AirOne {
     this.backT = 0;
     this.dropT = 6;
     this.target = null;
+    this.net = null;
   }
 }

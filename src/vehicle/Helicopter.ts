@@ -265,6 +265,15 @@ export class Helicopter {
   private flashR: THREE.MeshStandardMaterial;
   private flashB: THREE.MeshStandardMaterial;
   private landing: THREE.MeshStandardMaterial;
+  /**
+   * 4F.1: glints for the beacon, strobe, nav lights and flashers. They keep a fixed size on
+   * screen, the way a real aircraft's lights read from far off at night (the bulbs themselves are
+   * a few pixels at most past 50 m, and vanish without them).
+   */
+  private glare: THREE.Sprite;
+  private glareMat: THREE.SpriteMaterial;
+  private glareDir = new THREE.Vector3();
+  private glints: { m: THREE.SpriteMaterial; kind: 'beacon' | 'strobe' | 'navR' | 'navG' | 'red' | 'blue'; size: number; s: THREE.Sprite }[] = [];
   private lampMat: THREE.MeshStandardMaterial;
   /** the visible light cone (night, rain or fog) */
   readonly cone: THREE.Mesh;
@@ -489,6 +498,47 @@ export class Helicopter {
     const keep: THREE.Mesh[] = [this.disc, this.tailDisc];
     for (const g of [this.rotor, this.tailRotor]) g.traverse((o) => (o as THREE.Mesh).isMesh && keep.push(o as THREE.Mesh));
     mergeByMaterial(B, keep);
+    // glints (after the merge: sprites stay separate)
+    const gc = document.createElement('canvas');
+    gc.width = gc.height = 64;
+    const gx = gc.getContext('2d')!;
+    const rg = gx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    rg.addColorStop(0, 'rgba(255,255,255,1)');
+    rg.addColorStop(0.12, 'rgba(255,255,255,0.85)');
+    rg.addColorStop(0.35, 'rgba(255,255,255,0.1)');
+    rg.addColorStop(1, 'rgba(255,255,255,0)');
+    gx.fillStyle = rg;
+    gx.fillRect(0, 0, 64, 64);
+    // a faint horizontal streak, like a lens catching a bright point
+    const hg = gx.createLinearGradient(0, 0, 64, 0);
+    hg.addColorStop(0, 'rgba(255,255,255,0)');
+    hg.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+    hg.addColorStop(1, 'rgba(255,255,255,0)');
+    gx.fillStyle = hg;
+    gx.fillRect(0, 31, 64, 2);
+    const gtex = new THREE.CanvasTexture(gc);
+    gtex.colorSpace = THREE.SRGBColorSpace;
+    const glint = (col: number, x: number, y: number, z: number, kind: (typeof this.glints)[number]['kind'], size: number) => {
+      const m = new THREE.SpriteMaterial({ map: gtex, color: col, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false, fog: false, transparent: true, opacity: 0 });
+      const sp = new THREE.Sprite(m);
+      sp.position.set(x, y, z);
+      sp.scale.setScalar(size);
+      sp.renderOrder = 8;
+      B.add(sp);
+      this.glints.push({ m, kind, size, s: sp });
+    };
+    glint(0xff3030, 0, 1.62, -1.45, 'beacon', 0.045);
+    glint(0xffffff, 0, 2.0, -7.4, 'strobe', 0.07);
+    glint(0xff2a20, 0.98, 0.74, -6.4, 'navR', 0.022);
+    glint(0x40ff60, -0.98, 0.74, -6.4, 'navG', 0.022);
+    glint(0xff2030, 0.99, -0.35, 0.6, 'red', 0.04);
+    glint(0x3a6bff, -0.99, -0.35, 0.6, 'blue', 0.045);
+    // the searchlight's lamp: blinding when it points at you
+    this.glareMat = new THREE.SpriteMaterial({ map: gtex, color: 0xfff1d6, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false, fog: false, transparent: true, opacity: 0 });
+    this.glare = new THREE.Sprite(this.glareMat);
+    this.glare.renderOrder = 12;
+    this.glare.visible = false;
+    scene.add(this.glare);
     this.root.add(B);
     this.root.visible = false;
     scene.add(this.root);
@@ -528,11 +578,12 @@ export class Helicopter {
    * to the ground (0..1, turns the landing light on); night 0..1; `spotOn`: the real light is in
    * the scene.
    */
-  update(x: number, y: number, z: number, yaw: number, vx: number, vz: number, lx: number, lz: number, time: number, dt: number, night: number, active: boolean, spotOn: boolean, low = 0): void {
+  update(x: number, y: number, z: number, yaw: number, vx: number, vz: number, lx: number, lz: number, time: number, dt: number, night: number, active: boolean, spotOn: boolean, low = 0, cam?: THREE.Vector3): void {
     this.root.visible = active;
     const show = Math.max(night, this.haze * 0.7);
     this.cone.visible = active && show > 0.05;
     if (!active) {
+      this.glare.visible = false;
       this.spot.intensity = 0;
       this.pool.visible = false;
       this.fresh = true;
@@ -582,6 +633,18 @@ export class Helicopter {
     this.flashR.emissiveIntensity = red && blink ? 22 : 0;
     this.flashB.emissiveIntensity = !red && blink ? 26 : 0;
     this.landing.emissiveIntensity = 12 * low;
+    // glints: strongest at night; the strobe and beacon still catch the eye by day
+    const nk = 0.25 + 0.75 * night;
+    for (const g of this.glints) {
+      let a = 0;
+      if (g.kind === 'beacon') a = this.beacon.emissiveIntensity > 0 ? 1 : 0;
+      else if (g.kind === 'strobe') a = this.strobe.emissiveIntensity > 0 ? 1.4 : 0;
+      else if (g.kind === 'navR' || g.kind === 'navG') a = 0.75 * night;
+      else if (g.kind === 'red') a = this.flashR.emissiveIntensity > 0 ? 1 : 0;
+      else a = this.flashB.emissiveIntensity > 0 ? 1 : 0;
+      g.m.opacity = Math.min(1, a * nk);
+      g.s.visible = a > 0;
+    }
     // ── searchlight from under the nose to where it points ──
     this.root.updateMatrixWorld(true);
     const lamp = this.lampPos.set(-0.35, -1.0, 1.6);
@@ -604,6 +667,26 @@ export class Helicopter {
     // 4F: when Air One drops low the beam is close, so it's held to its 30 m brightness
     // instead of burning the car under it white
     this.spot.intensity = spotOn ? 5200 * lit * Math.min(1, Math.pow(len / 30, 1.6)) : 0;
+    // 4F.1: look up the beam and the lamp flares (a real searchlight is blinding head-on)
+    this.glare.visible = false;
+    if (cam) {
+      const v = this.glareDir.set(cam.x - lamp.x, cam.y - lamp.y, cam.z - lamp.z);
+      const dc = v.length() || 1;
+      const k = (v.x * dx + v.y * dy + v.z * dz) / (dc * len); // 1 = straight down the beam
+      const sm = (a: number, b: number, t: number) => {
+        const u = Math.max(0, Math.min(1, (t - a) / (b - a)));
+        return u * u * (3 - 2 * u);
+      };
+      const head = sm(0.95, 0.996, k);
+      const g = (0.22 * sm(0.4, 0.95, k) + head) * Math.max(night, 0.25) * (spotOn || show > 0.05 ? 1 : 0);
+      if (g > 0.01) {
+        this.glare.visible = true;
+        // a little towards you, so the nose doesn't cut the flare in half
+        this.glare.position.set(lamp.x + (v.x / dc) * 1.6, lamp.y + (v.y / dc) * 1.6, lamp.z + (v.z / dc) * 1.6);
+        this.glare.scale.setScalar(0.045 + 0.2 * head);
+        this.glareMat.opacity = Math.min(1, g);
+      }
+    }
     // without a real light, a soft pool on the ground shows where the beam lands
     this.pool.visible = !spotOn && show > 0.05;
     if (this.pool.visible) {

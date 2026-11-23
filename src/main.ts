@@ -223,6 +223,7 @@ class Game {
     this.props = new PropSystem(this.scene, this.world);
     this.particles = new Particles(this.scene);
     this.pview = new PursuitView(this.scene, this.world, this.particles);
+    this.pview.carRoots = () => this.carVisuals.map((v) => v.root);
     this.pview.carsForShadow = () => this.race.cars.filter((c) => !c.gone).map((c) => ({ x: c.s.x, z: c.s.z, yaw: c.s.yaw }));
     this.pview.attach(this.race.pursuit, this.settings.quality);
     // 4B.2: rain, particles and decals on the road are main-camera only (not in reflections / mirrors)
@@ -1398,6 +1399,7 @@ class Game {
 
   /** Download the current frame as a PNG. */
   private savePhoto(): void {
+    this.pview.renderSpotShadow(this.renderer, this.rig.camera);
     this.post.render(this.time, 0, 0, 0);
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     this.canvas.toBlob((blob) => {
@@ -2188,6 +2190,7 @@ class Game {
     tSec = prof.add('mirrors', tSec);
     // (the wet-road mirror and the paint probe time and count themselves inside the post pass)
     calls = info.calls;
+    this.pview.renderSpotShadow(this.renderer, this.rig.camera);
     this.post.render(this.time, live ? clamp01(s.speed / 105) : 0, this.boost, this.impactFlash);
     prof.drawCalls('main', info.calls - calls - this.beforeCalls);
     tSec = prof.add('main', tSec);
@@ -2359,6 +2362,8 @@ class Game {
   private smokeTrail = 0;
   private smokeRed = false;
   private airTag: HTMLElement | null = null;
+  private tagPanels: DOMRect[] = [];
+  private tagPanelT = 0;
   private tagV = new THREE.Vector3();
   private sirenVoices: { dist: number; closing: number; phase: number; mode?: 'wail' | 'yelp' | 'phaser' }[] = [];
   /** Heat panel, meters, Busted card and sirens. */
@@ -2459,9 +2464,21 @@ class Game {
     if (on && h.mode !== 'leaving' && this.airCam <= 0) {
       const v = this.tagV.set(h.x, h.y + 3.2, h.z).project(cam);
       const dist = Math.hypot(h.x - cam.position.x, h.z - cam.position.z);
-      if (v.z < 1 && Math.abs(v.x) < 0.95 && Math.abs(v.y) < 0.95 && dist < 420) {
+      const tx = ((v.x + 1) / 2) * innerWidth;
+      const ty = ((1 - v.y) / 2) * innerHeight;
+      // 4F.1: never on top of a HUD panel (the helicopter can be "behind" the race board)
+      this.tagPanelT -= dt;
+      if (this.tagPanelT <= 0) {
+        this.tagPanelT = 0.5;
+        this.tagPanels = ['hud-top', 'hud-event', 'hud-heat', 'hud-map', 'hud-cluster']
+          .map((id) => document.getElementById(id))
+          .filter((e): e is HTMLElement => !!e && e.offsetParent !== null)
+          .map((e) => e.getBoundingClientRect());
+      }
+      const underPanel = this.tagPanels.some((r) => tx > r.left - 50 && tx < r.right + 50 && ty > r.top - 4 && ty < r.bottom + 30);
+      if (v.z < 1 && Math.abs(v.x) < 0.95 && Math.abs(v.y) < 0.95 && dist < 420 && !underPanel) {
         show = true;
-        tag.style.transform = `translate(${((v.x + 1) / 2) * innerWidth}px, ${((1 - v.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
+        tag.style.transform = `translate(${tx}px, ${ty}px) translate(-50%, -100%)`;
         tag.classList.toggle('lit', h.sees);
         tag.style.opacity = String(Math.max(0.35, 1 - dist / 420));
       }

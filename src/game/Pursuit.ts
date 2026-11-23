@@ -1061,12 +1061,29 @@ export class Pursuit {
 
   // ── Air One (4E) and helicopter punctures ──
   private punctLap = new Map<RaceCar, { lap: number; t: number }>();
+  /** 4F.1: the car Air One is following. It sticks with it: a real crew doesn't swap suspects every few seconds. */
+  private airTarget: RaceCar | null = null;
+  private airSwitchT = 0;
   private stepAir(dt: number): void {
     let target: RaceCar | null = null;
     if (!this.mirror) {
       const humans = this.humans().filter((h) => !h.finished);
       const chased = this.units.find((u) => u.active && u.target && humans.includes(u.target))?.target ?? null;
-      target = chased ?? (humans.length ? humans.reduce((a, b) => (this.race.distanceOf(b) > this.race.distanceOf(a) ? b : a)) : null);
+      const want = chased ?? (humans.length ? humans.reduce((a, b) => (this.race.distanceOf(b) > this.race.distanceOf(a) ? b : a)) : null);
+      const cur = this.airTarget && humans.includes(this.airTarget) ? this.airTarget : null;
+      if (!cur || !this.air.heli.active) {
+        this.airTarget = want;
+        this.airSwitchT = 0;
+      } else if (want !== cur) {
+        // move to the other car only after the ground units have been on it a good while,
+        // or once Air One has lost sight of its own
+        this.airSwitchT += dt * (this.air.heli.seesTarget ? 1 : 3);
+        if (this.airSwitchT > 20) {
+          this.airTarget = want;
+          this.airSwitchT = 0;
+        }
+      } else this.airSwitchT = Math.max(0, this.airSwitchT - dt);
+      target = this.airTarget;
     }
     this.air.step(dt, this.level, this.cooldown, this.joined, target);
     // a flat from a helicopter spike strip lasts until the end of the lap
@@ -1491,6 +1508,8 @@ export class Pursuit {
   /** Back to the start of a race (restart). */
   reset(): void {
     for (const u of this.units) this.park(u), (u.respawnIn = 0), (u.aggro = null), (u.aggroT = 0);
+    this.airTarget = null;
+    this.airSwitchT = 0;
     this.obstacles.length = 0;
     this.pseudo.length = 0;
     this.heat = 0;

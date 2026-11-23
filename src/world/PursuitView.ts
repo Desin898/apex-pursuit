@@ -93,6 +93,15 @@ export class PursuitView {
   private shadowMat: THREE.MeshBasicMaterial;
   /** the race cars (set by the game): position and heading */
   carsForShadow: () => { x: number; z: number; yaw: number }[] = () => [];
+  /** the race cars' 3D models (set by the game), for the searchlight's real shadows */
+  carRoots: () => THREE.Object3D[] = () => [];
+  /** High/Ultra: the searchlight casts real shadows (only the cars and roadblocks in it) */
+  private realShadow = false;
+  // the searchlight's shadow is drawn by rendering a stand-in scene that holds only the light
+  // and the cars near it, seen by a camera that sees nothing (so only the shadow map is drawn)
+  private shadowScene = new THREE.Scene();
+  private shadowEye = new THREE.OrthographicCamera(-0.01, 0.01, 0.01, -0.01, 0.1, 0.2);
+  private shadowRT = new THREE.WebGLRenderTarget(1, 1);
   /** last frame's bangs, for the game to shake / sound (x, z) */
   readonly booms: { x: number; z: number }[] = [];
 
@@ -410,6 +419,27 @@ export class PursuitView {
     if (spot && !this.heliSpotAdded) this.scene.add(this.heli.spot, this.heli.spot.target);
     if (!spot && this.heliSpotAdded) this.scene.remove(this.heli.spot, this.heli.spot.target);
     this.heliSpotAdded = spot;
+    // 4F.1: on High and Ultra the searchlight's shadow is a real one. It is drawn by
+    // renderSpotShadow() with just the cars near the beam, never with the scenery, so it costs
+    // a handful of draw calls rather than a second pass over the whole map.
+    this.realShadow = spot && (quality === 'high' || quality === 'ultra');
+    const sl = this.heli.spot;
+    sl.castShadow = this.realShadow;
+    if (this.realShadow) {
+      const size = quality === 'ultra' ? 2048 : 1024;
+      if (sl.shadow.mapSize.x !== size) {
+        sl.shadow.mapSize.set(size, size);
+        sl.shadow.map?.dispose();
+        sl.shadow.map = null;
+      }
+      sl.shadow.camera.near = 4;
+      sl.shadow.camera.far = 230;
+      sl.shadow.bias = -0.0004;
+      sl.shadow.normalBias = 0.045;
+      sl.shadow.radius = 3;
+      sl.shadow.autoUpdate = false;
+      sl.shadow.needsUpdate = false;
+    }
     for (const b of this.breakers) {
       b.down = false;
       b.fallT = 0;
@@ -562,12 +592,61 @@ export class PursuitView {
   private sv = new THREE.Vector3();
   private ss = new THREE.Vector3();
   private yAxis = new THREE.Vector3(0, 1, 0);
-  /** cars inside the searchlight's pool throw a shadow away from the lamp */
+  /**
+   * 4F.1: draw the searchlight's shadow map with only what's in or near the beam: the race cars,
+   * the police and the roadblocks. Call once a frame, before the scene is drawn.
+   */
+  renderSpotShadow(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    if (!this.realShadow || !this.pursuit || !renderer.shadowMap.enabled) return;
+    const sl = this.heli.spot;
+    if (sl.intensity <= 0 && sl.shadow.map) return;
+    const h = this.pursuit.heli;
+    const sc = this.shadowScene;
+    // a stand-in list of children: the objects keep their real parents
+    const kids = sc.children;
+    kids.length = 0;
+    kids.push(sl);
+    const near = (o: THREE.Object3D, r = 45) => {
+      if (!o.visible || !o.parent) return;
+      const q = o.position;
+      if ((q.x - h.lx) ** 2 + (q.z - h.lz) ** 2 > r * r) return;
+      kids.push(o);
+    };
+    for (const r of this.carRoots()) near(r);
+    for (const v of this.units) near(v.root);
+    for (const [, o] of this.obs) near(o.mesh);
+    for (let i = 0; i < kids.length; i++) kids[i].updateMatrixWorld();
+    sl.target.updateMatrixWorld();
+    sl.shadow.needsUpdate = true;
+    // the eye sees the same layers as the game camera but points at nothing, far underground
+    const eye = this.shadowEye;
+    eye.layers.mask = camera.layers.mask;
+    eye.position.set(0, -9000, 0);
+    eye.lookAt(0, -10000, 0);
+    eye.updateMatrixWorld();
+    const sm = renderer.shadowMap;
+    const auto = sm.autoUpdate;
+    const pending = sm.needsUpdate;
+    const prevRT = renderer.getRenderTarget();
+    const prevClear = renderer.autoClear;
+    sm.autoUpdate = true;
+    renderer.autoClear = false;
+    renderer.setRenderTarget(this.shadowRT);
+    renderer.render(sc, eye);
+    renderer.setRenderTarget(prevRT);
+    renderer.autoClear = prevClear;
+    sm.autoUpdate = auto;
+    sm.needsUpdate = pending;
+    sl.shadow.needsUpdate = false;
+    kids.length = 0;
+  }
+
+  /** cars inside the searchlight's pool throw a shadow away from the lamp (painted: Medium) */
   private updateShadows(p: Pursuit): void {
     const h = p.heli;
     const beam = Math.max(this.night, this.wet * 0.5);
     let n = 0;
-    if (h.active && this.heliSpotAdded && beam > 0.2) {
+    if (h.active && this.heliSpotAdded && !this.realShadow && beam > 0.2) {
       const lamp = this.heli.lampPos;
       const ly = Math.max(4, lamp.y);
       const reach = Math.max(4, Math.hypot(h.lx - lamp.x, ly, h.lz - lamp.z) * 0.14);
@@ -762,7 +841,7 @@ export class PursuitView {
     const h = p.heli;
     this.heli.haze = this.wet;
     this.heli.gust = this.wet;
-    this.heli.update(h.x, h.y, h.z, h.yaw, h.vx, h.vz, h.lx, h.lz, time, dt, Math.max(this.night, 0.15), h.active, this.heliSpotAdded, h.low);
+    this.heli.update(h.x, h.y, h.z, h.yaw, h.vx, h.vz, h.lx, h.lz, time, dt, Math.max(this.night, 0.15), h.active, this.heliSpotAdded, h.low, camera.position);
     // rotor wash: strongest when it's low. Dust off a dry track, a ring of spray off a wet one,
     // smoke and spray pushed away, grass and trees bending
     const washK = h.active ? Math.max(0, Math.min(1, (42 - h.y) / 26)) : 0;
