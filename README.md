@@ -120,6 +120,25 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
 
+## New in Phase 4G.3: thunder that matches the lightning
+
+The lightning itself is unchanged. The thunder is rebuilt around it:
+- **On time.** It starts with the flash: a sharp crack on every flash of the bolt (a strike
+  flickers two to four times), the deep boom a breath after the first, then the rumble. It used
+  to come 1.5 to 6 s late, so it never matched what you saw.
+- **One thunder per strike.** It used to be several separate swells, which sounded like a new
+  thunder every second or two. Now it's one boom settling into one long rolling rumble that
+  fades out in 5 to 7 seconds, with a new one only when lightning strikes again.
+- **Real bass.** Made from proper sound samples (three rumbles, three cracks, built once when
+  it starts to rain): a falling 65→36 Hz thump you feel, brown-noise rumble with a bass lift,
+  and enough 100–400 Hz to come through laptop speakers too. Close strikes crack hard; far
+  ones are quieter and duller.
+- **The controller shakes with it.** A hard kick on every flash, then both motors follow the
+  thunder's own loudness, boom and rumble, at the same moments as the sound. The strength
+  goes with how close the strike is (and your Vibration strength setting).
+- **Not in the menus.** Thunder and its rumble only play during a race; the lightning still
+  shows behind the menus.
+
 ## New in Phase 4G.2: friends hear the host's music, thunder you can hear, sharper edges
 
 **Online: everyone hears the host's music.** When you host, the track you're playing is shared
@@ -1065,8 +1084,10 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
      online, its lights at night (done)
    - 4G. The sky: sunsets, moving clouds, stars and the Milky Way, a crescent moon,
      shooting stars, lightning and thunder, crows, lens dirt (done)
-   - **4G.2. Online music from the host, audible thunder, a cheaper sky, TAA, paint and glass
-     with rain beads, trackside detail (this build)**
+   - 4G.2. Online music from the host, audible thunder, a cheaper sky, TAA, paint and glass
+     with rain beads, trackside detail (done)
+   - **4G.3. Thunder on time with the lightning, deeper, one per strike, controller rumble in
+     sync, silent in the menus (this build)**
    - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder (next)
    - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

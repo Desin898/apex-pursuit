@@ -216,8 +216,16 @@ class Game {
 
     this.visuals = buildWorld(this.scene, this.renderer, this.world);
     this.env = new Environment(this.scene, this.renderer, this.world, this.visuals);
-    // 4G: thunder, after the flash (sound travels about 340 m a second)
-    this.env.sky.onThunder = (dist, delay) => this.audio.thunder(dist, delay);
+    // 4G.3: thunder with the lightning: a crack on every flash, the boom and the rumble, and the
+    // controller shaking in time with them. Races only (the menus stay quiet).
+    this.env.sky.onStrike = (dist, strokes, amp) => {
+      if (this.state !== 'playing') return;
+      const near = 1 / (1 + (dist / 1300) ** 2);
+      const sh = this.audio.thunder(dist, strokes, amp);
+      strokes.forEach((st, i) => this.haptics.pulseAt(st, Math.min(1, (0.55 + 0.45 * near) * (i ? 0.75 : 1)), Math.min(1, 0.45 + 0.55 * near), 0.18));
+      if (sh) this.haptics.follow(sh.env, 0.02 / sh.rate, sh.start, Math.min(1, 0.5 + 0.6 * near), 0.25 + 0.2 * near);
+      else this.haptics.pulseAt(0.06, 0.5 + 0.5 * near, 0.3, 1.6);
+    };
     // Phase 3D: wet-road mirror and distant shadows on the ground materials
     patchGround(this.visuals.mats.road, true);
     patchGround(this.visuals.mats.kerb, true);
@@ -2060,6 +2068,7 @@ class Game {
     }
 
     // ── Online: read everyone's latest state, publish ours ──
+    if (this.env.conditions.weather === 'rain') this.audio.prepareThunder();
     this.online.update(rawDt);
     // 4G.2: hosting, offline or not sharing: our own music again
     if (this.music.followingHost && (this.online.status !== 'online' || this.online.isHost || this.settings.onlineMusic !== 'host')) this.music.unfollow();

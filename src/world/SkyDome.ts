@@ -264,8 +264,11 @@ export class SkyDome {
   lightning: LightningMode = 'on';
   /** 0..1 how bright the lightning is this frame (for the scene's light) */
   flash = 0;
-  /** a strike's thunder: how far away (m) and how long until it's heard (s) */
-  onThunder: ((dist: number, delay: number) => void) | null = null;
+  /**
+   * a strike: how far away (m), when each flash of it comes (s from now: the first is 0), and
+   * how strong it is (0..1). Thunder and the controller's rumble follow these exact times.
+   */
+  onStrike: ((dist: number, strokes: number[], amp: number) => void) | null = null;
   private rand: () => number;
 
   constructor(scene: THREE.Scene) {
@@ -453,7 +456,7 @@ export class SkyDome {
         const dir = new THREE.Vector3(Math.sin(az), 0, Math.cos(az));
         this.strike = { t: 0, strokes, dir, dist, bolt, amp: (bolt ? 1 : 0.55) * (0.7 + 0.3 * (1 - dist / 3100)) };
         if (bolt) this.buildBolt(cam, dir, dist);
-        this.onThunder?.(dist, Math.min(9, dist / 343));
+        this.onStrike?.(dist, strokes.slice(), this.strike.amp);
         (u.uFlashDir.value as THREE.Vector3).set(dir.x, bolt ? 0.12 : 0.3, dir.z).normalize();
       }
       const s = this.strike;

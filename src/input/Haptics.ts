@@ -41,6 +41,25 @@ export class Haptics {
   private acc = 0;
   private wasIdle = true;
 
+  // 4G.3: kicks that start later, and rumbles that follow a loudness curve (the thunder)
+  private later: { at: number; strong: number; weak: number; dur: number }[] = [];
+  private curves: { env: Float32Array; step: number; t: number; strong: number; weak: number }[] = [];
+
+  /** a kick `delay` s from now (lines up with something timed, like a lightning flash) */
+  pulseAt(delay: number, strong: number, weak: number, duration: number): void {
+    if (this.later.length > 16) this.later.shift();
+    this.later.push({ at: delay, strong, weak, dur: duration });
+  }
+
+  /**
+   * A rumble that follows `env` (0..1, one value every `step` s), starting `delay` s from now:
+   * the strong (low) motor at `strong` × the curve, the weak one at `weak` × it.
+   */
+  follow(env: Float32Array, step: number, delay: number, strong: number, weak: number): void {
+    if (this.curves.length > 3) this.curves.shift();
+    this.curves.push({ env, step, t: -delay, strong, weak });
+  }
+
   /** Queue a one-shot kick that decays over `duration` seconds. */
   pulse(strong: number, weak: number, duration: number): void {
     if (this.pulses.length > 12) this.pulses.shift();
@@ -58,6 +77,8 @@ export class Haptics {
   stop(pad: Gamepad | null): void {
     const a = this.actuator(pad);
     this.pulses.length = 0;
+    this.later.length = 0;
+    this.curves.length = 0;
     this.lastStrong = this.lastWeak = 0;
     try {
       a?.reset?.()?.catch(() => {});
@@ -81,6 +102,31 @@ export class Haptics {
       pWeak = Math.max(pWeak, p.weak * k);
       p.life -= dt;
       if (p.life <= 0) this.pulses.splice(i, 1);
+    }
+
+    for (let i = this.later.length - 1; i >= 0; i--) {
+      const l = this.later[i];
+      l.at -= dt;
+      if (l.at <= 0) {
+        this.pulse(l.strong, l.weak, l.dur);
+        pStrong = Math.max(pStrong, l.strong);
+        pWeak = Math.max(pWeak, l.weak);
+        this.later.splice(i, 1);
+      }
+    }
+    for (let i = this.curves.length - 1; i >= 0; i--) {
+      const c = this.curves[i];
+      c.t += dt;
+      if (c.t < 0) continue;
+      const k = c.t / c.step;
+      const j = Math.floor(k);
+      if (j >= c.env.length - 1) {
+        this.curves.splice(i, 1);
+        continue;
+      }
+      const e = c.env[j] + (c.env[j + 1] - c.env[j]) * (k - j);
+      pStrong = Math.max(pStrong, e * c.strong);
+      pWeak = Math.max(pWeak, e * c.weak);
     }
 
     let strong = pStrong;

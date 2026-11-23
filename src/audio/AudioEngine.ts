@@ -431,72 +431,144 @@ export class AudioEngine {
     this.tone(60, 24, 0.7 * a + 0.04, 0.7);
     this.burst(6000, 3000, 1, 0.16 * a, 0.12, 'highpass'); // the crack
   }
+  // ── 4G.3 thunder: made once as real sound samples, then played per strike ──────────────
+  private thunderBufs: { rumble: AudioBuffer; env: Float32Array }[] = [];
+  private crackBufs: AudioBuffer[] = [];
+
   /**
-   * 4G: thunder from a lightning strike `dist` m away, heard `delay` s after the flash.
-   * 4G.2: rebuilt so it carries on any speaker: a tearing crack when it's close, a body in the
-   * 100-700 Hz range (what laptop and phone speakers can play), then rolls that come back two
-   * or three times as the sound bounces off the clouds; the deep rumble is only underneath.
-   * Far strikes lose their top end (the air soaks up high notes over distance).
+   * Builds three rumbles and three cracks (about 30 ms of work, once, at the first strike).
+   * A rumble: a deep boom (a falling 65→36 Hz thump with brown noise) that settles into one
+   * long rolling rumble, swelling and grumbling as it fades over 5-7 s. Brown noise carries most
+   * of its weight in the bass, with enough 100-400 Hz in it to come through small speakers.
+   * `env` is its loudness every 20 ms: the controller's rumble follows the same curve.
    */
-  thunder(dist: number, delay: number): void {
+  private makeThunder(): void {
+    const ctx = this.ctx!;
+    const sr = ctx.sampleRate;
+    let seed = 4242;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let v = 0; v < 3; v++) {
+      const len = 5.2 + v * 0.8;
+      const n = Math.floor(len * sr);
+      const buf = ctx.createBuffer(1, n, sr);
+      const out = buf.getChannelData(0);
+      const env = new Float32Array(Math.ceil(len / 0.02));
+      // the rolls: a few slow swells as the sound comes back off cloud and hills
+      const rolls = Array.from({ length: 3 + v }, (_, i) => ({ at: 0.9 + i * (0.8 + rnd() * 0.9), w: 0.35 + rnd() * 0.5, h: 0.35 + rnd() * 0.4 }));
+      let brown = 0;
+      let low = 0;
+      let mid = 0;
+      let grumble = 0;
+      let gTarget = 1;
+      let peak = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / sr;
+        const white = rnd() * 2 - 1;
+        brown = (brown + 0.025 * white) / 1.025;
+        low += (brown - low) * 0.06;
+        mid += (white - mid) * 0.035;
+        if (i % 512 === 0) gTarget = 0.55 + rnd() * 0.7; // grumbling: the level wanders
+        grumble += (gTarget - grumble) * 0.0009;
+        // loudness: the boom, then the rumble with its rolls, all fading away
+        const boom = t < 0.03 ? t / 0.03 : Math.exp(-(t - 0.03) / 0.55);
+        let roll = 0;
+        for (const r of rolls) roll += r.h * Math.exp(-(((t - r.at) / r.w) ** 2));
+        const tail = Math.exp(-t / (len * 0.42)) * Math.min(1, t / 0.15);
+        const e = Math.max(boom, (0.45 + roll) * tail) * Math.min(1, (len - t) / 0.6);
+        // the thump in the chest
+        const f = 36 + 29 * Math.exp(-t / 0.35);
+        const thump = Math.sin(2 * Math.PI * f * t + Math.sin(t * 7) * 0.4) * Math.exp(-t / 0.7) * 0.75;
+        const x = (low * 9.5 + brown * 2.2 + mid * 0.55) * e * (0.7 + 0.3 * grumble) + thump * Math.min(1, t / 0.02);
+        out[i] = x;
+        peak = Math.max(peak, Math.abs(x));
+        if (i % Math.floor(sr * 0.02) === 0) env[Math.floor(t / 0.02)] = e * (0.7 + 0.3 * grumble);
+      }
+      const g = 0.92 / (peak || 1);
+      for (let i = 0; i < n; i++) out[i] *= g;
+      this.thunderBufs.push({ rumble: buf, env });
+    }
+    // cracks: a tearing run of sharp bursts over a tenth of a second, with a low knock
+    for (let v = 0; v < 3; v++) {
+      const n = Math.floor(0.5 * sr);
+      const buf = ctx.createBuffer(1, n, sr);
+      const out = buf.getChannelData(0);
+      const bursts = Array.from({ length: 5 + v * 2 }, (_, i) => ({ at: i * (0.012 + rnd() * 0.022), k: 1 - i * 0.08 }));
+      let prev = 0;
+      let lp = 0;
+      let peak = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / sr;
+        const white = rnd() * 2 - 1;
+        const hi = white - prev; // brighter: the edge of the noise
+        prev = white;
+        lp += (white - lp) * 0.08;
+        let e = 0;
+        for (const b of bursts) if (t >= b.at) e = Math.max(e, b.k * Math.exp(-(t - b.at) / 0.018));
+        const body = Math.exp(-t / 0.12);
+        const knock = Math.sin(2 * Math.PI * 70 * t) * Math.exp(-t / 0.09);
+        const x = hi * e * 0.9 + lp * body * 1.4 + knock * 0.6;
+        out[i] = x;
+        peak = Math.max(peak, Math.abs(x));
+      }
+      const g = 0.95 / (peak || 1);
+      for (let i = 0; i < n; i++) out[i] *= g;
+      this.crackBufs.push(buf);
+    }
+  }
+
+  /** build the thunder ahead of time (call while it rains, so the first strike doesn't stutter) */
+  prepareThunder(): void {
+    if (this.ctx && this.ctx.state === 'running' && !this.thunderBufs.length) this.makeThunder();
+  }
+
+  /**
+   * 4G.3: thunder for a strike `dist` m away, starting with the flash: a crack on every flash of
+   * the bolt (`strokes`, s from now), the boom right behind the first, then the rumble. Far
+   * strikes are quieter and duller. Returns the rumble's loudness curve (every 20 ms, 0..1, and
+   * when it starts) for the controller, or null if the sound is off.
+   */
+  thunder(dist: number, strokes: number[], amp = 1): { env: Float32Array; rate: number; start: number; level: number } | null {
     const ctx = this.ctx;
-    if (!ctx || ctx.state !== 'running') return;
-    const t0 = ctx.currentTime + delay;
-    const near = 1 / (1 + (dist / 1400) ** 2);
-    const top = Math.max(900, 6000 - dist * 1.6); // the far ones are duller
-    const out = ctx.createGain();
-    out.gain.value = 2.8; // it has to carry over the engine and the rain
-    // all of it through one low-pass that dulls with distance
+    if (!ctx || ctx.state !== 'running') return null;
+    if (!this.thunderBufs.length) this.makeThunder();
+    const near = 1 / (1 + (dist / 1300) ** 2);
+    const level = (0.55 + 0.45 * near) * (0.7 + 0.3 * amp);
+    const t0 = ctx.currentTime + 0.02;
+    // one chain for this strike: dull with distance, a bass lift, then the effects bus
     const air = ctx.createBiquadFilter();
     air.type = 'lowpass';
-    air.frequency.value = top;
-    air.Q.value = 0.5;
-    out.connect(air).connect(this.fxBus);
-    const noise = (start: number, dur: number) => {
-      const src = ctx.createBufferSource();
-      src.buffer = this.noise;
-      src.loop = true;
-      src.start(start, Math.random() * 1.8);
-      src.stop(start + dur + 0.1);
-      return src;
-    };
-    const band = (src: AudioNode, type: BiquadFilterType, f0: number, f1: number, q: number, start: number, dur: number) => {
-      const f = ctx.createBiquadFilter();
-      f.type = type;
-      f.Q.value = q;
-      f.frequency.setValueAtTime(f0, start);
-      f.frequency.exponentialRampToValueAtTime(f1, start + dur);
-      src.connect(f);
-      return f;
-    };
-    const env = (node: AudioNode, start: number, peak: number, attack: number, dur: number) => {
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, start);
-      g.gain.exponentialRampToValueAtTime(peak, start + attack);
-      g.gain.exponentialRampToValueAtTime(peak * 0.35, start + attack + dur * 0.35);
-      g.gain.exponentialRampToValueAtTime(0.0003, start + dur);
-      node.connect(g).connect(out);
-    };
-    // the crack: a fast tearing run of bright bursts (close strikes only)
-    if (dist < 1600) {
-      const k = 0.6 * near;
-      for (let i = 0; i < 6; i++) {
-        const st = t0 + i * (0.025 + Math.random() * 0.05);
-        env(band(noise(st, 0.25), 'bandpass', 3800 - i * 300, 1200, 0.9, st, 0.22), st, k * (1 - i * 0.12), 0.004, 0.2 + i * 0.03);
-      }
-    }
-    // the body and its rolls: each roll a swell of 120-700 Hz noise, later ones softer and duller
-    const rolls = 3 + Math.floor(Math.random() * 3);
-    let at = t0 + (dist < 1600 ? 0.12 : 0.05);
-    for (let i = 0; i < rolls; i++) {
-      const dur = 1.1 + Math.random() * 1.6;
-      const peak = (0.55 + 0.45 * near) * (1 - i * 0.16) * (0.8 + Math.random() * 0.3);
-      env(band(noise(at, dur), 'bandpass', 720 - i * 70, 260, 0.55, at, dur), at, peak * 1.3, 0.08 + Math.random() * 0.15, dur);
-      at += dur * (0.45 + Math.random() * 0.35);
-    }
-    // the deep rumble underneath it all (felt more than heard on small speakers)
-    const total = at - t0 + 1.5;
-    env(band(noise(t0, total), 'lowpass', 140, 50, 0.7, t0, total), t0 + 0.1, 0.22 * (0.5 + 0.5 * near), 0.4, total);
+    air.frequency.value = Math.max(700, 9000 - dist * 3.2);
+    air.Q.value = 0.4;
+    const bass = ctx.createBiquadFilter();
+    bass.type = 'lowshelf';
+    bass.frequency.value = 110;
+    bass.gain.value = 6;
+    const vol = ctx.createGain();
+    vol.gain.value = 1.9 * level;
+    air.connect(bass).connect(vol).connect(this.fxBus);
+    const pick = this.thunderBufs[Math.floor(Math.random() * this.thunderBufs.length)];
+    // a lower, slower playback for the big ones: deeper and longer
+    const rate = 0.82 + Math.random() * 0.2 + (1 - near) * 0.06;
+    const r = ctx.createBufferSource();
+    r.buffer = pick.rumble;
+    r.playbackRate.value = rate;
+    const rg = ctx.createGain();
+    rg.gain.value = 1;
+    r.connect(rg).connect(air);
+    const boomAt = t0 + 0.05 + dist / 9000; // a breath after the first crack, a touch later when far
+    r.start(boomAt);
+    // the cracks, on each flash (close strikes crack hard; far ones barely)
+    const crackK = Math.max(0.08, near * 1.1);
+    strokes.forEach((st, i) => {
+      const c = ctx.createBufferSource();
+      c.buffer = this.crackBufs[(i + Math.floor(Math.random() * 3)) % this.crackBufs.length];
+      c.playbackRate.value = 0.9 + Math.random() * 0.25;
+      const cg = ctx.createGain();
+      cg.gain.value = crackK * (i === 0 ? 1 : 0.6);
+      c.connect(cg).connect(air);
+      c.start(t0 + st);
+    });
+    return { env: pick.env, rate, start: boomAt - ctx.currentTime, level };
   }
 
   /** A smoke canister landing and starting to hiss. */
