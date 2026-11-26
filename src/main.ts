@@ -23,8 +23,9 @@ import { Menu, MenuPage } from './ui/Menu';
 import { renderCards } from './ui/CardRenders';
 import { artUrl } from './ui/art';
 import { Screens } from './ui/Screens';
-import { DriverAids, EDITIONS, lookFromPaint, lookOf, tunedVehicle } from './vehicle/Cars';
+import { defaultLoadout, DriverAids, EDITIONS, lookFromPaint, lookOf, tunedVehicle } from './vehicle/Cars';
 import { PhantomX1 } from './vehicle/PhantomX1';
+import { loadImportedCars, makeCarVisual, registerImportedCars } from './vehicle/ImportedCars';
 import { Cockpit } from './vehicle/Cockpit';
 import { VehicleInput, VehiclePhysics, VehicleState, WHEEL_X, WHEEL_Z } from './vehicle/VehiclePhysics';
 import { PropSystem } from './world/Props';
@@ -147,6 +148,8 @@ class Game {
   }
 
   constructor(private canvas: HTMLCanvasElement) {
+    // 4.5: a car from a car pack that is not here any more: back to the house car
+    if (!EDITIONS.some((e) => e.id === this.settings.loadout.edition)) this.settings.loadout = defaultLoadout();
     this.musicMenu = new MusicMenu(this.music, this.settings, () => saveSettings(this.settings), (k) => this.audio.ui(k), (m) => this.hud.toast(m));
     this.screens = new Screens({
       music: this.musicMenu,
@@ -413,7 +416,10 @@ class Game {
   /** Start-up work after the constructor, spread over frames so the loading screen can move. */
   async boot(progress: (f: number, label: string) => Promise<void>): Promise<void> {
     await progress(0.55, 'Preparing the cars');
-    this.cardShots = renderCards(EDITIONS.map((e) => lookOf({ ...this.settings.loadout, edition: e.id, ...(e.id === this.settings.loadout.edition ? {} : { paint: null, customColor: null, finish: null, rim: null, caliper: null, underglow: null }) })));
+    this.cardShots = renderCards(
+      EDITIONS.map((e) => lookOf({ ...this.settings.loadout, edition: e.id, ...(e.id === this.settings.loadout.edition ? {} : { paint: null, customColor: null, finish: null, rim: null, caliper: null, underglow: null }) })),
+      EDITIONS.map((e) => e.id),
+    );
     await progress(0.75, 'Compiling shaders');
     try {
       this.renderer.compile(this.scene, this.rig.camera);
@@ -638,7 +644,7 @@ class Game {
       return;
     }
     if (!this.ghostCar) {
-      this.ghostCar = new PhantomX1();
+      this.ghostCar = makeCarVisual(this.race.player.edition);
       this.ghostCar.makeGhost(new THREE.MeshStandardMaterial({ color: 0x9fe8ff, emissive: 0x2aa8c0, emissiveIntensity: 0.7, transparent: true, opacity: 0.3, depthWrite: false, roughness: 0.3 }));
       this.scene.add(this.ghostCar.root);
     }
@@ -1807,7 +1813,8 @@ class Game {
     this.tags = [];
     this.renderPoses = [];
     for (const c of this.race.cars) {
-      const v = new PhantomX1();
+      // 4.5: an imported car when its model is here, else the Phantom X1
+      const v = makeCarVisual(c.edition);
       v.setLook(c.look);
       if (this.env) v.setNight(this.env.p.carLights);
       this.scene.add(v.root);
@@ -1820,8 +1827,14 @@ class Game {
       }
       this.tags.push(tag);
     }
-    // the cockpit rides on the player's sprung body
+    // the cockpit rides on the player's sprung body (an imported car brings its own interior)
     this.carVisuals[0]?.body.add(this.cockpit.root);
+    this.cockpit.useOwnInterior(this.carVisuals[0]?.eye ?? null);
+    // a new car means a new ghost model too
+    if (this.ghostCar) {
+      this.scene.remove(this.ghostCar.root);
+      this.ghostCar = null;
+    }
     this.physics.s.manual = this.settings.manual;
   }
 
@@ -2885,6 +2898,8 @@ function classifyName(id: string): DeviceKind {
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
 async function boot(): Promise<void> {
+  // 4.5: the car pack's cars go into the catalogue before anything reads the player's loadout
+  registerImportedCars();
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   // show the loading art and a first progress tick before the heavy world build starts
   document.getElementById('loading-art')!.style.backgroundImage = `url("${artUrl(Math.random() < 0.5 ? 'load-1' : 'load-2')}")`;
@@ -2897,12 +2912,17 @@ async function boot(): Promise<void> {
     status.textContent = label;
     await nextFrame();
   };
+  if ((window as unknown as { __APEX_CARS__?: unknown[] }).__APEX_CARS__?.length) {
+    await progress(0.04, 'Loading your cars');
+    await loadImportedCars((name) => (status.textContent = `Loading ${name}`));
+  }
   await progress(0.08, 'Building the proving grounds');
   await nextFrame();
   let game: Game;
   try {
     game = new Game(canvas);
     (window as unknown as { __apex: Game }).__apex = game; // handy for debugging from the console
+    (window as unknown as { __apexMakeCar: typeof makeCarVisual }).__apexMakeCar = makeCarVisual;
   } catch (err) {
     document.getElementById('boot-error')!.hidden = false;
     document.getElementById('boot-msg')!.textContent =

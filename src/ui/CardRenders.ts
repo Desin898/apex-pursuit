@@ -5,9 +5,11 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { CarLook } from '../vehicle/Cars';
 import { PhantomX1 } from '../vehicle/PhantomX1';
+import { hasImportedModel, makeCarVisual } from '../vehicle/ImportedCars';
+import { modelOf } from '../vehicle/Cars';
 import { VehicleState } from '../vehicle/VehiclePhysics';
 
-export function renderCards(looks: CarLook[], width = 960, height = 600): string[] {
+export function renderCards(looks: CarLook[], editions: string[] = [], width = 960, height = 600): string[] {
   let renderer: THREE.WebGLRenderer | null = null;
   try {
     const canvas = document.createElement('canvas');
@@ -48,9 +50,20 @@ export function renderCards(looks: CarLook[], width = 960, height = 600): string
     wall.position.set(0, 5, -12);
     scene.add(wall);
 
-    const car = new PhantomX1();
-    car.root.traverse((o) => (o.castShadow = (o as THREE.Mesh).isMesh ? o.castShadow : false));
-    scene.add(car.root);
+    // one studio car per model (4.5: imported cars get their own model)
+    const cars = new Map<string, PhantomX1>();
+    const carFor = (edition: string): PhantomX1 => {
+      const key = hasImportedModel(edition) ? modelOf(edition).id : 'phantom-x1';
+      let c = cars.get(key);
+      if (!c) {
+        c = makeCarVisual(edition);
+        c.root.traverse((o) => (o.castShadow = (o as THREE.Mesh).isMesh ? o.castShadow : false));
+        scene.add(c.root);
+        cars.set(key, c);
+      }
+      for (const v of cars.values()) v.root.visible = v === c;
+      return c;
+    };
     const st = new VehicleState();
     st.steerAngle = 0.28;
     const cam = new THREE.PerspectiveCamera(26, width / height, 0.1, 100);
@@ -59,12 +72,14 @@ export function renderCards(looks: CarLook[], width = 960, height = 600): string
     cam.lookAt(0, 0.5, -0.05);
 
     const out: string[] = [];
-    for (const look of looks) {
+    const r = renderer;
+    looks.forEach((look, i) => {
+      const car = carFor(editions[i] ?? '');
       car.setLook(look);
       car.update(st, { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0 }, 1, 0.016);
-      renderer.render(scene, cam);
+      r.render(scene, cam);
       out.push(canvas.toDataURL('image/jpeg', 0.86));
-    }
+    });
     pmrem.dispose();
     return out;
   } catch {

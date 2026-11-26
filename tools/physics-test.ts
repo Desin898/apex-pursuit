@@ -289,6 +289,54 @@ import * as AIDriverModule from '../src/ai/AIDriver';
   check('editions', ok, Object.entries(tops).map(([k, v]) => `${k.slice(3)} ${v.toFixed(0)} km/h`).join(', '));
 }
 
+// 14b. 4.5 car packs: an imported car's tune goes through the catalogue, the card stats follow it,
+// and the car still laps the circuit cleanly (a made-up track car: less power, much more downforce)
+import { registerImportedCar } from '../src/vehicle/Cars';
+{
+  registerImportedCar({
+    id: 'test-gt', name: 'Test GT', tune: { torque: 0.84, dragCoef: 1.28, downforce: 1.75, gripAsphalt: 1.04, mass: 0.98, yawInertia: 0.92, driftSustain: 0.75 },
+    editions: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B', tune: { downforce: 1.15 } }],
+  });
+  const id = 'test-gt-a';
+  const c = new VehiclePhysics(world, tunedVehicle(id));
+  c.reset(-320, -220, Math.PI / 2);
+  let top = 0;
+  for (let i = 0; i < 40 / DT; i++) {
+    if (c.s.x > 200) c.s.x -= 500;
+    c.step(input({ throttle: 1 }), DT);
+    top = c.s.speed * 3.6;
+  }
+  const lapCar = new VehiclePhysics(world, tunedVehicle(id));
+  const timer = new LapTimer(world, 0);
+  lapCar.reset(P.x, P.z, P.yaw);
+  let laps = 0;
+  let walls = 0;
+  let maxSlip = 0;
+  const N = world.samples.length;
+  for (let t = 0; t < 240 && laps < 1; t += DT) {
+    const hit = world.nearestTrack(lapCar.s.x, lapCar.s.z);
+    const i = hit ? hit.index : 0;
+    const look = world.samples[(i + Math.round(6 + lapCar.s.speed * 0.45)) % N];
+    let err = Math.atan2(look.x - lapCar.s.x, look.z - lapCar.s.z) - lapCar.s.yaw;
+    err = Math.atan2(Math.sin(err), Math.cos(err));
+    let k = 0;
+    for (let j = 0; j < 60; j++) k = Math.max(k, Math.abs(world.samples[(i + j) % N].curv));
+    const vMax = Math.min(95, Math.sqrt(13 / Math.max(k, 1e-4)));
+    lapCar.step(input({ steer: Math.max(-1, Math.min(1, -err * 3)), throttle: lapCar.s.speed < vMax ? 1 : 0, brake: lapCar.s.speed > vMax + 3 ? 0.8 : 0, analog: true }), DT);
+    walls += lapCar.s.impacts.length;
+    lapCar.s.impacts.length = 0;
+    if (lapCar.s.speed > 8) maxSlip = Math.max(maxSlip, Math.abs(lapCar.s.sideSlip));
+    timer.update(lapCar.s, DT);
+    if (timer.event) laps++;
+  }
+  const sa = statsOf(id);
+  const sx = statsOf('x1-street');
+  const ok = EDITIONS.some((e) => e.id === 'test-gt-b') && top > 260 && top < 330 && sa.topSpeed < sx.topSpeed && sa.grip > sx.grip && laps === 1 && walls === 0 && maxSlip < 0.35;
+  check('imported car tune', ok, `top ${top.toFixed(0)} km/h, lap ${timer.last.toFixed(2)} s, wall hits ${walls}, max sideslip ${((maxSlip * 180) / Math.PI).toFixed(1)}°, card grip ${sa.grip.toFixed(2)} vs ${sx.grip.toFixed(2)}`);
+  // keep the other checks on the house cars only
+  for (let i = EDITIONS.length - 1; i >= 0; i--) if (EDITIONS[i].model === 'test-gt') EDITIONS.splice(i, 1);
+}
+
 // 15. Phase 3C handling: grass recovery, Arcade stability, rejoin
 import { RECOVERY, STABILITY } from '../src/config';
 {

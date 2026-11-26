@@ -136,7 +136,7 @@ async function findCloudflared() {
 }
 
 function startRelay() {
-  const relay = spawn(process.execPath, [join(here, 'relay.mjs')], { env: { ...process.env, PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'inherit'] });
+  const relay = spawn(process.execPath, [join(here, 'relay.mjs')], { env: { ...process.env, PORT: String(PORT), ...(process.argv.includes('--share-cars') ? { SHARE_CARS: '1' } : {}) }, stdio: ['ignore', 'pipe', 'inherit'] });
   relay.stdout.on('data', () => {}); // its own banner is replaced by ours
   relay.on('exit', (code) => {
     console.log(`\n  The race server stopped (code ${code}).`);

@@ -8,7 +8,7 @@ import { PAINTS } from '../config';
 import { Settings } from '../core/Settings';
 import { formatLap } from '../game/LapTimer';
 import { Actions, DeviceKind, glyph } from '../input/InputManager';
-import { CALIPER_COLOURS, CAR_MODELS, EDITIONS, editionById, FINISHES, Loadout, lookOf, RIM_COLOURS, statsOf, UNDERGLOW_COLOURS } from '../vehicle/Cars';
+import { CALIPER_COLOURS, CAR_MODELS, EDITIONS, editionById, modelOf, FINISHES, Loadout, lookOf, RIM_COLOURS, statsOf, UNDERGLOW_COLOURS } from '../vehicle/Cars';
 import { artUrl } from './art';
 import { Nav } from './Nav';
 import { MusicMenu } from './MusicMenu';
@@ -82,6 +82,12 @@ const TIPS = [
   '<b>Online, the host runs the AI.</b> Each new friend who joins sends everyone back to the grid.',
   '<b>Change editions in the Garage.</b> Sport grips harder, Nitro carries a bigger tank, Pursuit shrugs off contact.',
 ];
+
+/** 4.5: a model's name for the cards, with its maker for imported cars ("Porsche 911 GT3 RS"). */
+function fullName(editionId: string): string {
+  const m = modelOf(editionId);
+  return m.maker ? `${m.maker} ${m.name}` : m.name;
+}
 
 export class Screens {
   current: PageId | null = 'loading';
@@ -559,8 +565,8 @@ export class Screens {
     $('home-net').innerHTML = `<i class="dot${live ? ' live' : ''}"></i>${live ? `${net.players} online${net.host ? ' · host' : ''}` : net.status === 'connecting' ? 'Connecting' : 'Offline'}`;
     const e = editionById(s.loadout.edition);
     const look = lookOf(s.loadout);
-    const paintName = s.loadout.customColor !== null ? 'Custom' : PAINTS[look.paintIndex].name;
-    $('home-car').innerHTML = `<i style="background:${hex(look.color)}"></i><span>${CAR_MODELS[0].name} · ${esc(e.name)} · ${esc(paintName)}</span>`;
+    const paintName = s.loadout.customColor !== null ? 'Custom' : s.loadout.paint === null && e.color !== undefined ? 'Factory colour' : PAINTS[look.paintIndex].name;
+    $('home-car').innerHTML = `<i style="background:${hex(look.color)}"></i><span>${esc(modelOf(e.id).name)} · ${esc(e.name)} · ${esc(paintName)}</span>`;
   }
 
   // ── car select ─────────────────────────────────────────────────────────
@@ -571,7 +577,7 @@ export class Screens {
   private buildCars(): void {
     const track = this.track();
     track.innerHTML = '';
-    $('cars-count').textContent = `${EDITIONS.length} editions`;
+    $('cars-count').textContent = CAR_MODELS.length > 1 ? `${CAR_MODELS.length} cars · ${EDITIONS.length} editions` : `${EDITIONS.length} editions`;
     EDITIONS.forEach((e, i) => {
       const st = statsOf(e.id);
       const card = document.createElement('button');
@@ -579,9 +585,9 @@ export class Screens {
       card.className = 'card';
       card.innerHTML =
         `<div class="shot"><span class="ed">${esc(e.name)} edition</span></div>` +
-        `<div class="body"><div><h3>${esc(CAR_MODELS[0].name)}<br>${esc(e.name)}</h3><div class="tag">${esc(e.tagline)}</div></div>` +
+        `<div class="body"><div><h3>${esc(fullName(e.id))}<br>${esc(e.name)}</h3><div class="tag">${esc(e.tagline)}</div></div>` +
         `<div class="meta"><span class="label">Nr.</span><span class="label">Livery</span><span class="label">Finish</span>` +
-        `<span class="n num">${e.number}</span><span class="v">${esc(PAINTS[e.paint].name)}</span><span class="v">${esc(FINISHES.find((f) => f.id === e.finish)!.name)}</span></div>` +
+        `<span class="n num">${e.number}</span><span class="v">${esc(e.color !== undefined ? e.name : PAINTS[e.paint].name)}</span><span class="v">${esc(FINISHES.find((f) => f.id === e.finish)!.name)}</span></div>` +
         `<div class="stats">${(
           [
             ['Power', st.power],
@@ -655,7 +661,7 @@ export class Screens {
     }
     $('cars-dots').querySelectorAll('i').forEach((d, i) => d.classList.toggle('on', i === this.carIndex));
     const e = EDITIONS[this.carIndex];
-    $('cars-sub').textContent = `${CAR_MODELS[0].name} · ${e.name} edition`;
+    $('cars-sub').textContent = `${fullName(e.id)} · ${e.name} edition`;
     const nav = this.navs.cars;
     if (nav && nav.focused && nav.focused.classList.contains('card') && nav.focused !== card) nav.focus(card, false);
   }
@@ -684,7 +690,7 @@ export class Screens {
     const l: Loadout = this.h.settings.loadout;
     const e = editionById(l.edition);
     const look = lookOf(l);
-    $('garage-edition').textContent = `${CAR_MODELS[0].name} · ${e.name}`;
+    $('garage-edition').textContent = `${fullName(e.id)} · ${e.name}`;
     const groups = $('garage-groups');
     const focusedKey = this.navs.garage?.focused?.dataset.key ?? null;
     groups.innerHTML = '';
@@ -714,9 +720,12 @@ export class Screens {
       return b;
     };
 
-    const paintName = l.customColor !== null ? 'Custom' : PAINTS[look.paintIndex].name;
+    // 4.5: an imported car's edition can come in its own factory colour
+    const factory = l.customColor === null && l.paint === null && e.color !== undefined;
+    const paintName = l.customColor !== null ? 'Custom' : factory ? 'Factory colour' : PAINTS[look.paintIndex].name;
     const paints = group('Paint', paintName);
-    PAINTS.forEach((p, i) => swatch(paints, `paint-${i}`, p.color, l.customColor === null && look.paintIndex === i, p.name, () => ((l.paint = i), (l.customColor = null))));
+    if (e.color !== undefined) swatch(paints, 'paint-factory', e.color, factory, 'Factory colour', () => ((l.paint = null), (l.customColor = null)));
+    PAINTS.forEach((p, i) => swatch(paints, `paint-${i}`, p.color, l.customColor === null && !factory && look.paintIndex === i, p.name, () => ((l.paint = i), (l.customColor = null))));
     // custom colour picker
     const custom = document.createElement('label');
     custom.className = `swatch custom${l.customColor !== null ? ' on' : ''}`;

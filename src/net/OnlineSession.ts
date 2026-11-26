@@ -36,7 +36,7 @@ interface PeerView {
   car: NetCar | null;
   dist: number;
   host: HostBlock | null;
-  edition: number;
+  edition: string; // 4.5: by id (a friend may have cars in a car pack that you don't)
   /** guest's running total of Heat it raised (trap flashes, ramming police, smashing barriers) */
   heat: number;
   /** 4C.2: pressed Ready in the lobby */
@@ -63,7 +63,7 @@ interface HostBlock {
   cd: number; // countdown seconds remaining (0 = racing)
   hd?: number; // the random "Set" hold inside that countdown
   ri?: number; // rain intensity 0..100 (4B.2): the host's shower, so everyone gets wet together
-  r: [string, number, number, string, number][]; // humans: peer id, grid slot, paint, name, edition index
+  r: [string, number, number, string, string | number][]; // humans: peer id, grid slot, paint, name, edition (id; index before 4.5)
   a: [number, number, number, string?][]; // AI: grid slot, paint, index into RIVALS (−1 = took over a friend's car, named)
   ph: number; // 4C.2: 0 = lobby (waiting before the lights), 1 = racing
   q: string[]; // 4C.2: players waiting for the next race
@@ -91,6 +91,9 @@ const cleanName = (v: unknown): string => {
   return s || 'Driver';
 };
 const isInt = (v: unknown, lo: number, hi: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
+/** A car edition from the wire: an id (4.5), or an index from an older build. Unknown ids are kept. */
+const editionOf = (v: unknown): string =>
+  typeof v === 'string' && /^[a-z0-9-]{1,48}$/i.test(v) ? v : isInt(v, 0, EDITIONS.length - 1) ? EDITIONS[v].id : EDITIONS[0].id;
 
 function parseHost(h: unknown): HostBlock | null {
   if (typeof h !== 'object' || h === null) return null;
@@ -101,7 +104,7 @@ function parseHost(h: unknown): HostBlock | null {
   const r: HostBlock['r'] = [];
   for (const e of o.r) {
     if (!Array.isArray(e) || typeof e[0] !== 'string' || !isInt(e[1], 0, AI.gridSize - 1) || !isInt(e[2], 0, PAINTS.length - 1)) return null;
-    r.push([e[0], e[1], e[2], cleanName(e[3]), isInt(e[4], 0, EDITIONS.length - 1) ? e[4] : 0]);
+    r.push([e[0], e[1], e[2], cleanName(e[3]), editionOf(e[4])]);
   }
   const a: HostBlock['a'] = [];
   for (const e of o.a) {
@@ -284,7 +287,7 @@ export class OnlineSession {
         car: validNetCar(d.c) ? d.c : null,
         dist: typeof d.d === 'number' && Number.isFinite(d.d) ? Math.max(-2, Math.min(9999, d.d)) : 0,
         host: parseHost(d.h),
-        edition: isInt(d.e, 0, EDITIONS.length - 1) ? d.e : 0,
+        edition: editionOf(d.e),
         heat: typeof d.hr === 'number' && Number.isFinite(d.hr) ? Math.max(0, Math.min(1e4, d.hr)) : 0,
         ready: d.rd === 1,
         ping: typeof d.pg === 'number' && Number.isFinite(d.pg) ? Math.max(-1, Math.min(9999, Math.round(d.pg))) : -1,
@@ -292,7 +295,7 @@ export class OnlineSession {
       });
     }
     const myLook = lookOf(this.settings.loadout);
-    const myEdition = Math.max(0, EDITIONS.findIndex((e) => e.id === this.settings.loadout.edition));
+    const myEdition = this.settings.loadout.edition;
     const me: PeerView = { id: myId, name: cleanName(this.settings.name), paint: myLook.paintIndex, joined: this.joined, car: null, dist: 0, host: null, edition: myEdition, heat: 0, ready: this.ready, ping: Math.round(this.ping), vn: this.venueId };
     const all = [me, ...peers.values()].sort((a, b) => a.joined - b.joined || (a.id < b.id ? -1 : 1));
     const hostId = all[0].id;
@@ -524,8 +527,9 @@ export class OnlineSession {
   }
 
   /** A human on the grid: you drive your own edition and garage look unless the host had to change your colour. */
-  private humanSpec(id: string, myId: string, slot: number, paint: number, name: string, ed: number, k: number): CarSpec {
-    const edition = EDITIONS[ed]?.id ?? EDITIONS[0].id;
+  private humanSpec(id: string, myId: string, slot: number, paint: number, name: string, ed: string | number, k: number): CarSpec {
+    // (an edition from a car pack you don't have stays as it is: the visual falls back to a Phantom X1)
+    const edition = editionOf(ed);
     if (id === myId) {
       const mine = lookOf(this.settings.loadout);
       const look = mine.paintIndex === paint ? mine : { ...mine, color: lookFromPaint(paint, edition).color, paintIndex: paint };

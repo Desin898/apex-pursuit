@@ -120,6 +120,39 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
 
+## New in Phase 4.5: real cars from car packs
+
+You can now race a real 3D car model next to the Phantom X1. It gets its own handling, works in
+the garage and in every camera, and shows up online.
+- **Car packs.** A `cars/` folder next to the game page, the same idea as a music pack.
+  `tools/car-import` turns a model (`.blend`, `.fbx` or `.obj`) into a pack entry. Blender
+  cleans it up headless, a meshopt and WebP pass shrinks it (about 25 MB down to 1.5 MB), and the
+  game loads it even from a double-clicked file. The steps are in
+  [tools/car-import/README.md](tools/car-import/README.md).
+- **Car select.** Each car in a pack adds its editions to the carousel, with a studio picture,
+  the maker's name and stat bars worked out from its handling. The garage paint, finish, rims,
+  callipers and underglow all work on it.
+- **Its own handling.** A pack sets multipliers on the house car: power, drag, downforce, grip,
+  weight, yaw inertia and rev limit. Each edition can tune on top of that. (A track car with
+  less power and a big wing tops out around 300 km/h, but carries much more speed through the
+  fast corners.)
+- **The game's own materials.** Each part of the model is sorted into one of 24 slots, and
+  each slot gets the game's material:
+  - paint with flake, clear-coat peel and rain beads;
+  - tinted glass you can see the cabin through;
+  - carbon, chrome, rubber and grilles;
+  - lamps that light up when you brake;
+  - a steering wheel that turns with yours.
+- **Every camera.** The cockpit camera sits in the model's own driver's seat, with its real
+  dash. Far-away copies use about 10 % of the triangles.
+- **Online.** Your edition now goes over the network by name. Friends who have the same pack
+  see your car. Friends without it see a Phantom X1 in your colours. Your physics stays your
+  own either way. A host can share the pack with friends on the link with
+  `npm run host -- --share-cars`. This is off by default, and you should only share models
+  you're allowed to share.
+- Car packs are personal. `play/cars/`, `dist/cars/` and `cars-src/` are in `.gitignore`, so no
+  real car models or brands go into this repository.
+
 ## New in Phase 4G.3: thunder that matches the lightning
 
 The lightning itself is unchanged. The thunder is rebuilt around it:
@@ -1086,8 +1119,11 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
      shooting stars, lightning and thunder, crows, lens dirt (done)
    - 4G.2. Online music from the host, audible thunder, a cheaper sky, TAA, paint and glass
      with rain beads, trackside detail (done)
-   - **4G.3. Thunder on time with the lightning, deeper, one per strike, controller rumble in
-     sync, silent in the menus (this build)**
+   - 4G.3. Thunder on time with the lightning, deeper, one per strike, controller rumble in
+     sync, silent in the menus (done)
+   - **4.5. Real cars from car packs: the import tool, car select, own handling, the game's
+     materials, cockpit in the model's seat, LODs, online by name with a Phantom X1 stand-in
+     (this build)**
    - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder (next)
    - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

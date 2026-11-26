@@ -595,6 +595,7 @@ export class Cockpit {
    * High / Ultra: every frame; Low: a static gradient instead.
    */
   renderMirrors(renderer: THREE.WebGLRenderer, scene: THREE.Scene, body: THREE.Object3D, quality: string): void {
+    if (this.own) return;
     const live = quality !== 'low';
     for (const m of this.mirrorMats) {
       const want = live ? this.mirrorTarget.texture : this.mirrorStatic;
@@ -649,4 +650,16 @@ export class Cockpit {
   setVisible(on: boolean): void {
     this.root.visible = on;
   }
+
+  /**
+   * 4.5: an imported car brings its own interior. Then this cockpit only keeps the eye point
+   * (moved to the model's driver's seat); its own dash, wheel, hands, mirrors and rain are hidden.
+   */
+  useOwnInterior(eye: THREE.Vector3 | null): void {
+    this.own = !!eye;
+    for (const c of this.root.children) if (c !== this.eye) c.visible = !eye;
+    if (eye) this.eye.position.copy(eye);
+    else this.eye.position.set(0, K.eyeY, K.eyeZ);
+  }
+  private own = false;
 }

@@ -25,6 +25,9 @@ const PROTOCOL = '2';
 const here = dirname(fileURLToPath(import.meta.url));
 const built = join(here, '..', 'dist', 'index.html');
 const root = existsSync(built) ? built : join(here, '..', 'play', 'ApexPursuit.html');
+// 4.5: car packs are personal and stay on the host's computer unless the host shares them
+// (SHARE_CARS=1, or `npm run host -- --share-cars`). Only share models you are allowed to share.
+const SHARE_CARS = process.env.SHARE_CARS === '1';
 
 function page() {
   if (!existsSync(root)) return null;
@@ -43,6 +46,16 @@ const server = createServer((req, res) => {
     }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     res.end(html);
+  } else if (url.pathname === '/cars/cars.js' && SHARE_CARS) {
+    // 4.5: only when the host asked for it (SHARE_CARS=1): the host's car pack, for friends on the link
+    const file = [join(here, '..', 'dist', 'cars', 'cars.js'), join(here, '..', 'play', 'cars', 'cars.js')].find((f) => existsSync(f));
+    if (!file) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(readFileSync(file));
   } else if (url.pathname === '/favicon.ico') {
     res.writeHead(204);
     res.end();

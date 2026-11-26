@@ -14,3 +14,8 @@ tools/bin/
 # 4D.1: personal music packs (tools/music-pack.py) never go into the public repository
 play/music/
 dist/music/
+
+# 4.5: personal car packs (tools/car-import) never go into the public repository
+play/cars/
+dist/cars/
+cars-src/

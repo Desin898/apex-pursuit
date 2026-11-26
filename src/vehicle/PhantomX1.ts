@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { mainOnly } from '../core/layers';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { PAINTS, VEHICLE as V } from '../config';
+import { COCKPIT, PAINTS, VEHICLE as V } from '../config';
 import { CarLook, FINISHES } from './Cars';
 import { clamp, curve1, smoothstep } from '../core/math';
 import { VehicleState, WHEEL_X, WHEEL_Z } from './VehiclePhysics';
@@ -565,7 +565,7 @@ function peelNormalMap(): THREE.CanvasTexture {
  * a little dome (it bends the reflections), glossy, a touch darker underneath. They come with the
  * wetness of the track and dry off with it. `q` is the shader expression for 2D surface coords.
  */
-function addBeads(m: THREE.MeshPhysicalMaterial, key: string, q: string, objectPos: boolean): void {
+export function addBeads(m: THREE.MeshPhysicalMaterial, key: string, q: string, objectPos: boolean): void {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uBeadWet = groundUniforms.uWet;
     if (objectPos) {
@@ -773,7 +773,7 @@ function sharedBody(): Record<PartKey, THREE.BufferGeometry> {
   return out;
 }
 
-interface SharedMaterials {
+export interface SharedMaterials {
   gloss: THREE.Material;
   matte: THREE.Material;
   carbon: THREE.Material;
@@ -795,7 +795,7 @@ function lightTextures(): { beam: THREE.Texture; pool: THREE.Texture } {
   return lightTexCache;
 }
 
-function sharedMaterials(): SharedMaterials {
+export function sharedMaterials(): SharedMaterials {
   if (matCache) return matCache;
   matCache = {
     gloss: new THREE.MeshPhysicalMaterial({ color: 0x08090b, metalness: 0.6, roughness: 0.28, clearcoat: 0.8, clearcoatRoughness: 0.2 }),
@@ -831,7 +831,38 @@ interface WheelRig {
   pivot: THREE.Group; // position + steer
   spin: THREE.Group; // rolling
   dir: number; // +1 left side, −1 right side (mirrored)
+  x: number; // where the wheel sits on the model (car space)
+  z: number;
+  r: number; // its radius
 }
+
+/** The per-car materials an imported model is dressed with (the rest are shared). */
+export interface KitMats {
+  paint: THREE.MeshPhysicalMaterial;
+  tail: THREE.MeshStandardMaterial;
+  reverse: THREE.MeshStandardMaterial;
+  rim: THREE.MeshStandardMaterial;
+  caliper: THREE.MeshStandardMaterial;
+}
+
+/**
+ * 4.5: an imported car's parts, ready to ride on the rig. Car space as above (origin under the
+ * centre of gravity). Wheels in the order FL, FR, RL, RR, each with its origin at the wheel centre.
+ */
+export interface CarKit {
+  body: THREE.Object3D[]; // the sprung body at full detail
+  detail1: THREE.Object3D[]; // hidden from detail level 1 (interior, underbody, callipers)
+  far: THREE.Object3D | null; // the whole car at detail level 2 (static wheels)
+  wheels: { spin: THREE.Object3D; hub: THREE.Object3D | null; x: number; z: number; r: number }[];
+  steer: { obj: THREE.Object3D; axis: THREE.Vector3 } | null;
+  zFront: number;
+  zRear: number;
+  halfW: number;
+  exhaust: THREE.Vector3[];
+  eye: THREE.Vector3 | null; // the driver's eyes, for the cockpit camera
+  shadow: THREE.Texture | null; // a baked ground shadow, if the model has one
+}
+export type CarKitBuilder = (m: KitMats) => CarKit;
 
 export class PhantomX1 {
   /** Place this in the scene; move/rotate it with the car's ground pose (x, y, z, yaw). */
@@ -867,7 +898,17 @@ export class PhantomX1 {
   private cabinCut = { value: 0 };
   private cabinPatched = false;
 
-  constructor() {
+  /** 4.5: an imported model's driver eye point (null for the Phantom X1, which has its own cockpit) */
+  readonly eye: THREE.Vector3 | null = null;
+  readonly imported: boolean;
+  private kit: CarKit | null = null;
+  private zFront = Z_TIP;
+  private zRear = Z_REAR;
+  private exhaust: THREE.Vector3[] = [new THREE.Vector3(0.105, 0.555, Z_REAR - 0.1), new THREE.Vector3(-0.105, 0.555, Z_REAR - 0.1)];
+  private steerWheel: { obj: THREE.Object3D; axis: THREE.Vector3 } | null = null;
+
+  constructor(build?: CarKitBuilder) {
+    this.imported = !!build;
     const M = sharedMaterials();
     const p = PAINTS[0];
     this.paint = new THREE.MeshPhysicalMaterial({
@@ -888,8 +929,24 @@ export class PhantomX1 {
     addBeads(this.paint, 'paint-4g2', 'vNormalMapUv * vec2(3.2, 4.0)', false);
     this.tailMat = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff1508, emissiveIntensity: 2.2 });
     this.reverseMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffffff, emissiveIntensity: 0 });
+    this.rimMat = (M.rim as THREE.MeshStandardMaterial).clone();
+    this.caliperMat = M.caliper.clone();
+    const kit = build ? build({ paint: this.paint, tail: this.tailMat, reverse: this.reverseMat, rim: this.rimMat, caliper: this.caliperMat }) : null;
+    this.kit = kit;
+    if (kit) {
+      this.zFront = kit.zFront;
+      this.zRear = kit.zRear;
+      this.exhaust = kit.exhaust.length ? kit.exhaust : [new THREE.Vector3(0, 0.4, kit.zRear)];
+      this.steerWheel = kit.steer;
+      this.eye = kit.eye;
+      for (const o of kit.body) this.body.add(o);
+      if (kit.far) {
+        kit.far.visible = false;
+        this.body.add(kit.far);
+      }
+    }
     const mats: Record<PartKey, THREE.Material> = { paint: this.paint, gloss: M.gloss, matte: M.matte, carbon: M.carbon, glass: M.glass, head: M.head, tail: this.tailMat, reverse: this.reverseMat, steel: M.steel };
-    const body = sharedBody();
+    const body = kit ? ({} as Record<PartKey, THREE.BufferGeometry>) : sharedBody();
     for (const k of Object.keys(body) as PartKey[]) {
       const m = new THREE.Mesh(body[k], mats[k]);
       m.castShadow = SHADOW_CASTERS.includes(k);
@@ -897,9 +954,7 @@ export class PhantomX1 {
       this.skin.push(m);
     }
     const tyreMat = M.tyre;
-    // rims and calipers are per car so the garage can colour them
-    this.rimMat = (M.rim as THREE.MeshStandardMaterial).clone();
-    this.caliperMat = M.caliper.clone();
+    // rims and calipers are per car so the garage can colour them (made above, before the kit)
     const rimMat = this.rimMat;
     const discMat = M.disc;
     const caliperMat = this.caliperMat;
@@ -927,21 +982,34 @@ export class PhantomX1 {
           gl_FragColor = vec4(max(col * a * 3.2, 0.0), max(a, 0.0));
         }`,
     });
-    for (const sx of [1, -1]) {
-      const cone = new THREE.ConeGeometry(0.052, 1.0, 14, 1, true);
+    for (const tip of this.exhaust) {
+      const cone = new THREE.ConeGeometry(kit ? 0.045 : 0.052, 1.0, 14, 1, true);
       cone.translate(0, -0.5, 0); // base at origin, tip at −Y
       cone.rotateX(Math.PI / 2); // tip points −Z (backwards)
       const f = new THREE.Mesh(cone, this.flameMat);
-      f.position.set(sx * 0.105, 0.555, Z_REAR - 0.1);
+      f.position.copy(tip);
       f.visible = false;
       this.body.add(f);
       this.flames.push(f);
     }
 
     // Wheels
+    if (kit) {
+      for (const kw of kit.wheels) {
+        const pivot = new THREE.Group();
+        const spin = new THREE.Group();
+        pivot.position.set(kw.x, kw.r, kw.z);
+        spin.add(kw.spin);
+        pivot.add(spin);
+        if (kw.hub) pivot.add(kw.hub);
+        this.root.add(pivot);
+        // the model's wheels are modelled in place: they all roll about +x
+        this.wheels.push({ pivot, spin, dir: 1, x: kw.x, z: kw.z, r: kw.r });
+      }
+    }
     const frontParts = sharedWheel(0.275);
     const rearParts = sharedWheel(0.335);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 4 && !kit; i++) {
       const parts = i < 2 ? frontParts : rearParts;
       const width = i < 2 ? 0.275 : 0.335;
       const dir = WHEEL_X[i] > 0 ? 1 : -1;
@@ -963,13 +1031,16 @@ export class PhantomX1 {
       const lipX = (i < 2 ? HALF_W(V.cgToFront) : HALF_W(-V.cgToRear)) - 0.012;
       pivot.position.set(dir * (lipX - width / 2), V.wheelRadius, WHEEL_Z[i]);
       this.root.add(pivot);
-      this.wheels.push({ pivot, spin, dir });
+      this.wheels.push({ pivot, spin, dir, x: WHEEL_X[i], z: WHEEL_Z[i], r: V.wheelRadius });
     }
 
     // Soft contact shadow so the car stays grounded even with shadow maps off
+    const blobLen = kit ? (kit.zFront - kit.zRear) * (kit.shadow ? 1.55 : 1.36) : 6.2;
+    const blobW = kit ? kit.halfW * 2 * (kit.shadow ? 1.75 : 1.6) : 3.1;
     this.shadowBlob = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.1, 6.2),
-      new THREE.MeshBasicMaterial({ map: M.blob, transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }),
+      // (plane +y becomes −z once it is laid flat)
+      new THREE.PlaneGeometry(blobW, blobLen).translate(0, kit ? -(kit.zFront + kit.zRear) / 2 : 0, 0),
+      new THREE.MeshBasicMaterial({ map: kit?.shadow ?? M.blob, transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }),
     );
     this.shadowBlob.rotation.x = -Math.PI / 2;
     this.shadowBlob.position.y = 0.03;
@@ -1000,9 +1071,9 @@ export class PhantomX1 {
     this.beamMat = cardMat(lightTex.beam, 0x000000);
     this.tailGlowMat = cardMat(lightTex.pool, 0x000000);
     this.barGlowMat = cardMat(lightTex.pool, 0x000000);
-    card(11, 34, Z_TIP - 0.6, this.beamMat);
-    card(3.4, 3.2, Z_REAR - 2.4, this.tailGlowMat);
-    card(3.6, 2.6, Z_TIP - 1.4, this.barGlowMat);
+    card(11, 34, this.zFront - 0.6, this.beamMat);
+    card(3.4, 3.2, this.zRear - 2.4, this.tailGlowMat);
+    card(3.6, 2.6, this.zFront - 1.4, this.barGlowMat);
     this.lightCards.visible = false;
     this.root.add(this.lightCards);
     // decals on the road and hidden effects: never drawn in reflections or mirrors
@@ -1021,6 +1092,11 @@ export class PhantomX1 {
       else if (m.material === M.gloss || m.material === M.carbon || m.material === M.steel || m.material === this.reverseMat || m.material === M.head) this.lodFar2.push(m);
       if (m.castShadow) this.lodShadow.push(m);
     });
+    if (kit)
+      for (const o of kit.detail1) {
+        this.lodFar1.push(o);
+        mainOnly(o);
+      }
   }
 
   /** Turn this car into a see-through ghost (one material, no shadows, no light cards). */
@@ -1048,6 +1124,7 @@ export class PhantomX1 {
    * on is affected: shared materials are cloned for it the first time.
    */
   setCabinCut(on: boolean): void {
+    if (this.kit) return; // imported cars keep their own interior
     this.cabinCut.value = on ? 1 : 0;
     if (!on || this.cabinPatched) return;
     this.cabinPatched = true;
@@ -1082,6 +1159,13 @@ export class PhantomX1 {
     for (const o of this.lodFar1) o.visible = level < 1;
     for (const o of this.lodFar2) o.visible = level < 2;
     for (const m of this.lodShadow) m.castShadow = level < 2;
+    const k = this.kit;
+    if (k?.far) {
+      // far away: one low-poly copy of the whole car instead of the full model
+      k.far.visible = level >= 2;
+      for (const o of k.body) o.visible = level < 2 && !(level >= 1 && k.detail1.includes(o));
+      for (const w of this.wheels) w.pivot.visible = level < 2;
+    }
   }
 
   /** 0 = daylight (no light cards) .. 1 = full night. */
@@ -1126,7 +1210,9 @@ export class PhantomX1 {
 
   /** World position of the exhaust tips' midpoint (for particles / lights). */
   exhaustWorld(out: THREE.Vector3): THREE.Vector3 {
-    return this.body.localToWorld(out.set(0, 0.555, Z_REAR - 0.1));
+    out.set(0, 0, 0);
+    for (const t of this.exhaust) out.add(t);
+    return this.body.localToWorld(out.multiplyScalar(1 / this.exhaust.length));
   }
 
   /**
@@ -1155,11 +1241,14 @@ export class PhantomX1 {
       const w = this.wheels[i];
       // wheel height: on the ground when loaded, hanging at full droop in the air
       const drop = s.wheelDrop[i];
-      const bodyAtWheel = pose.y + WHEEL_Z[i] * pose.pitch + WHEEL_X[i] * pose.roll;
-      w.pivot.position.y = bodyAtWheel - drop - base + V.wheelRadius;
+      const bodyAtWheel = pose.y + w.z * pose.pitch + w.x * pose.roll;
+      w.pivot.position.y = bodyAtWheel - drop - base + w.r;
       if (i < 2) w.pivot.rotation.y = s.steerAngle;
-      w.spin.rotation.x = w.dir * s.wheelRot[i];
+      // (a bigger wheel turns a little slower for the same road speed)
+      w.spin.rotation.x = w.dir * s.wheelRot[i] * (V.wheelRadius / w.r);
     }
+    // an imported car's own steering wheel (seen in the cockpit view)
+    if (this.steerWheel) this.steerWheel.obj.quaternion.setFromAxisAngle(this.steerWheel.axis, -s.steerAngle * COCKPIT.steeringRatio);
 
     // Lights
     const braking = s.brake > 0.05 && s.gear !== -1;
