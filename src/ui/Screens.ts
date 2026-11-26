@@ -83,7 +83,7 @@ const TIPS = [
   '<b>Change editions in the Garage.</b> Sport grips harder, Nitro carries a bigger tank, Pursuit shrugs off contact.',
 ];
 
-/** 4.5: a model's name for the cards, with its maker for imported cars ("Porsche 911 GT3 RS"). */
+/** 4.5: a model's name for the cards, with its maker for imported cars ("Maker Model"). */
 function fullName(editionId: string): string {
   const m = modelOf(editionId);
   return m.maker ? `${m.maker} ${m.name}` : m.name;
