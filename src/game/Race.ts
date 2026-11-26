@@ -9,7 +9,7 @@ import { AIDriver, Style } from '../ai/AIDriver';
 import { RacingLine } from '../ai/RacingLine';
 import { AI, PAINTS, RACE_FLOW, RECOVERY, RIVALS, STEER_ASSIST, VEHICLE as V, WEATHER } from '../config';
 import { clamp, wrapAngle } from '../core/math';
-import { CarLook, DriverAids, EXPERT_AIDS, Loadout, lookFromPaint, lookOf, tunedVehicle } from '../vehicle/Cars';
+import { CarLook, DriverAids, EXPERT_AIDS, Loadout, lookFromPaint, lookOf, modelOf, rivalEdition, tunedVehicle } from '../vehicle/Cars';
 import { collideCars } from '../vehicle/CarCollisions';
 import { VehicleInput, VehiclePhysics, VehicleState } from '../vehicle/VehiclePhysics';
 import { WorldData } from '../world/WorldData';
@@ -84,7 +84,7 @@ export interface CarSpec {
   grid: number;
   style?: Style;
   netId?: string;
-  /** car-select edition (tuning) — only the local player's car uses it for physics */
+  /** car-select edition (tuning): the local player's car, and (4.6) AI rivals in imported cars */
   edition?: string;
   /** full garage look; defaults to the factory paint */
   look?: CarLook;
@@ -173,7 +173,9 @@ export class Race {
     let player: RaceCar | null = null;
     specs.forEach((sp, i) => {
       const edition = sp.edition ?? 'x1-street';
-      const physics = new VehiclePhysics(world, sp.kind === 'player' ? tunedVehicle(edition, aids) : undefined);
+      // 4.6: an AI rival in an imported car drives with that car's engine, gearbox and aero
+      const aiOwn = sp.kind === 'ai' && modelOf(edition).visual === 'imported';
+      const physics = new VehiclePhysics(world, sp.kind === 'player' ? tunedVehicle(edition, aids) : aiOwn ? tunedVehicle(edition, EXPERT_AIDS) : undefined);
       const car: RaceCar = {
         id: i, name: sp.name, number: sp.number, isPlayer: sp.kind === 'player', paint: sp.paint, physics, s: physics.s,
         driver: sp.kind === 'ai' ? new AIDriver(world, this.line, sp.style ?? 'clean', AI.levels[difficulty], 1000 + sp.grid * 77) : null,
@@ -200,9 +202,17 @@ export class Race {
     // every car gets a different paint: the player keeps theirs, rivals take the rest in order
     const free = PAINTS.map((_, i) => i).filter((i) => i !== playerPaint);
     const specs: CarSpec[] = [];
-    for (let i = 0; i < count; i++) specs.push({ kind: 'ai', name: RIVALS[i].name, number: RIVALS[i].number, paint: free[i % free.length], grid: i, style: RIVALS[i].style });
+    for (let i = 0; i < count; i++) specs.push(Race.rivalSpec(i, free[i % free.length], i));
     specs.push({ kind: 'player', name: 'You', number: 1, paint: playerPaint, grid: count, edition: loadout.edition, look });
     return specs;
+  }
+
+  /** 4.6: an AI rival; with imported cars in the catalogue some drive them, in their factory colours. */
+  static rivalSpec(idx: number, paint: number, grid: number, editionId?: string): CarSpec {
+    const edition = editionId ?? rivalEdition(idx);
+    const imported = modelOf(edition).visual === 'imported';
+    const look = imported ? { ...lookOf({ edition, paint: null, customColor: null, finish: null, rim: null, caliper: null, underglow: null }), paintIndex: paint } : undefined;
+    return { kind: 'ai', name: RIVALS[idx].name, number: RIVALS[idx].number, paint, grid, style: RIVALS[idx].style, edition, look };
   }
 
   /** Race distance of any car, wherever it is simulated. */

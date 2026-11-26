@@ -47,18 +47,13 @@ export const WHEEL_Z = [V.cgToFront, V.cgToFront, -V.cgToRear, -V.cgToRear];
 
 const G = 9.81;
 const WHEELBASE = V.cgToFront + V.cgToRear;
-// Normalised torque curve: fat mid-range, tails off towards the redline.
-const torqueCurve = curve1([
-  [0, 0.55],
-  [1000, 0.62],
-  [2500, 0.8],
-  [4000, 0.93],
-  [5500, 1.0],
-  [7000, 0.98],
-  [8000, 0.9],
-  [8500, 0.82],
-  [9000, 0.5],
-]);
+// Normalised torque curve: fat mid-range, tails off towards the redline (4.6: from the car's params)
+const curveCache = new WeakMap<object, (x: number) => number>();
+function torqueCurveOf(p: VehicleParams): (x: number) => number {
+  let c = curveCache.get(p.torqueCurve);
+  if (!c) curveCache.set(p.torqueCurve, (c = curve1(p.torqueCurve)));
+  return c;
+}
 
 function tyre(slip: number): number {
   return Math.sin(V.tyreC * Math.atan(V.tyreB * slip));
@@ -388,7 +383,7 @@ export class VehiclePhysics {
       );
     }
 
-    let torque = V.torque * torqueCurve(rpm) * drive;
+    let torque = V.torque * torqueCurveOf(V)(rpm) * drive;
     if (rpm >= V.redlineRpm - 40) torque = 0; // rev limiter
     if (s.shiftTimer > 0) torque *= V.shiftTorqueCut;
     if (punct) torque *= POLICE.punctureTorque;

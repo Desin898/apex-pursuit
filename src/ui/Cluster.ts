@@ -8,7 +8,7 @@
 // The dial face (ticks, numerals, labels) is drawn once to an offscreen canvas; each frame only
 // copies it and draws needles and numbers, well under a millisecond.
 // ─────────────────────────────────────────────────────────────────────────────
-import { VEHICLE as V } from '../config';
+import { VEHICLE as V, PLAYER_ENGINE } from '../config';
 import type { VehicleState } from '../vehicle/VehiclePhysics';
 
 const W = 560; // css px of the cluster box
@@ -198,7 +198,7 @@ export class Cluster {
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     // shift light: the red zone and the gear flash just before the redline
-    const shift = s.gear > 0 && s.rpm > V.upshiftRpm - 250;
+    const shift = s.gear > 0 && s.rpm > PLAYER_ENGINE.upshiftRpm - 250;
     const blink = shift && Math.floor(this.time * 10) % 2 === 0;
     if (blink) {
       g.save();

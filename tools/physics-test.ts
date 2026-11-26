@@ -291,20 +291,25 @@ import * as AIDriverModule from '../src/ai/AIDriver';
 
 // 14b. 4.5 car packs: an imported car's tune goes through the catalogue, the card stats follow it,
 // and the car still laps the circuit cleanly (a made-up track car: less power, much more downforce)
-import { registerImportedCar } from '../src/vehicle/Cars';
+import { CAR_MODELS, registerImportedCar } from '../src/vehicle/Cars';
 {
   registerImportedCar({
-    id: 'test-gt', name: 'Test GT', tune: { torque: 0.84, dragCoef: 1.28, downforce: 1.75, gripAsphalt: 1.04, mass: 0.98, yawInertia: 0.92, driftSustain: 0.75 },
+    id: 'test-gt', name: 'Test GT', tune: { gripAsphalt: 1.04, yawInertia: 0.92, driftSustain: 0.75 },
+    // 4.6: an engine of its own (absolute values): a 9,000 rpm engine, seven close ratios, more aero
+    set: { torque: 404, redlineRpm: 9000, upshiftRpm: 8800, gearRatios: [3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84], finalDrive: 4.59, dragCoef: 0.502, downforce: 1.32,
+      torqueCurve: [[0, 0.45], [2500, 0.72], [6300, 1], [8500, 0.93], [9000, 0.86]] },
     editions: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B', tune: { downforce: 1.15 } }],
   });
   const id = 'test-gt-a';
   const c = new VehiclePhysics(world, tunedVehicle(id));
   c.reset(-320, -220, Math.PI / 2);
   let top = 0;
+  let t100 = 0;
   for (let i = 0; i < 40 / DT; i++) {
     if (c.s.x > 200) c.s.x -= 500;
     c.step(input({ throttle: 1 }), DT);
     top = c.s.speed * 3.6;
+    if (!t100 && top >= 100) t100 = i * DT;
   }
   const lapCar = new VehiclePhysics(world, tunedVehicle(id));
   const timer = new LapTimer(world, 0);
@@ -331,10 +336,32 @@ import { registerImportedCar } from '../src/vehicle/Cars';
   }
   const sa = statsOf(id);
   const sx = statsOf('x1-street');
-  const ok = EDITIONS.some((e) => e.id === 'test-gt-b') && top > 260 && top < 330 && sa.topSpeed < sx.topSpeed && sa.grip > sx.grip && laps === 1 && walls === 0 && maxSlip < 0.35;
-  check('imported car tune', ok, `top ${top.toFixed(0)} km/h, lap ${timer.last.toFixed(2)} s, wall hits ${walls}, max sideslip ${((maxSlip * 180) / Math.PI).toFixed(1)}°, card grip ${sa.grip.toFixed(2)} vs ${sx.grip.toFixed(2)}`);
+  const ok = EDITIONS.some((e) => e.id === 'test-gt-b') && top > 285 && top < 305 && t100 > 2.7 && t100 < 3.6 && tunedVehicle(id).redlineRpm === 9000 && sa.topSpeed < sx.topSpeed && sa.grip > sx.grip && laps === 1 && walls === 0 && maxSlip < 0.35;
+  check('imported car tune', ok, `0-100 ${t100.toFixed(2)} s, top ${top.toFixed(0)} km/h, lap ${timer.last.toFixed(2)} s, wall hits ${walls}, max sideslip ${((maxSlip * 180) / Math.PI).toFixed(1)}°, card grip ${sa.grip.toFixed(2)} vs ${sx.grip.toFixed(2)}`);
+  // 4.6: rivals in the imported car: every other AI car drives it, the field still races cleanly
+  {
+    const specs = Race.soloSpecs(7, defaultLoadout());
+    const race = new Race(world, specs, 'medium', 0);
+    const { AIDriver } = require_ai();
+    const bot = new AIDriver(world, race.line, 'clean', AI.levels.medium, 4242);
+    let bad = false;
+    let t = 0;
+    while (t < 330 && Math.min(...race.cars.map((c) => c.lap.laps)) < 2) {
+      bot.update(race.player, race.cars, DT, race.held ? -race.countdown : race.time, 0);
+      race.step({ ...race.player.input }, DT);
+      for (const c of race.cars) {
+        c.s.impacts.length = 0;
+        if (!Number.isFinite(c.s.x + c.s.z + c.s.yaw + c.s.y)) bad = true;
+      }
+      t += DT;
+    }
+    const gt = race.cars.filter((c) => c.edition.startsWith('test-gt'));
+    const done = race.cars.every((c) => c.lap.laps >= 2);
+    check('rivals in imported cars', !bad && done && gt.length === 3, `${gt.length} of 7 rivals in it, 2 laps in ${t.toFixed(0)} s, their best laps ${gt.map((c) => c.lap.best.toFixed(1)).join(', ')} s; Phantom X1s ${race.cars.filter((c) => !c.edition.startsWith('test-gt') && !c.isPlayer).map((c) => c.lap.best.toFixed(1)).join(', ')} s`);
+  }
   // keep the other checks on the house cars only
   for (let i = EDITIONS.length - 1; i >= 0; i--) if (EDITIONS[i].model === 'test-gt') EDITIONS.splice(i, 1);
+  CAR_MODELS.splice(CAR_MODELS.findIndex((m) => m.id === 'test-gt'), 1);
 }
 
 // 15. Phase 3C handling: grass recovery, Arcade stability, rejoin

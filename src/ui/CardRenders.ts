@@ -73,16 +73,25 @@ export function renderCards(looks: CarLook[], editions: string[] = [], width = 9
 
     const out: string[] = [];
     const r = renderer;
+    // 4.6: frame every model the same way: its length fills the card as the Phantom X1's does
+    const size = new THREE.Vector3();
     looks.forEach((look, i) => {
       const car = carFor(editions[i] ?? '');
       car.setLook(look);
       car.update(st, { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0 }, 1, 0.016);
+      // (the car's own length: the root also holds the 34 m headlight card and the ground shadow)
+      const len = Math.hypot(car.noseZ - car.tailZ, 2 * 0.6);
+      size.set(2, 1.3, len);
+      const k = car.imported ? (len / 4.95) * 0.97 : 1; // (4.95: the Phantom X1's measure)
+      cam.position.set(Math.sin(a) * 7.6 * k, 1.9 * k + (car.imported ? 0.05 : 0), Math.cos(a) * 7.6 * k);
+      cam.lookAt(0, car.imported ? size.y * 0.42 : 0.5, -0.05);
       r.render(scene, cam);
       out.push(canvas.toDataURL('image/jpeg', 0.86));
     });
     pmrem.dispose();
     return out;
-  } catch {
+  } catch (err) {
+    console.warn('card renders failed', err);
     return looks.map(() => '');
   } finally {
     if (renderer) {

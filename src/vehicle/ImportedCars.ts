@@ -28,6 +28,7 @@ interface PackWheel {
 }
 interface PackEntry extends ImportedCarInfo {
   lod0: string; // base64 .glb
+  lodm?: string; // 4.6: middle distance
   lod1?: string;
   shadow?: string; // data: URL of a baked ground shadow (white = lit)
   meta: {
@@ -35,12 +36,14 @@ interface PackEntry extends ImportedCarInfo {
     steer?: { pos: [number, number, number]; axis: [number, number, number] };
     exhaust?: [number, number, number][];
     eye?: [number, number, number];
+    cams?: { hood?: [number, number]; bumper?: [number, number] };
   };
 }
 
 interface LoadedModel {
   entry: PackEntry;
   lod0: THREE.Group;
+  lodm: THREE.Group | null;
   lod1: THREE.Group | null;
   shadow: THREE.Texture | null;
   /** model space → car space: the model's axle midpoint goes over the physics axle midpoint */
@@ -89,6 +92,7 @@ export async function loadImportedCars(onProgress?: (name: string) => void): Pro
     onProgress?.(e.name);
     try {
       const lod0 = await parse(loader, e.lod0);
+      const lodm = e.lodm ? await parse(loader, e.lodm).catch(() => null) : null;
       const lod1 = e.lod1 ? await parse(loader, e.lod1).catch(() => null) : null;
       let shadow: THREE.Texture | null = null;
       if (e.shadow) {
@@ -99,7 +103,7 @@ export async function loadImportedCars(onProgress?: (name: string) => void): Pro
       const mid = (w.FL.pos[2] + w.RL.pos[2]) / 2;
       const dz = (V.cgToFront - V.cgToRear) / 2 - mid;
       const box = new THREE.Box3().setFromObject(lod0);
-      models.set(e.id, { entry: e, lod0, lod1, shadow, dz, zFront: box.max.z + dz, zRear: box.min.z + dz, halfW: Math.max(-box.min.x, box.max.x) });
+      models.set(e.id, { entry: e, lod0, lodm, lod1, shadow, dz, zFront: box.max.z + dz, zRear: box.min.z + dz, halfW: Math.max(-box.min.x, box.max.x) });
     } catch (err) {
       console.warn(`car pack: ${e.name} could not be loaded`, err);
     }
@@ -258,6 +262,28 @@ function kitBuilder(lm: LoadedModel): CarKitBuilder {
       }
       return { spin, hub, x: w[k].pos[0], z: w[k].pos[2] + lm.dz, r: w[k].radius };
     });
+    // 4.6: the middle-distance copy: its own body and wheels (they still roll and steer)
+    const mid: THREE.Object3D[] = [];
+    const midWheels: (THREE.Object3D | null)[] = [null, null, null, null];
+    if (lm.lodm) {
+      const m = lm.lodm.clone(true);
+      dress(m, true);
+      for (const n of ['body', 'cabin']) {
+        const o = m.getObjectByName(n);
+        if (!o) continue;
+        o.removeFromParent();
+        o.position.z += lm.dz;
+        mid.push(o);
+      }
+      (['FL', 'FR', 'RL', 'RR'] as const).forEach((k, i) => {
+        const o = m.getObjectByName(`wheel_${k}`);
+        if (!o) return;
+        o.removeFromParent();
+        o.position.set(0, 0, 0);
+        midWheels[i] = o;
+      });
+    }
+    wheels.forEach((w, i) => (w.spinMid = midWheels[i]));
     let far: THREE.Object3D | null = null;
     if (lm.lod1) {
       far = lm.lod1.clone(true);
@@ -266,7 +292,7 @@ function kitBuilder(lm: LoadedModel): CarKitBuilder {
     }
     const v3 = (p: [number, number, number]) => new THREE.Vector3(p[0], p[1], p[2] + lm.dz);
     return {
-      body, detail1, far, wheels, steer,
+      body, detail1, mid, far, wheels, steer,
       zFront: lm.zFront, zRear: lm.zRear, halfW: lm.halfW,
       exhaust: (lm.entry.meta.exhaust ?? []).map(v3),
       eye: lm.entry.meta.eye ? v3(lm.entry.meta.eye) : null,

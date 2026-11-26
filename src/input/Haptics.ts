@@ -12,7 +12,7 @@
 // Firefox), with trigger rumble on pads that have it (Xbox) and a hapticActuators.pulse()
 // fallback. If nothing is available it silently does nothing.
 // ─────────────────────────────────────────────────────────────────────────────
-import { HAPTICS as H, VEHICLE as V } from '../config';
+import { HAPTICS as H, VEHICLE as V, PLAYER_ENGINE } from '../config';
 import { clamp01, smoothstep } from '../core/math';
 import { VehicleState } from '../vehicle/VehiclePhysics';
 
@@ -134,11 +134,11 @@ export class Haptics {
     let trigL = 0;
     let trigR = 0;
     if (car) {
-      const rpmN = clamp01((car.rpm - V.idleRpm) / (V.redlineRpm - V.idleRpm));
+      const rpmN = clamp01((car.rpm - PLAYER_ENGINE.idleRpm) / (PLAYER_ENGINE.redlineRpm - PLAYER_ENGINE.idleRpm));
       // Engine: a faint idle throb that grows with revs and load
       strong += H.engineIdle + H.engineGain * rpmN * (0.35 + 0.65 * car.throttle);
       // Rev limiter flutter
-      if (car.rpm > V.redlineRpm - 250 && car.throttle > 0.5) weak += 0.25 * (Math.sin(performance.now() * 0.09) > 0 ? 1 : 0);
+      if (car.rpm > PLAYER_ENGINE.redlineRpm - 250 && car.throttle > 0.5) weak += 0.25 * (Math.sin(performance.now() * 0.09) > 0 ? 1 : 0);
       // Tyres: rear slip is the drift feel, front slip is understeer scrub
       const rear = Math.max(car.wheelSlip[2], car.wheelSlip[3]);
       const front = Math.max(car.wheelSlip[0], car.wheelSlip[1]);

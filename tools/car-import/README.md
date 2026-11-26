@@ -3,12 +3,13 @@
 Bring a real 3D car model into APEX PURSUIT as a new car in car select, with its own handling.
 
 Imported cars live in a **car pack**. That is a `cars/` folder next to the game page, the same idea as a
-music pack. Car packs are personal:
+music pack. The game's own pack ships in `play/cars/` (4.6); each car's rules and description are in
+`cars-src/<id>/`, and the converted `.glb` files are rebuilt from the source model, so they stay out of git.
 
-- `play/cars/`, `dist/cars/` and `cars-src/` are in `.gitignore`. Models of real cars are other people's work and
-  brands, and they never go into this public repository.
+- Only add models you have the right to share. The pack goes wherever the game goes.
 - Online, a friend who has the same pack sees your car. A friend without it sees a Phantom X1 in your colours.
-  Your handling stays your own, because each player drives their own physics.
+  Your handling stays your own, because each player drives their own physics. The relay also hands the
+  pack to friends on the link (`npm run host -- --no-share-cars` turns that off).
 
 ## What you need
 
@@ -57,8 +58,9 @@ what is what. Each pattern is a regular expression, and case is ignored.
 blender -b "My Car.blend" --python tools/car-import/convert.py -- cars-src/mycar --rules cars-src/mycar/rules.json --textures "path/to/textures"
 ```
 
-This writes `lod0.glb` (full detail), `lod1.glb` (the far-away copy) and `meta.json` (wheel positions, wheel size and
-the steering wheel's axis). Check the triangle counts it prints. Under about 250 000 for LOD0 is fine.
+This writes `lod0.glb` (full detail), `lodm.glb` (middle distance, about 30 %), `lod1.glb` (far away, about 10 %)
+and `meta.json` (wheel positions, wheel size and the steering wheel's axis). Check the triangle counts it prints.
+Under about 250 000 for LOD0 is fine: only your own car, and cars right beside you, use it.
 
 ## 3. Describe the car: `car.json`
 
@@ -70,16 +72,27 @@ Put this file in the same folder:
   "name": "My Car",
   "maker": "Maker",
   "year": 2024,
-  "tune": { "torque": 0.85, "dragCoef": 1.25, "downforce": 1.6, "gripAsphalt": 1.04, "mass": 0.98 },
+  "sound": "flat6-na",
+  "set": { "torque": 404, "redlineRpm": 9000, "upshiftRpm": 8800, "mass": 1450, "dragCoef": 0.502, "downforce": 1.32,
+           "gearRatios": [3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84], "finalDrive": 4.59,
+           "torqueCurve": [[0, 0.45], [2500, 0.72], [4000, 0.85], [6300, 1], [8500, 0.93], [9000, 0.86]] },
+  "tune": { "gripAsphalt": 1.04, "yawInertia": 0.92 },
   "editions": [
     { "id": "base", "name": "Base", "tagline": "One line for the card.", "number": 7,
       "paint": 0, "color": 15198440, "finish": "gloss", "rim": 12172482, "caliper": 13111324 }
   ],
-  "meta": { "exhaust": [[0.08, 0.36, -2.26], [-0.08, 0.36, -2.26]], "eye": [0.36, 1.07, -0.24] }
+  "meta": { "exhaust": [[0.08, 0.36, -2.26], [-0.08, 0.36, -2.26]], "eye": [0.36, 1.07, -0.24], "cams": { "hood": [0.92, 1.04] } }
 }
 ```
 
-- `tune` values multiply the house car's handling (see `VEHICLE` in `src/config.ts`), and each edition can add its own
+- `set` replaces the house car's values outright: the engine (`torque` in the game's units, `torqueCurve` as
+  rpm → share of peak, `idleRpm`, `redlineRpm`, `upshiftRpm`), the gearbox (`gearRatios`, `finalDrive`,
+  `shiftTime`), `mass` and the aero (`dragCoef`, `downforce` in N per (m/s)²). Calibrate against the real car's
+  published 0-100, 0-200 and top speed: `tools/car-import` has no calibrator of its own, but the physics test's
+  straight-line runs show how (`npm run test:physics`).
+- `sound` picks the engine voice: `x1` (the house car) or `flat6-na` (a high-revving naturally aspirated flat six).
+- `meta.cams.hood` / `meta.cams.bumper` place those cameras: `[metres forward of the centre of gravity, height]`.
+- `tune` values multiply the house car's handling (after `set`) (see `VEHICLE` in `src/config.ts`), and each edition can add its own
   `tune` on top. Top speed goes roughly with √(torque ÷ dragCoef).
 - Colours are plain numbers (0xe7e8e8 = 15198440). `paint` is the nearest of the game's eight paints, used for the
   minimap and for online colour clashes.

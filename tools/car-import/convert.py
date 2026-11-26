@@ -12,7 +12,8 @@ What it does, driven by the rules file (see README.md next to this script):
   5. joins everything into a few parts and re-centres the car:
        body, cabin, under, steer, wheel_FL/FR/RL/RR (spin), hub_FL/FR/RL/RR (steer only)
      glTF space: +Y up, the car faces +Z, left = +X, the tyres stand on y = 0, origin = mid-wheelbase
-  6. writes lod0.glb (full detail), lod1.glb (far away: ~10 % of the triangles) and meta.json
+  6. writes lod0.glb (full detail), lodm.glb (middle distance: ~30 %), lod1.glb (far away: ~10 %)
+     and meta.json
 
 Then run tools/car-import/pack.mjs to compress the files and add the car to a car pack.
 """
@@ -265,15 +266,26 @@ meta['tris_lod0'] = tris()
 print('LOD0 triangles', sum(meta['tris_lod0'].values()), meta['tris_lod0'])
 export(os.path.join(OUT, 'lod0.glb'))
 
-# ── 6. LOD1 ─────────────────────────────────────────────────────────────────
+# ── 6. LOD1 (middle distance, also AI cars near you) and LOD2 (far away) ──
 for name in ['steer', 'under'] + ['hub_' + k for k in ('FL', 'FR', 'RL', 'RR')]:
     if final.get(name):
         bpy.data.objects.remove(final[name], do_unlink=True)
         final[name] = None
+LM = RULES.get('lod_mid', {'body': 0.32, 'cabin': 0.12, 'wheel': 0.3})
 L1 = RULES.get('lod1', {})
+mid_ratio = {}
 for name, o in final.items():
     if o:
-        decimate(o, L1.get('wheel', 0.12) if name.startswith('wheel_') else L1.get(name, 0.14))
+        r = LM.get('wheel', 0.3) if name.startswith('wheel_') else LM.get(name, 0.32)
+        mid_ratio[name] = r
+        decimate(o, r)
+meta['tris_mid'] = tris()
+print('MID triangles', sum(meta['tris_mid'].values()))
+export(os.path.join(OUT, 'lodm.glb'))
+for name, o in final.items():
+    if o:
+        want = L1.get('wheel', 0.12) if name.startswith('wheel_') else L1.get(name, 0.14)
+        decimate(o, min(1, want / mid_ratio[name]))
 meta['tris_lod1'] = tris()
 print('LOD1 triangles', sum(meta['tris_lod1'].values()))
 export(os.path.join(OUT, 'lod1.glb'))

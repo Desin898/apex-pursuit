@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { AudioEngine } from './audio/AudioEngine';
 import { CAMERA_MODES, CameraRig, CarPose } from './camera/CameraRig';
-import { AI, PAINTS, PHYSICS_DT, RECOVERY, STEER_ASSIST, StabilityMode, VEHICLE as V } from './config';
+import { AI, PAINTS, PHYSICS_DT, RECOVERY, STEER_ASSIST, StabilityMode, VEHICLE as V, PLAYER_ENGINE } from './config';
 import { clamp, clamp01, damp, lerp, smoothstep, wrapAngle } from './core/math';
 import { loadSettings, saveSettings, Settings, STEER_CURVES, STEER_LABELS } from './core/Settings';
 import { Particles } from './fx/Particles';
@@ -23,7 +23,7 @@ import { Menu, MenuPage } from './ui/Menu';
 import { renderCards } from './ui/CardRenders';
 import { artUrl } from './ui/art';
 import { Screens } from './ui/Screens';
-import { defaultLoadout, DriverAids, EDITIONS, lookFromPaint, lookOf, tunedVehicle } from './vehicle/Cars';
+import { defaultLoadout, DriverAids, EDITIONS, lookFromPaint, lookOf, modelOf, tunedVehicle } from './vehicle/Cars';
 import { PhantomX1 } from './vehicle/PhantomX1';
 import { loadImportedCars, makeCarVisual, registerImportedCars } from './vehicle/ImportedCars';
 import { Cockpit } from './vehicle/Cockpit';
@@ -250,6 +250,7 @@ class Game {
     this.buildCarVisuals();
 
     this.rig = new CameraRig(1);
+    this.applyCarSetup();
     this.rig.world = this.world;
     this.rig.cockpitEye = this.cockpit.eye;
     this.rig.camera.layers.enable(DETAIL_LAYER); // the main camera sees the details
@@ -574,7 +575,7 @@ class Game {
     this.cockpit.update(s, dt, this.time, night, live ? p.rain : 0, 1 - 0.55 * night, this.settings.mph);
     if (this.state === 'playing') {
       // a buzz at the rev limiter, a light tick each time the wiper turns round
-      if (s.rpm > V.redlineRpm - 60 && s.throttle > 0.5) this.haptics.pulse(0.12, 0.35, 0.05);
+      if (s.rpm > PLAYER_ENGINE.redlineRpm - 60 && s.throttle > 0.5) this.haptics.pulse(0.12, 0.35, 0.05);
       if (this.cockpit.wiperKick) this.haptics.pulse(0.05, 0.18, 0.06);
     }
   }
@@ -1830,6 +1831,23 @@ class Game {
     // the cockpit rides on the player's sprung body (an imported car brings its own interior)
     this.carVisuals[0]?.body.add(this.cockpit.root);
     this.cockpit.useOwnInterior(this.carVisuals[0]?.eye ?? null);
+    this.applyCarSetup();
+  }
+
+  /** 4.6: the player's car sets the hood / bumper camera spots, the rev dial and the engine voice. */
+  private applyCarSetup(): void {
+    if (!this.rig || !this.carVisuals.length) return; // (the first build runs before the camera exists)
+    const pe = this.race.player.edition;
+    const model = modelOf(pe);
+    const nose = this.carVisuals[0]?.noseZ ?? 2.42;
+    const imported = this.carVisuals[0]?.imported ?? false;
+    this.rig.carCams = {
+      hood: model.cams?.hood && imported ? model.cams.hood : [0.62, 1.0],
+      bumper: model.cams?.bumper && imported ? model.cams.bumper : [imported ? nose + 0.12 : 2.62, 0.4],
+    };
+    const tv = tunedVehicle(imported ? pe : 'x1-street');
+    Object.assign(PLAYER_ENGINE, { idleRpm: tv.idleRpm, redlineRpm: tv.redlineRpm, upshiftRpm: tv.upshiftRpm });
+    this.audio.setVoice(imported ? model.voice ?? 'x1' : 'x1');
     // a new car means a new ghost model too
     if (this.ghostCar) {
       this.scene.remove(this.ghostCar.root);
@@ -2147,7 +2165,8 @@ class Game {
       this.carVisuals[i].update(c.s, p, this.time, dt);
       // level of detail by distance from the camera (your own car is always full detail)
       const cd = i === 0 || this.photo.active ? 0 : this.rig.camera.position.distanceTo(this.carVisuals[i].root.position);
-      this.carVisuals[i].setDetail(cd < 45 ? 0 : cd < 130 ? 1 : 2);
+      // (4.6: an imported model is heavy: other cars drop to its lighter copy unless right beside you)
+      this.carVisuals[i].setDetail(cd < (this.carVisuals[i].imported ? 14 : 45) ? 0 : cd < 130 ? 1 : 2);
       // a rejoined car is a ghost for a moment: it blinks and nothing can hit it
       if (live) this.carVisuals[i].root.visible = !c.gone && (c.s.ghost <= 0 || Math.floor(this.time * 12) % 2 === 0);
     }

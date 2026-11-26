@@ -23,6 +23,10 @@ export interface CarModel {
   /** imported cars: maker and year for the card ('' for the house car) */
   maker?: string;
   year?: number;
+  /** 4.6: engine sound ('x1' = the house car's; 'flat6-na' = a high-revving flat six) */
+  voice?: string;
+  /** 4.6: hood and bumper camera spots [forward, up] in metres from the centre of gravity */
+  cams?: { hood?: [number, number]; bumper?: [number, number] };
 }
 
 export interface Edition {
@@ -43,6 +47,8 @@ export interface Edition {
   unlock: number;
   /** imported cars: the factory colour (overrides the paint swatch's colour) */
   color?: number;
+  /** 4.6: absolute values that replace the base car's (engine, gearbox, mass, aero), before `tune` */
+  set?: Partial<VehicleParams>;
 }
 
 export const CAR_MODELS: CarModel[] = [{ id: 'phantom-x1', name: 'Phantom X1', visual: 'phantom-x1' }];
@@ -102,14 +108,40 @@ export interface ImportedCarInfo {
   year?: number;
   /** handling: multipliers on the base car, shared by all its editions */
   tune?: Partial<Record<keyof VehicleParams, number>>;
+  /** 4.6: absolute engine / gearbox / mass / aero values (see Edition.set) */
+  set?: Partial<VehicleParams>;
+  sound?: string;
+  meta?: { cams?: CarModel['cams'] };
   editions: Partial<Edition>[];
+}
+
+/** Only known numeric or numeric-array keys, in sane ranges (packs are other people's files). */
+function safeSet(src?: Partial<Record<string, unknown>>): Partial<VehicleParams> {
+  const out: Record<string, unknown> = {};
+  const base = VEHICLE as Record<string, unknown>;
+  const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1e6;
+  for (const [k, v] of Object.entries(src ?? {})) {
+    const b = base[k];
+    if (typeof b === 'number' && num(v)) out[k] = v;
+    else if (k === 'gearRatios' && Array.isArray(v) && v.length >= 3 && v.length <= 10 && v.every((x) => num(x) && (x as number) > 0.2 && (x as number) < 8)) out[k] = v;
+    else if (k === 'torqueCurve' && Array.isArray(v) && v.length >= 3 && v.length <= 24 && v.every((p) => Array.isArray(p) && p.length === 2 && num(p[0]) && num(p[1]) && p[1] <= 1.5))
+      out[k] = (v as [number, number][]).slice().sort((a, b) => a[0] - b[0]);
+  }
+  return out as Partial<VehicleParams>;
 }
 
 /** Add an imported model and its editions to the catalogue (once, at start-up). */
 export function registerImportedCar(info: ImportedCarInfo): void {
   const id = String(info.id).replace(/[^a-z0-9-]/gi, '').slice(0, 24);
   if (!id || CAR_MODELS.some((m) => m.id === id)) return;
-  CAR_MODELS.push({ id, name: String(info.name).slice(0, 40), visual: 'imported', maker: info.maker?.slice(0, 30), year: info.year });
+  const cam = (v: unknown): [number, number] | undefined =>
+    Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === 'number' && Number.isFinite(x) && Math.abs(x) < 6) ? (v as [number, number]) : undefined;
+  CAR_MODELS.push({
+    id, name: String(info.name).slice(0, 40), visual: 'imported', maker: info.maker?.slice(0, 30), year: info.year,
+    voice: typeof info.sound === 'string' ? info.sound.slice(0, 16) : undefined,
+    cams: { hood: cam(info.meta?.cams?.hood), bumper: cam(info.meta?.cams?.bumper) },
+  });
+  const baseSet = safeSet(info.set);
   const safeTune = (t?: Partial<Record<string, number>>): Partial<Record<keyof VehicleParams, number>> => {
     const out: Record<string, number> = {};
     for (const [k, v] of Object.entries(t ?? {})) if (k in VEHICLE && typeof v === 'number' && Number.isFinite(v) && v > 0.2 && v < 5) out[k] = v;
@@ -124,7 +156,8 @@ export function registerImportedCar(info: ImportedCarInfo): void {
     EDITIONS.push({
       id: eid, model: id, name: String(e.name ?? info.name).slice(0, 24), tagline: String(e.tagline ?? '').slice(0, 80), number: e.number ?? 9,
       paint: Math.max(0, Math.min(PAINTS.length - 1, e.paint ?? 0)), finish: e.finish ?? 'gloss', rim: e.rim ?? 0x1b1c20, caliper: e.caliper ?? 0xc8141c,
-      underglow: e.underglow ?? 0, tune, unlock: 0, color: e.color,
+      underglow: e.underglow ?? 0, tune, unlock: 0, color: typeof e.color === 'number' ? e.color : undefined,
+      set: { ...baseSet, ...safeSet(e.set) },
     });
   });
 }
@@ -180,7 +213,7 @@ export const EXPERT_AIDS: DriverAids = { stability: 'expert', tractionControl: f
  */
 export function tunedVehicle(editionId: string, aids: DriverAids = EXPERT_AIDS): VehicleParams {
   const e = editionById(editionId);
-  const v = { ...VEHICLE, ...STABILITY[aids.stability] } as Record<string, unknown>;
+  const v = { ...VEHICLE, ...STABILITY[aids.stability], ...(e.set ?? {}) } as Record<string, unknown>;
   v.tractionControl = aids.tractionControl ? 1 : 0;
   v.brakeAssist = aids.brakeAssist ? 1 : 0;
   for (const [k, m] of Object.entries(e.tune)) {
@@ -193,12 +226,29 @@ export function tunedVehicle(editionId: string, aids: DriverAids = EXPERT_AIDS):
 export function statsOf(editionId: string): { power: number; topSpeed: number; grip: number; nitro: number; weight: number } {
   const t = tunedVehicle(editionId);
   const b = VEHICLE;
-  const topRel = Math.sqrt((t.torque / t.mass / (b.torque / b.mass)) * (b.dragCoef / t.dragCoef));
+  // 4.6: from peak engine power (torque curve × rpm), so cars with their own engines compare fairly
+  const peak = (p: VehicleParams) => {
+    let best = 0;
+    for (const [rpm, k] of p.torqueCurve) if (rpm <= p.redlineRpm) best = Math.max(best, p.torque * k * rpm);
+    return best;
+  };
+  const pt = peak(t);
+  const pb = peak(b);
   return {
-    power: Math.min(1, 0.72 * ((t.torque / t.mass) / (b.torque / b.mass))),
-    topSpeed: Math.min(1, 0.74 * topRel),
+    power: Math.min(1, 0.72 * ((pt / t.mass) / (pb / b.mass))),
+    topSpeed: Math.min(1, 0.74 * Math.cbrt((pt / t.dragCoef) / (pb / b.dragCoef))),
     grip: Math.min(1, 0.7 * (t.gripAsphalt / b.gripAsphalt) * (1 + 0.15 * (t.downforce / b.downforce - 1))),
     nitro: Math.min(1, 0.6 * (b.nitroBurn / t.nitroBurn) ** 0.8 * (t.nitroTorque / b.nitroTorque) ** 0.3),
     weight: Math.min(1, 0.62 * (t.mass / b.mass)),
   };
+}
+
+/**
+ * 4.6: which car an AI rival drives. With imported cars in the catalogue, every other rival takes
+ * one of their editions (in turn); the rest drive Phantom X1s. Deterministic, so a host can send it.
+ */
+export function rivalEdition(index: number): string {
+  const imported = EDITIONS.filter((e) => CAR_MODELS.find((m) => m.id === e.model)?.visual === 'imported');
+  if (!imported.length || index % 2 === 0) return EDITIONS[0].id;
+  return imported[(index >> 1) % imported.length].id;
 }

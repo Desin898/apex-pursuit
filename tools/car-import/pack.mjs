@@ -45,9 +45,12 @@ const entry = {
   maker: car.maker,
   year: car.year,
   tune: car.tune ?? {},
+  set: car.set ?? {},
+  sound: car.sound,
   editions: car.editions ?? [],
   meta: { wheels: meta.wheels, steer: meta.steer, ...(car.meta ?? {}) },
   lod0: optimise('lod0.glb'),
+  lodm: optimise('lodm.glb'),
   lod1: optimise('lod1.glb'),
   shadow: existsSync(join(dir, 'shadow.jpg')) ? `data:image/jpeg;base64,${readFileSync(join(dir, 'shadow.jpg')).toString('base64')}` : undefined,
 };
@@ -56,10 +59,18 @@ if (!entry.lod0) throw new Error(`${dir}/lod0.glb is missing: run convert.py fir
 
 for (const out of outs) {
   mkdirSync(out, { recursive: true });
+  // cars already in this pack's cars.js but without their .carpack.json (a fresh clone) are kept
+  if (existsSync(join(out, 'cars.js'))) {
+    for (const line of readFileSync(join(out, 'cars.js'), 'utf8').split('\n')) {
+      if (!line.startsWith('A.push(')) continue;
+      const old = JSON.parse(line.slice(7, -2));
+      if (old.id !== car.id && !existsSync(join(out, `${old.id}.carpack.json`))) writeFileSync(join(out, `${old.id}.carpack.json`), JSON.stringify(old));
+    }
+  }
   writeFileSync(join(out, `${car.id}.carpack.json`), JSON.stringify(entry));
   const all = readdirSync(out).filter((f) => f.endsWith('.carpack.json')).sort();
   const body = all.map((f) => `A.push(${readFileSync(join(out, f), 'utf8')});`).join('\n');
-  writeFileSync(join(out, 'cars.js'), `// APEX PURSUIT car pack (tools/car-import). Personal: keep it out of public repositories.\n(function(){var A=window.__APEX_CARS__=window.__APEX_CARS__||[];\n${body}\n})();\n`);
+  writeFileSync(join(out, 'cars.js'), `// APEX PURSUIT car pack, made by tools/car-import. Only share models you have the right to share.\n(function(){var A=window.__APEX_CARS__=window.__APEX_CARS__||[];\n${body}\n})();\n`);
   const kb = Math.round(readFileSync(join(out, 'cars.js')).length / 1024);
   console.log(`${resolve(out)}/cars.js: ${all.length} car${all.length === 1 ? '' : 's'}, ${kb} kB`);
 }

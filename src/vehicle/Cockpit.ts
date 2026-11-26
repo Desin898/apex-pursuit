@@ -13,7 +13,7 @@
 // Car-body space: +z forward, +x left, y up from the ground.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
-import { COCKPIT as K, VEHICLE as V } from '../config';
+import { COCKPIT as K, VEHICLE as V, PLAYER_ENGINE } from '../config';
 import { clamp, damp, lerp } from '../core/math';
 import { buildCanopy } from './PhantomX1';
 import { VehicleState } from './VehiclePhysics';
@@ -495,9 +495,9 @@ export class Cockpit {
       arm.quaternion.setFromUnitVectors(up, mid.subVectors(wrist, e).normalize());
     }
     // shift lights: green → amber → red, all blink at the limiter
-    const rpmN = clamp((s.rpm - 4500) / (V.upshiftRpm - 4500), 0, 1);
+    const rpmN = clamp((s.rpm - 4500) / (PLAYER_ENGINE.upshiftRpm - 4500), 0, 1);
     const lit = Math.round(rpmN * 9);
-    const blink = s.rpm > V.upshiftRpm - 120 && Math.floor(time * 12) % 2 === 0;
+    const blink = s.rpm > PLAYER_ENGINE.upshiftRpm - 120 && Math.floor(time * 12) % 2 === 0;
     this.shiftLeds.forEach((m, i) => {
       const on = !blink && i < lit;
       m.color.setHex(on ? (i < 3 ? 0x3cff7a : i < 6 ? 0xffb000 : 0xff3040) : blink ? 0x2a0004 : 0x111416);
@@ -570,7 +570,7 @@ export class Cockpit {
     g.fillText('RPM ×1000', 20, 62);
     // gear in the middle, speed to the right, nitrous to the left
     g.textAlign = 'center';
-    g.fillStyle = s.rpm > V.upshiftRpm - 250 ? '#ff4d55' : '#eef5f5';
+    g.fillStyle = s.rpm > PLAYER_ENGINE.upshiftRpm - 250 ? '#ff4d55' : '#eef5f5';
     g.font = '700 92px Outfit, system-ui, sans-serif';
     g.fillText(gear, W / 2, 158);
     g.fillStyle = '#4fd1d9';

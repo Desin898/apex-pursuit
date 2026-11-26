@@ -21,7 +21,7 @@ import { Conditions, TIMES, WEATHERS } from '../world/Environment';
 import { AI, PAINTS, RIVALS } from '../config';
 import { Settings } from '../core/Settings';
 import { CarSpec, NetCar, packCar, Race, validNetCar } from '../game/Race';
-import { EDITIONS, lookFromPaint, lookOf } from '../vehicle/Cars';
+import { EDITIONS, lookFromPaint, lookOf, rivalEdition } from '../vehicle/Cars';
 import { openTransport, Transport, TransportOptions } from './Transport';
 import type { SharedTrack } from '../audio/MusicLibrary';
 
@@ -64,7 +64,7 @@ interface HostBlock {
   hd?: number; // the random "Set" hold inside that countdown
   ri?: number; // rain intensity 0..100 (4B.2): the host's shower, so everyone gets wet together
   r: [string, number, number, string, string | number][]; // humans: peer id, grid slot, paint, name, edition (id; index before 4.5)
-  a: [number, number, number, string?][]; // AI: grid slot, paint, index into RIVALS (−1 = took over a friend's car, named)
+  a: [number, number, number, (string | null)?, string?][]; // AI: grid slot, paint, index into RIVALS (−1 = took over a friend's car, named), 4.6: edition
   ph: number; // 4C.2: 0 = lobby (waiting before the lights), 1 = racing
   q: string[]; // 4C.2: players waiting for the next race
   st?: number; // 4C.2: lobby auto-start seconds left (−1 = not counting)
@@ -109,7 +109,7 @@ function parseHost(h: unknown): HostBlock | null {
   const a: HostBlock['a'] = [];
   for (const e of o.a) {
     if (!Array.isArray(e) || !isInt(e[0], 0, AI.gridSize - 1) || !isInt(e[1], 0, PAINTS.length - 1) || !isInt(e[2], -1, RIVALS.length - 1)) return null;
-    a.push(e[2] === -1 ? [e[0], e[1], -1, `${cleanName(e[3])}`] : [e[0], e[1], e[2]]);
+    a.push(e[2] === -1 ? [e[0], e[1], -1, `${cleanName(e[3])}`] : typeof e[4] === 'string' ? [e[0], e[1], e[2], null, editionOf(e[4])] : [e[0], e[1], e[2]]);
   }
   const q = Array.isArray(o.q) ? (o.q.filter((x) => typeof x === 'string').slice(0, 8) as string[]) : [];
   return { vn: typeof o.vn === 'string' ? o.vn.slice(0, 32) : undefined, ph: o.ph === 0 ? 0 : 1, q, st: typeof o.st === 'number' && Number.isFinite(o.st) ? o.st : -1, id: o.id, cd: Math.max(0, Math.min(10, o.cd)), r, a, ai: o.ai as number[][], pz: o.pz, mu: parseMusic(o.mu), l: isInt(o.l, 0, 20) ? (o.l as number) : 3, w: isInt(o.w, 0, WEATHERS.length - 1) ? (o.w as number) : 0, t: isInt(o.t, 0, TIMES.length - 1) ? (o.t as number) : 0 };
@@ -493,7 +493,11 @@ export class OnlineSession {
       this.roster = hb.r;
       this.aiRoster = hb.a;
       const specs: CarSpec[] = [];
-      for (const [slot, paint, idx, nm] of hb.a) specs.push({ kind: 'remote', name: idx === -1 ? (nm ?? 'AI') : RIVALS[idx].name, number: idx === -1 ? slot + 1 : RIVALS[idx].number, paint, grid: slot, netId: `ai:${slot}` });
+      for (const [slot, paint, idx, nm, ed] of hb.a) {
+        // 4.6: the host says which car each rival drives (a Phantom X1 if that car's pack isn't here)
+        const rs = idx === -1 ? null : Race.rivalSpec(idx, paint, slot, ed ?? EDITIONS[0].id);
+        specs.push({ kind: 'remote', name: idx === -1 ? (nm ?? 'AI') : RIVALS[idx].name, number: idx === -1 ? slot + 1 : RIVALS[idx].number, paint, grid: slot, netId: `ai:${slot}`, edition: rs?.edition, look: rs?.look });
+      }
       hb.r.forEach(([id, slot, paint, name, ed], k) => specs.push(this.humanSpec(id, myId, slot, paint, name, ed, k)));
       this.onRoster(specs, false);
     } else if (hb.a.length !== this.aiRoster.length) {
@@ -550,7 +554,7 @@ export class OnlineSession {
     };
     this.roster = humans.map((h, k) => [h.id, nAI + k, pick(h.paint), h.name, h.edition]);
     this.aiRoster = [];
-    for (let k = 0; k < nAI; k++) this.aiRoster.push([k, pick(0), k]);
+    for (let k = 0; k < nAI; k++) this.aiRoster.push([k, pick(0), k, null, rivalEdition(k)]);
     this.queue = this.queue.filter((id) => !humans.some((h) => h.id === id));
     this.raceId = (Date.now() % 1000000000) + Math.floor(Math.random() * 1000);
     this.raceKey = `${myId}|${this.raceId}`;
@@ -559,7 +563,7 @@ export class OnlineSession {
     this.startWanted = false;
     this.overT = 0;
     const specs: CarSpec[] = [];
-    for (const [slot, paint, idx] of this.aiRoster) specs.push({ kind: 'ai', name: RIVALS[idx].name, number: RIVALS[idx].number, paint, grid: slot, style: RIVALS[idx].style });
+    for (const [slot, paint, idx, , ed] of this.aiRoster) specs.push(Race.rivalSpec(idx, paint, slot, ed));
     this.roster.forEach(([id, slot, paint, name, ed], k) => specs.push(this.humanSpec(id, myId, slot, paint, name, ed, k)));
     this.onRoster(specs, true);
   }

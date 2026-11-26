@@ -120,6 +120,42 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
 
+## New in Phase 4.6: the 911 GT3 RS, as the real thing
+
+The game now ships with a car pack: a Porsche 911 GT3 RS (992) in five factory colours, next to the
+Phantom X1. It's in `play/cars/`, so friends who download the game or join your link get it too.
+- **Its real numbers.** The engine, gearbox, weight and aero come from the car's published data:
+  - a 9,000 rpm flat six with its torque peak at 6,300 rpm;
+  - seven close PDK-style ratios and 1,450 kg;
+  - downforce that builds to about 860 kg at 285 km/h.
+
+  On the game's test straight it does 0-100 km/h in 3.1 s (official 3.2), 0-160 in 6.8 s (6.9) and 0-200 in
+  10.6 s (10.6). It tops out at 296 km/h in seventh (296), runs 80-120 km/h in 1.8 s (1.8) and stops from
+  200 km/h in 98 m (97 m in a magazine test). It has less power than the Phantom X1, a fictional hypercar,
+  but it carries more speed through fast corners.
+- **Its own sound.** A new engine voice for a naturally aspirated flat six:
+  - a waveform built from the boxer's firing orders, for its metallic rasp;
+  - an induction howl that opens up past 6,000 rpm;
+  - crackle on the overrun and on downshifts, and no turbo whoosh.
+
+  The rev dial, shift lights and controller rumble follow its 9,000 rpm redline.
+- **Factory colours.** RS white, Arctic Grey and Jet Black on black wheels, Shark Blue and Guards Red,
+  plus every garage colour.
+- **Rivals drive it too.** With the pack loaded, every other AI rival takes a GT3 RS with the car's own
+  physics, so they're slower on the straights and quicker in the fast corners. Online, the host tells
+  everyone which car each rival drives.
+- **Lighter at a distance.** A middle-distance copy has about 65,000 triangles, against 240,000 for the
+  full model. Rivals only show the full model when they're right beside you, and far-away cars use
+  about 28,000.
+- **Cameras.** The hood and bumper cameras sit on the GT3 RS's own lid and nose. The car-select picture
+  frames each car by its own size.
+
+| | |
+|---|---|
+| ![Car select](docs/4.6/car-select.jpg) | ![Dusk](docs/4.6/dusk-rear.jpg) |
+| ![Cockpit](docs/4.6/cockpit.jpg) | ![Night brake lights](docs/4.6/night-brake-lights.jpg) |
+| ![Jet Black rival](docs/4.6/jet-black-rival.jpg) | ![Hood camera](docs/4.6/hood-camera.jpg) |
+
 ## New in Phase 4.5: real cars from car packs
 
 You can now race a real 3D car model next to the Phantom X1. It gets its own handling, works in
@@ -147,11 +183,10 @@ the garage and in every camera, and shows up online.
   dash. Far-away copies use about 10 % of the triangles.
 - **Online.** Your edition now goes over the network by name. Friends who have the same pack
   see your car. Friends without it see a Phantom X1 in your colours. Your physics stays your
-  own either way. A host can share the pack with friends on the link with
-  `npm run host -- --share-cars`. This is off by default, and you should only share models
-  you're allowed to share.
-- Car packs are personal. `play/cars/`, `dist/cars/` and `cars-src/` are in `.gitignore`, so no
-  real car models or brands go into this repository.
+  own either way. (Since 4.6 the relay hands the game's pack to friends on the link; turn that off
+  with `npm run host -- --no-share-cars`.)
+- In 4.5 car packs stayed out of git. Since 4.6 the game's pack ships in `play/cars/`; only the
+  converted `.glb` files and source models stay out.
 
 ## New in Phase 4G.3: thunder that matches the lightning
 
@@ -1121,9 +1156,12 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
      with rain beads, trackside detail (done)
    - 4G.3. Thunder on time with the lightning, deeper, one per strike, controller rumble in
      sync, silent in the menus (done)
-   - **4.5. Real cars from car packs: the import tool, car select, own handling, the game's
-     materials, cockpit in the model's seat, LODs, online by name with a Phantom X1 stand-in
+   - 4.5. Real cars from car packs: the import tool, car select, own handling, the game's
+     materials, cockpit in the model's seat, LODs, online by name with a Phantom X1 stand-in (done)
+   - **4.6. The 911 GT3 RS ships with the game: real engine, gearbox and aero numbers, a flat-six
+     voice, factory colours, rivals in it, a middle-distance LOD, its own hood and bumper cameras
      (this build)**
-   - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder (next)
+   - 5A. Hanagiri Pass, a second venue built from a mountain-road layout (next)
+   - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder
    - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

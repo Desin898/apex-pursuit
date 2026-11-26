@@ -124,7 +124,26 @@ export const VEHICLE = {
   bodyCircleOffsets: [1.42, 0, -1.4],
   wallRestitution: 0.18,
   wallFriction: 0.28,
+
+  // 4.6: the engine's torque curve (rpm, share of peak torque). An imported car can bring its own.
+  torqueCurve: [
+    [0, 0.55],
+    [1000, 0.62],
+    [2500, 0.8],
+    [4000, 0.93],
+    [5500, 1.0],
+    [7000, 0.98],
+    [8000, 0.9],
+    [8500, 0.82],
+    [9000, 0.5],
+  ] as [number, number][],
 };
+
+/**
+ * 4.6: the engine numbers of the car you are driving, for the rev dial, shift lights, rumble and
+ * engine sound (the Phantom X1's until an imported car with its own engine is chosen).
+ */
+export const PLAYER_ENGINE = { idleRpm: VEHICLE.idleRpm, redlineRpm: VEHICLE.redlineRpm, upshiftRpm: VEHICLE.upshiftRpm };
 
 export const CAMERA = {
   fovBase: 58,

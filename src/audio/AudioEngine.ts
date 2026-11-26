@@ -4,7 +4,7 @@
 // grass rumble, wind, nitrous, impacts, gear changes, horn and UI blips.
 // Browsers only allow audio after a user gesture, so start() must be called from a click/key.
 // ─────────────────────────────────────────────────────────────────────────────
-import { VEHICLE as V } from '../config';
+import { VEHICLE as V, PLAYER_ENGINE } from '../config';
 import { clamp01, smoothstep } from '../core/math';
 import { VehicleState } from '../vehicle/VehiclePhysics';
 
@@ -28,6 +28,15 @@ export class AudioEngine {
   private lump!: OscillatorNode;
   private lumpDepth!: GainNode;
   private engFilter!: BiquadFilterNode;
+  // 4.6: engine voices
+  private gA!: GainNode;
+  private gB!: GainNode;
+  private gS!: GainNode;
+  private howl!: BiquadFilterNode; // the induction howl of a high-revving engine (off for the X1)
+  private voice = 'x1';
+  private flat6Wave: PeriodicWave | null = null;
+  private popT = 0; // overrun crackle left (s)
+  private popNext = 0;
   private engGain!: GainNode;
   private roarFilter!: BiquadFilterNode;
   private roarGain!: GainNode;
@@ -140,11 +149,11 @@ export class AudioEngine {
     this.oscSub.type = 'square';
     const mix = ctx.createGain();
     mix.gain.value = 0.5;
-    const gA = ctx.createGain();
+    const gA = (this.gA = ctx.createGain());
     gA.gain.value = 0.5;
-    const gB = ctx.createGain();
+    const gB = (this.gB = ctx.createGain());
     gB.gain.value = 0.28;
-    const gS = ctx.createGain();
+    const gS = (this.gS = ctx.createGain());
     gS.gain.value = 0.42;
     this.oscA.connect(gA).connect(mix);
     this.oscB.connect(gB).connect(mix);
@@ -167,8 +176,13 @@ export class AudioEngine {
     this.engFilter.Q.value = 1.2;
     this.engGain = ctx.createGain();
     this.engGain.gain.value = 0;
-    mix.connect(shaper).connect(this.engFilter).connect(this.engGain).connect(this.engineBus);
+    this.howl = ctx.createBiquadFilter();
+    this.howl.type = 'peaking';
+    this.howl.Q.value = 1.3;
+    this.howl.gain.value = 0;
+    mix.connect(shaper).connect(this.engFilter).connect(this.howl).connect(this.engGain).connect(this.engineBus);
     for (const o of [this.oscA, this.oscB, this.oscSub, this.lump]) o.start();
+    this.applyVoice();
     // intake / exhaust roar: band-passed noise that opens up with throttle
     this.roarFilter = ctx.createBiquadFilter();
     this.roarFilter.type = 'bandpass';
@@ -598,25 +612,82 @@ export class AudioEngine {
     if (this.ctx && this.rainGain) this.rainGain.gain.setTargetAtTime(0.075 * level, this.ctx.currentTime, 0.4);
   }
 
+  /**
+   * 4.6: the engine's voice. 'x1' is the house car (two saws and a sub). 'flat6-na' is a
+   * high-revving naturally aspirated flat six: a waveform built from the engine's firing orders
+   * (1.5th, 3rd = firing, 4.5th, 6th, 9th... the boxer's metallic rasp), an induction howl that
+   * opens up past 6,000 rpm, no turbo whoosh, and crackle on the overrun.
+   */
+  setVoice(v: string): void {
+    this.voice = v === 'flat6-na' ? v : 'x1';
+    this.applyVoice();
+  }
+  private applyVoice(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.oscA) return;
+    if (this.voice === 'flat6-na') {
+      if (!this.flat6Wave) {
+        // harmonic n of the wave = engine order 1.5 n
+        const amp = [0, 0.32, 1.0, 0.42, 0.72, 0.22, 0.55, 0.14, 0.36, 0.09, 0.26, 0.06, 0.2, 0.05, 0.12, 0.04, 0.1];
+        const re = new Float32Array(amp.length);
+        const im = new Float32Array(amp.length);
+        amp.forEach((a, n) => {
+          const ph = n * 0.9; // a little phase spread: rasp rather than a pure buzz
+          re[n] = a * Math.cos(ph);
+          im[n] = a * Math.sin(ph);
+        });
+        this.flat6Wave = ctx.createPeriodicWave(re, im);
+      }
+      this.oscA.setPeriodicWave(this.flat6Wave);
+      this.oscB.type = 'sawtooth';
+      this.oscSub.type = 'sine';
+      this.gA.gain.value = 0.62;
+      this.gB.gain.value = 0.12;
+      this.gS.gain.value = 0.22;
+    } else {
+      this.oscA.type = 'sawtooth';
+      this.oscB.type = 'sawtooth';
+      this.oscSub.type = 'square';
+      this.gA.gain.value = 0.5;
+      this.gB.gain.value = 0.28;
+      this.gS.gain.value = 0.42;
+      this.howl.gain.value = 0;
+    }
+  }
+
   /** Per-frame update of every continuous layer. */
   update(s: VehicleState, horn: boolean): void {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;
     const t = ctx.currentTime;
     const k = 0.035; // smoothing time constant
-    const rpmN = clamp01((s.rpm - V.idleRpm) / (V.redlineRpm - V.idleRpm));
+    const rpmN = clamp01((s.rpm - PLAYER_ENGINE.idleRpm) / (PLAYER_ENGINE.redlineRpm - PLAYER_ENGINE.idleRpm));
     const f = (s.rpm / 60) * 3;
-    this.oscA.frequency.setTargetAtTime(f, t, k);
-    this.oscB.frequency.setTargetAtTime(f * 2.012, t, k);
-    this.oscSub.frequency.setTargetAtTime(f * 0.5, t, k);
-    this.lump.frequency.setTargetAtTime(f * 0.25, t, k);
-    this.lumpDepth.gain.setTargetAtTime(0.26 * (1 - rpmN), t, 0.1);
+    const flat6 = this.voice === 'flat6-na';
     const load = s.throttle * (s.shiftTimer > 0 ? 0.25 : 1);
     // Cabin mix (4A): inside the cockpit the exhaust is muffled (lower cut-off) but the cabin
     // booms (a little more engine body) and the intake behind your head is louder.
     const cab = this.cabin;
-    this.engFilter.frequency.setTargetAtTime((260 + rpmN * 2600 + load * 2200) * (1 - 0.42 * cab), t, k);
-    this.engGain.gain.setTargetAtTime((0.11 + 0.17 * load + 0.07 * rpmN) * (1 + 0.25 * cab), t, k);
+    if (flat6) {
+      this.oscA.frequency.setTargetAtTime(f * 0.5, t, k);
+      this.oscB.frequency.setTargetAtTime(f * 1.004, t, k);
+      this.oscSub.frequency.setTargetAtTime(f * 0.5, t, k);
+      this.lump.frequency.setTargetAtTime(f * 0.5, t, k);
+      this.lumpDepth.gain.setTargetAtTime(0.12 * (1 - rpmN), t, 0.1);
+      const high = smoothstep(0.55, 0.95, rpmN); // past ~6,000 rpm the intake opens up
+      this.engFilter.frequency.setTargetAtTime((420 + rpmN * 4600 + load * 2600 + high * 2400) * (1 - 0.38 * cab), t, k);
+      this.howl.frequency.setTargetAtTime(1500 + rpmN * 2600, t, k);
+      this.howl.gain.setTargetAtTime((2 + 9 * high) * (0.35 + 0.65 * load) * (1 + 0.3 * cab), t, 0.06);
+      this.engGain.gain.setTargetAtTime((0.1 + 0.15 * load + 0.12 * rpmN) * (1 + 0.25 * cab), t, k);
+    } else {
+      this.oscA.frequency.setTargetAtTime(f, t, k);
+      this.oscB.frequency.setTargetAtTime(f * 2.012, t, k);
+      this.oscSub.frequency.setTargetAtTime(f * 0.5, t, k);
+      this.lump.frequency.setTargetAtTime(f * 0.25, t, k);
+      this.lumpDepth.gain.setTargetAtTime(0.26 * (1 - rpmN), t, 0.1);
+      this.engFilter.frequency.setTargetAtTime((260 + rpmN * 2600 + load * 2200) * (1 - 0.42 * cab), t, k);
+      this.engGain.gain.setTargetAtTime((0.11 + 0.17 * load + 0.07 * rpmN) * (1 + 0.25 * cab), t, k);
+    }
     this.roarFilter.frequency.setTargetAtTime((350 + rpmN * 1900) * (1 - 0.2 * cab), t, k);
     this.roarGain.gain.setTargetAtTime((load * (0.03 + 0.11 * rpmN) + (s.nitroActive ? 0.05 : 0)) * (1 + 0.6 * cab), t, k);
 
@@ -637,9 +708,23 @@ export class AudioEngine {
     if (this.hissGain) this.hissGain.gain.setTargetAtTime(this.wet * 0.09 * smoothstep(3, 60, s.speed) * (s.airborne ? 0 : 1), t, 0.08);
     this.hornGain.gain.setTargetAtTime(horn ? 0.07 : 0, t, 0.012);
 
-    // turbo blow-off when you snap off the throttle at high revs
-    if (this.prevThrottle > 0.75 && s.throttle < 0.2 && s.rpm > 4800) this.blowOff();
+    // turbo blow-off when you snap off the throttle at high revs (the X1); a naturally aspirated
+    // flat six crackles on the overrun instead
+    if (this.prevThrottle > 0.75 && s.throttle < 0.2 && s.rpm > 4800) {
+      if (flat6) this.popT = 0.5 + rpmN * 0.6;
+      else this.blowOff();
+    }
     this.prevThrottle = s.throttle;
+    if (flat6 && this.popT > 0) {
+      const dt = 1 / 60;
+      this.popT -= dt;
+      this.popNext -= dt;
+      if (s.throttle > 0.3) this.popT = 0;
+      else if (this.popNext <= 0) {
+        this.popNext = 0.04 + Math.random() * 0.11;
+        this.pop(0.5 + Math.random() * 0.5);
+      }
+    }
   }
 
   private burst(freq0: number, freq1: number, q: number, gain: number, dur: number, type: BiquadFilterType = 'bandpass'): void {
@@ -677,10 +762,20 @@ export class AudioEngine {
     o.stop(t + dur + 0.05);
   }
 
+  /** One exhaust pop: a short, dull crack (4.6 overrun crackle). */
+  private pop(a: number): void {
+    this.burst(900 + Math.random() * 700, 160, 0.8, 0.07 * a, 0.05 + Math.random() * 0.04, 'lowpass');
+  }
+
   blowOff(): void {
     this.burst(3200, 900, 2.5, 0.11, 0.32);
   }
   shift(up: boolean): void {
+    if (this.voice === 'flat6-na' && !up) {
+      // a downshift blip: a crack from the exhaust as the revs flare
+      this.pop(1);
+      this.popT = Math.max(this.popT, 0.18);
+    }
     this.burst(up ? 1800 : 1200, 500, 1.5, 0.05, 0.07);
     this.tone(up ? 140 : 110, 60, 0.12, 0.09);
   }

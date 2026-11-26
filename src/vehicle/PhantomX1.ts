@@ -852,8 +852,9 @@ export interface KitMats {
 export interface CarKit {
   body: THREE.Object3D[]; // the sprung body at full detail
   detail1: THREE.Object3D[]; // hidden from detail level 1 (interior, underbody, callipers)
+  mid: THREE.Object3D[]; // 4.6: the body at detail level 1 (a lighter copy; empty = keep the full one)
   far: THREE.Object3D | null; // the whole car at detail level 2 (static wheels)
-  wheels: { spin: THREE.Object3D; hub: THREE.Object3D | null; x: number; z: number; r: number }[];
+  wheels: { spin: THREE.Object3D; spinMid?: THREE.Object3D | null; hub: THREE.Object3D | null; x: number; z: number; r: number }[];
   steer: { obj: THREE.Object3D; axis: THREE.Vector3 } | null;
   zFront: number;
   zRear: number;
@@ -903,6 +904,14 @@ export class PhantomX1 {
   readonly imported: boolean;
   private kit: CarKit | null = null;
   private zFront = Z_TIP;
+  /** 4.6: the tip of the nose (car space z) */
+  get noseZ(): number {
+    return this.zFront;
+  }
+  /** 4.6: the tail (car space z) */
+  get tailZ(): number {
+    return this.zRear;
+  }
   private zRear = Z_REAR;
   private exhaust: THREE.Vector3[] = [new THREE.Vector3(0.105, 0.555, Z_REAR - 0.1), new THREE.Vector3(-0.105, 0.555, Z_REAR - 0.1)];
   private steerWheel: { obj: THREE.Object3D; axis: THREE.Vector3 } | null = null;
@@ -940,6 +949,10 @@ export class PhantomX1 {
       this.steerWheel = kit.steer;
       this.eye = kit.eye;
       for (const o of kit.body) this.body.add(o);
+      for (const o of kit.mid) {
+        o.visible = false;
+        this.body.add(o);
+      }
       if (kit.far) {
         kit.far.visible = false;
         this.body.add(kit.far);
@@ -1000,6 +1013,10 @@ export class PhantomX1 {
         const spin = new THREE.Group();
         pivot.position.set(kw.x, kw.r, kw.z);
         spin.add(kw.spin);
+        if (kw.spinMid) {
+          kw.spinMid.visible = false;
+          spin.add(kw.spinMid);
+        }
         pivot.add(spin);
         if (kw.hub) pivot.add(kw.hub);
         this.root.add(pivot);
@@ -1160,11 +1177,18 @@ export class PhantomX1 {
     for (const o of this.lodFar2) o.visible = level < 2;
     for (const m of this.lodShadow) m.castShadow = level < 2;
     const k = this.kit;
-    if (k?.far) {
-      // far away: one low-poly copy of the whole car instead of the full model
-      k.far.visible = level >= 2;
-      for (const o of k.body) o.visible = level < 2 && !(level >= 1 && k.detail1.includes(o));
-      for (const w of this.wheels) w.pivot.visible = level < 2;
+    if (k) {
+      // 4.6: full model near, a lighter copy in the middle distance, one low-poly car far away
+      const hasMid = k.mid.length > 0;
+      if (k.far) k.far.visible = level >= 2;
+      for (const o of k.body) o.visible = level === 0 || (level === 1 && !hasMid && !k.detail1.includes(o));
+      for (const o of k.mid) o.visible = level === 1;
+      k.wheels.forEach((kw, i) => {
+        this.wheels[i].pivot.visible = level < 2 || !k.far;
+        kw.spin.visible = level === 0 || !kw.spinMid;
+        if (kw.spinMid) kw.spinMid.visible = level === 1;
+        if (kw.hub) kw.hub.visible = level === 0;
+      });
     }
   }
 

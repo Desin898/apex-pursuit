@@ -1,0 +1,159 @@
+{
+ "id": "gt3rs",
+ "name": "911 GT3 RS",
+ "maker": "Porsche",
+ "year": 2023,
+ "tune": {
+  "gripAsphalt": 1.04,
+  "yawInertia": 0.92,
+  "driftSustain": 0.75,
+  "powerSlide": 0.9,
+  "brakeDecel": 1.0
+ },
+ "editions": [
+  {
+   "id": "rs",
+   "name": "RS",
+   "tagline": "Naturally aspirated, 9000 rpm, a wing the size of a table.",
+   "number": 92,
+   "paint": 0,
+   "color": 15198440,
+   "finish": "gloss",
+   "rim": 12172482,
+   "caliper": 13111324
+  },
+  {
+   "id": "arctic",
+   "name": "Arctic Grey",
+   "tagline": "The grey from the harbour at dusk: black wheels, black stripes.",
+   "number": 97,
+   "paint": 1,
+   "color": 8290692,
+   "finish": "gloss",
+   "rim": 1118740,
+   "caliper": 13112348
+  },
+  {
+   "id": "jet",
+   "name": "Jet Black",
+   "tagline": "Jet black metallic on black wheels. Mirror finish.",
+   "number": 13,
+   "paint": 5,
+   "color": 657932,
+   "finish": "metallic",
+   "rim": 1118740,
+   "caliper": 13112348
+  },
+  {
+   "id": "shark",
+   "name": "Shark Blue",
+   "tagline": "The launch colour. Same car, louder.",
+   "number": 23,
+   "paint": 3,
+   "color": 1474766,
+   "finish": "metallic",
+   "rim": 1776416,
+   "caliper": 15190828
+  },
+  {
+   "id": "guards",
+   "name": "Guards Red",
+   "tagline": "More downforce, a little less top speed.",
+   "number": 11,
+   "paint": 2,
+   "color": 12849431,
+   "finish": "gloss",
+   "rim": 1776416,
+   "caliper": 15190828,
+   "tune": {
+    "downforce": 1.12,
+    "dragCoef": 1.04,
+    "gripAsphalt": 1.02
+   }
+  }
+ ],
+ "meta": {
+  "exhaust": [
+   [
+    0.075,
+    0.36,
+    -2.26
+   ],
+   [
+    -0.075,
+    0.36,
+    -2.26
+   ]
+  ],
+  "eye": [
+   0.36,
+   1.07,
+   -0.24
+  ],
+  "cams": {
+   "hood": [
+    0.92,
+    1.04
+   ]
+  }
+ },
+ "sound": "flat6-na",
+ "set": {
+  "torque": 404,
+  "idleRpm": 950,
+  "redlineRpm": 9000,
+  "upshiftRpm": 8800,
+  "gearRatios": [
+   3.75,
+   2.38,
+   1.72,
+   1.34,
+   1.11,
+   0.96,
+   0.84
+  ],
+  "finalDrive": 4.59,
+  "mass": 1450,
+  "dragCoef": 0.502,
+  "downforce": 1.32,
+  "shiftTime": 0.07,
+  "torqueCurve": [
+   [
+    0,
+    0.45
+   ],
+   [
+    1000,
+    0.55
+   ],
+   [
+    2500,
+    0.72
+   ],
+   [
+    4000,
+    0.85
+   ],
+   [
+    5000,
+    0.92
+   ],
+   [
+    6300,
+    1.0
+   ],
+   [
+    7500,
+    0.985
+   ],
+   [
+    8500,
+    0.932
+   ],
+   [
+    9000,
+    0.86
+   ]
+  ]
+ }
+}

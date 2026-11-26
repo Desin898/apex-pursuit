@@ -54,6 +54,8 @@ export class CameraRig {
   world: WorldData | null = null;
   /** the cockpit's eye point, on the player's car body (set when the cockpit is built) */
   cockpitEye: THREE.Object3D | null = null;
+  /** 4.6: hood and bumper camera spots [forward, up] for the car being driven */
+  carCams: { hood: [number, number]; bumper: [number, number] } = { hood: [0.62, 1.0], bumper: [2.62, 0.4] };
   private probe = 1; // 0..1 how far out the chase camera may sit (pulls in fast, eases out)
   private head = new THREE.Vector3(); // cockpit head offset from g-forces
   private headNod = 0;
@@ -246,8 +248,10 @@ export class CameraRig {
     } else {
       // ── Hood / bumper: rigidly mounted, inherits body pitch and roll ──
       const hood = kind === 'hood';
-      const fwd = hood ? 0.62 : 2.62; // bumper cam sits just ahead of the nose
-      const up = hood ? 1.0 : 0.4;
+      // (4.6: an imported car brings its own spots; the Phantom X1's are the defaults)
+      const spot = hood ? this.carCams.hood : this.carCams.bumper;
+      const fwd = spot[0]; // bumper cam sits just ahead of the nose
+      const up = spot[1];
       const back = look.back ? Math.PI : 0;
       const yawNow = pose.yaw + this.lookYaw + back;
       cam.position.set(pose.x + sinY * fwd, pose.y + up + pose.pitch * fwd, pose.z + cosY * fwd);
