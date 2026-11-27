@@ -7,7 +7,8 @@ import { PROVING_GROUNDS, VenueDef } from './venues';
 import { WORLD } from '../config';
 import { rng } from '../core/math';
 import { setGroundHeight } from './ground';
-import type { HeightField } from './hanagiri/terrain';
+import { buildRoadSnow, puddleDepth, ROAD_V_METRES, SNOW_COLS } from './surfaceMaps';
+import { HeightField } from './hanagiri/terrain';
 
 export const enum Surface {
   Asphalt = 0,
@@ -89,6 +90,17 @@ export interface BarrierRun {
   /** 5A: concrete (default), a steel guard rail, or a rock / retaining wall on a cut slope */
   kind?: 'rail' | 'rock';
 }
+/** 5B: a point-to-point route along the lap (sprints and touge): start and finish sample indices. */
+export interface RaceRoute {
+  id: string;
+  name: string;
+  blurb: string;
+  from: number;
+  to: number;
+  /** metres from start to finish, along the lap */
+  len: number;
+}
+
 export interface TrackHit {
   index: number;
   /** signed sideways offset from the centre line (positive = left) */
@@ -131,6 +143,8 @@ export class WorldData {
   readonly trees: { x: number; z: number; s: number; k?: number }[] = [];
   /** 5A: a mountain venue's set dressing: torii gates, lanterns, the shrine, chevrons, snow poles, crowds */
   readonly decor: { kind: 'torii' | 'lantern' | 'chevron' | 'snowpole' | 'shrine' | 'crowd'; x: number; z: number; yaw: number; s?: number }[] = [];
+  /** 5B: point-to-point routes for sprints and touge battles (the venue adds them; none on a circuit) */
+  readonly routes: RaceRoute[] = [];
   /** 5A: hiding spots the venue adds for the pursuit (on top of the car park, pits and stands) */
   readonly hides: { x: number; z: number; r: number; name: string }[] = [];
   /** Paved areas that are not part of the circuit (from the venue). */
@@ -163,13 +177,76 @@ export class WorldData {
   constructor(readonly venue: VenueDef = PROVING_GROUNDS) {
     this.pad = { ...venue.pad };
     this.aprons = venue.aprons.map((a) => ({ ...a }));
-    this.field = venue.terrain ? venue.terrain() : null;
+    // (5B: a copy of the venue's field: the road's profile is eased into it below)
+    const F0 = venue.terrain ? venue.terrain() : null;
+    this.field = F0 ? new HeightField(F0.x0, F0.z0, F0.cell, F0.nx, F0.nz, new Float32Array(F0.h)) : null;
     this.bounds = venue.bounds ?? { x: WORLD.boundsCenterX, z: WORLD.boundsCenterZ, r: WORLD.boundsRadius };
     this.buildTrack();
+    if (this.field) this.easeProfile();
     // everything that stands on the ground asks here (flat venue: 0, exactly as before)
     setGroundHeight(this.field ? (x, z) => this.heightAt(x, z) : () => 0);
     this.buildFacility();
     this.buildColliderGrid();
+  }
+
+  /**
+   * 5B: smooth the road's height profile so no crest or dip is sharper than a real mountain road
+   * (vertical curves of a few hundred metres): the old profile had crests of 160 m radius that
+   * threw a fast car into the air and dips that bottomed it out. The land beside the road follows
+   * the change (fully up to the shoulders, fading out by 60 m), so nothing steps.
+   */
+  private easeProfile(): void {
+    const S = this.samples;
+    const n = S.length;
+    const y0 = S.map((p) => p.y);
+    // gaussian, σ = 14 m (7 samples), wrapped round the lap
+    const sig = 7;
+    const R = sig * 3;
+    const wts: number[] = [];
+    let tot = 0;
+    for (let k = -R; k <= R; k++) {
+      const w = Math.exp(-(k * k) / (2 * sig * sig));
+      wts.push(w);
+      tot += w;
+    }
+    const y1 = y0.map((_, i) => {
+      let a = 0;
+      for (let k = -R; k <= R; k++) a += y0[(i + k + n) % n] * wts[k + R];
+      return a / tot;
+    });
+    for (let i = 0; i < n; i++) S[i].y = y1[i];
+    // the land: nearest sample's change, full under the shoulders, gone by 60 m
+    const F = this.field!;
+    const D = 60;
+    const dist = new Float32Array(F.nx * F.nz).fill(1e9);
+    const dy = new Float32Array(F.nx * F.nz);
+    for (let i = 0; i < n; i++) {
+      const s = S[i];
+      const d = y1[i] - y0[i];
+      const i0 = Math.max(0, Math.floor((s.x - D - F.x0) / F.cell));
+      const i1 = Math.min(F.nx - 1, Math.ceil((s.x + D - F.x0) / F.cell));
+      const k0 = Math.max(0, Math.floor((s.z - D - F.z0) / F.cell));
+      const k1 = Math.min(F.nz - 1, Math.ceil((s.z + D - F.z0) / F.cell));
+      for (let k = k0; k <= k1; k++) {
+        const pz = F.z0 + k * F.cell - s.z;
+        for (let j = i0; j <= i1; j++) {
+          const px = F.x0 + j * F.cell - s.x;
+          const r2 = px * px + pz * pz;
+          const c = k * F.nx + j;
+          if (r2 < dist[c]) {
+            dist[c] = r2;
+            dy[c] = d;
+          }
+        }
+      }
+    }
+    const inner = this.roadBand + 6;
+    for (let c = 0; c < dist.length; c++) {
+      if (dist[c] >= D * D) continue;
+      const r = Math.sqrt(dist[c]);
+      const t = r <= inner ? 1 : 1 - Math.min(1, (r - inner) / (D - inner));
+      F.h[c] += dy[c] * t * t * (3 - 2 * t);
+    }
   }
 
   // ── Track ────────────────────────────────────────────────────────────────
@@ -318,12 +395,54 @@ export class WorldData {
     return hit;
   }
 
+  // ── 5B: what lies on the road (shared with the road shader) ───────────────
+  private _snow: Uint8Array | null = null;
+  private _ch: TrackHit = { index: 0, offset: 0, s: 0 };
+  /** the road-snow map (built on first use): SNOW_COLS columns across the road per sample */
+  get roadSnow(): Uint8Array {
+    return (this._snow ??= buildRoadSnow(this.samples.length, this.halfWidth));
+  }
+  /**
+   * What covers the road at x, z: standing water (0..1, from the puddle map) and snow (0..1, from
+   * the road-snow map; the paved shoulders of a mountain road are banked with snow). Both 0 off
+   * the paving. Callers scale them by how wet / how snowy the weather is.
+   */
+  roadCover(x: number, z: number, out: { water: number; snow: number }): { water: number; snow: number } {
+    out.water = out.snow = 0;
+    const hit = this.nearestTrack(x, z, this._ch);
+    if (!hit) return out;
+    const hw = this.halfWidth;
+    const a = Math.abs(hit.offset);
+    if (a <= hw) {
+      const u = (hw - hit.offset) / (2 * hw);
+      out.water = puddleDepth(u, hit.s / ROAD_V_METRES);
+      const m = this.roadSnow;
+      const n = this.samples.length;
+      const c = Math.min(SNOW_COLS - 1, Math.max(0, u * SNOW_COLS - 0.5));
+      const c0 = Math.floor(c);
+      const c1 = Math.min(SNOW_COLS - 1, c0 + 1);
+      const fc = c - c0;
+      const i0 = hit.index;
+      const i1 = (i0 + 1) % n;
+      const r0 = m[i0 * SNOW_COLS + c0] * (1 - fc) + m[i0 * SNOW_COLS + c1] * fc;
+      const r1 = m[i1 * SNOW_COLS + c0] * (1 - fc) + m[i1 * SNOW_COLS + c1] * fc;
+      const along = Math.min(1, Math.max(0, (hit.s - this.samples[i0].s) / WORLD.sampleSpacing));
+      out.snow = (r0 + (r1 - r0) * along) / 255;
+    } else if (this.venue.look === 'mountain' && a <= this.roadBand - 0.6) {
+      out.snow = 0.92;
+    }
+    return out;
+  }
+
   // ── Surfaces and height ──────────────────────────────────────────────────
   surfaceAt(x: number, z: number): Surface {
     const hit = this.nearestTrack(x, z);
     if (hit) {
       const a = Math.abs(hit.offset);
       if (a <= this.halfWidth) return Surface.Asphalt;
+      // 5B: on a mountain road the paved shoulder is asphalt too (it was run-off grip, so a car
+      // with two wheels on it pulled to one side)
+      if (this.venue.look === 'mountain' && a <= this.roadBand - 0.6) return Surface.Asphalt;
       if (a <= this.halfWidth + WORLD.kerbWidth) {
         const s = this.samples[hit.index];
         if (hit.offset > 0 ? s.kerbL : s.kerbR) return Surface.Kerb;
@@ -377,15 +496,51 @@ export class WorldData {
     return h;
   }
 
-  /** 5A: road height at x, z near sample i (interpolated along the lap). */
+  /**
+   * 5A/5B: road height at x, z near sample i. The point is placed on the segment between two
+   * samples by the cross-section lines through them (each sample's normal), so the height is
+   * continuous everywhere — on the inside and outside of hairpins too, where a plain projection
+   * on one sample's tangent left steps of several centimetres that the suspension felt as bumps.
+   * The profile between samples is Catmull-Rom (no kinks in the grade).
+   */
   roadY(i: number, x: number, z: number): number {
     const S = this.samples;
     const n = S.length;
-    const s = S[i];
-    const along = (x - s.x) * s.tx + (z - s.z) * s.tz;
-    const o = S[(along >= 0 ? i + 1 : i - 1 + n) % n];
-    const f = Math.min(1, Math.abs(along) / WORLD.sampleSpacing);
-    return s.y + (o.y - s.y) * f;
+    const s0 = S[i];
+    let a = (x - s0.x) * s0.tx + (z - s0.z) * s0.tz >= 0 ? i : (i - 1 + n) % n;
+    let u = 0;
+    for (let tries = 0; tries < 3; tries++) {
+      const A = S[a];
+      const B = S[(a + 1) % n];
+      const ex = B.x - A.x;
+      const ez = B.z - A.z;
+      const dnx = B.nx - A.nx;
+      const dnz = B.nz - A.nz;
+      const L = Math.hypot(ex, ez) || 1;
+      u = ((x - A.x) * ex + (z - A.z) * ez) / (L * L);
+      // Newton on f(u) = (p − P(u)) × N(u) = 0, P(u) = A + e·u, N(u) = nA + dn·u
+      for (let k = 0; k < 3; k++) {
+        const px = x - A.x - ex * u;
+        const pz = z - A.z - ez * u;
+        const nx = A.nx + dnx * u;
+        const nz = A.nz + dnz * u;
+        const f = px * nz - pz * nx;
+        const df = -ex * nz + ez * nx + px * dnz - pz * dnx;
+        if (Math.abs(df) < 1e-9) break;
+        u -= f / df;
+      }
+      if (u < -1e-6) a = (a - 1 + n) % n;
+      else if (u > 1 + 1e-6) a = (a + 1) % n;
+      else break;
+    }
+    u = Math.min(1, Math.max(0, u));
+    const y0 = S[(a - 1 + n) % n].y;
+    const y1 = S[a].y;
+    const y2 = S[(a + 1) % n].y;
+    const y3 = S[(a + 2) % n].y;
+    const u2 = u * u;
+    const u3 = u2 * u;
+    return 0.5 * (2 * y1 + (-y0 + y2) * u + (2 * y0 - 5 * y1 + 4 * y2 - y3) * u2 + (-y0 + 3 * y1 - 3 * y2 + y3) * u3);
   }
 
   /** 5A: ground height for things that stand on it (0 everywhere on the flat venue). */
@@ -610,17 +765,17 @@ export class WorldData {
   }
 
   /** Grid slot `k` (0 = pole). Slots are staggered left/right, 8 m apart, behind the start line. */
-  gridPose(k: number): { x: number; z: number; yaw: number } {
+  gridPose(k: number, start = this.startIndex): { x: number; z: number; yaw: number } {
     const n = this.samples.length;
     const back = Math.round((11.6 + k * 8) / WORLD.sampleSpacing);
-    const s = this.samples[(this.startIndex - back + n) % n];
+    const s = this.samples[(start - back + n) % n];
     const side = k % 2 === 0 ? 3 : -3;
     return { x: s.x + s.nx * side, z: s.z + s.nz * side, yaw: Math.atan2(s.tx, s.tz) };
   }
 
   /** Spawn pose on the grid, a few metres behind the start line. */
-  startPose(): { x: number; z: number; yaw: number } {
-    const s = this.samples[(this.startIndex - 6 + this.samples.length) % this.samples.length];
+  startPose(start = this.startIndex): { x: number; z: number; yaw: number } {
+    const s = this.samples[(start - 6 + this.samples.length) % this.samples.length];
     return { x: s.x, z: s.z, yaw: Math.atan2(s.tx, s.tz) };
   }
 }

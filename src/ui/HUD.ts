@@ -39,6 +39,7 @@ export class HUD {
   private posEl = $('race-pos');
   private posOf = $('race-of');
   private lapNo = $('race-lap');
+  private lapLabel = $('race-lap-label');
   private lapNow = $('lap-now');
   private lapLast = $('lap-last');
   private lapBest = $('lap-best');
@@ -157,7 +158,8 @@ export class HUD {
   /** the player's throttle, for the boost gauge */
   throttle = 0;
 
-  update(s: VehicleState, lap: LapTimer, mph: boolean, dt: number, place = 1, field = 1, lapNumber = 1, lapTotal = 0): void {
+  /** 5B: lapText replaces the lap count (a route's distance to go, a touge round), with its label */
+  update(s: VehicleState, lap: LapTimer, mph: boolean, dt: number, place = 1, field = 1, lapNumber = 1, lapTotal = 0, lapText?: [label: string, value: string]): void {
     if (this.cache.field !== String(field)) {
       this.cache.field = String(field);
       this.posRow.hidden = field < 2;
@@ -166,7 +168,8 @@ export class HUD {
       this.set(this.posEl, 'pos', String(place));
       this.set(this.posOf, 'posof', `/${field}`);
     }
-    this.set(this.lapNo, 'lapno', lapTotal > 0 ? `${Math.min(lapTotal, Math.max(1, lapNumber))}/${lapTotal}` : String(Math.max(1, lapNumber)));
+    this.set(this.lapLabel, 'laplabel', lapText ? lapText[0] : 'Lap');
+    this.set(this.lapNo, 'lapno', lapText ? lapText[1] : lapTotal > 0 ? `${Math.min(lapTotal, Math.max(1, lapNumber))}/${lapTotal}` : String(Math.max(1, lapNumber)));
     this.cluster.draw(s, mph, dt, this.throttle);
     this.set(this.lapNow, 'now', lap.running ? formatLap(Math.max(0.001, lap.time)) : '0:00.00');
     this.set(this.lapLast, 'last', formatLap(lap.last));
@@ -231,8 +234,11 @@ export class HUD {
   }
   private venue = '';
   private kind: 'circuit' | 'pursuit' | 'free' = 'circuit';
+  /** 5B: overrides the panel's kicker (Sprint event, Touge battle) */
+  kickerText = '';
   private kicker(): string {
     if (this.venue.startsWith('Online')) return this.venue;
+    if (this.kickerText) return this.kickerText;
     return this.kind === 'free' ? 'Time trial' : this.kind === 'pursuit' ? 'Pursuit event' : 'Circuit event';
   }
   setDebug(text: string | null): void {

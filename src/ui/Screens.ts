@@ -37,6 +37,8 @@ export interface ScreenHooks {
   onlineInfo(): { status: string; players: number; host: boolean };
   /** 4D: the venue loaded now, and switching (reloads the world) */
   venueId(): string;
+  /** 5B: this venue's point-to-point routes (sprints, touge) */
+  routes(): { id: string; name: string; blurb: string; len: number }[];
   switchVenue(id: string): void;
   /** rendered studio pictures, one per edition (may be empty strings until ready) */
   cardImages(): string[];
@@ -51,7 +53,13 @@ export interface ScreenHooks {
   eventName(): string;
   gridRows(): BoardRow[];
   resultRows(): BoardRow[];
-  resultInfo(): { place: number; field: number; time: number; best: number; earned: number; laps: number; over: boolean; bounty?: number; bountyLog?: [string, number][] };
+  resultInfo(): {
+    place: number; field: number; time: number; best: number; earned: number; laps: number; over: boolean; bounty?: number; bountyLog?: [string, number][];
+    /** 5B: a route race's distance (replaces "N laps") */
+    dist?: string;
+    /** 5B: a touge battle's outcome */
+    touge?: { winner: 'you' | 'rival' | 'draw'; score: [number, number]; rival: string; rounds: string[] };
+  };
   trackShape(): { pts: [number, number][]; start: number; length: number };
   /** weather or time changed on the event card: show it behind the menus */
   conditionsChanged(): void;
@@ -315,12 +323,20 @@ export class Screens {
     };
     // 4D: venues (5A: the Proving Grounds and Hanagiri Pass)
     row('Venue', VENUES.map((v): Item => [`venue-${v.id}`, v.name, this.h.venueId() === v.id, v.available, () => this.h.switchVenue(v.id), v.available ? undefined : 'Phase 5']));
-    row('Laps', [3, 5, 8].map((n): Item => [`laps-${n}`, String(n), s.laps === n, true, () => (s.laps = n)]));
-    row('Rivals', (['easy', 'medium', 'hard'] as const).map((d): Item => [`diff-${d}`, d[0].toUpperCase() + d.slice(1), s.difficulty === d, true, () => (s.difficulty = d)]));
+    // 5B: sprints and touge battles run on a venue's point-to-point routes (Hanagiri Pass)
+    const routes = this.h.routes();
+    if (!routes.length && (s.raceType === 'sprint' || s.raceType === 'touge')) s.raceType = 'clean';
+    const onRoute = s.raceType === 'sprint' || s.raceType === 'touge';
+    const route = routes.find((r) => r.id === s.route) ?? routes[0];
     row('Race', [
       ['type-clean', 'Clean race', s.raceType === 'clean', true, () => (s.raceType = 'clean')],
       ['type-pursuit', 'Pursuit race', s.raceType === 'pursuit', true, () => (s.raceType = 'pursuit')],
+      ['type-sprint', 'Sprint', s.raceType === 'sprint', routes.length > 0, () => (s.raceType = 'sprint'), routes.length ? undefined : 'Mountain'],
+      ['type-touge', 'Touge 1v1', s.raceType === 'touge', routes.length > 0, () => (s.raceType = 'touge'), routes.length ? undefined : 'Mountain'],
     ]);
+    if (onRoute && routes.length) row('Route', routes.map((r): Item => [`route-${r.id}`, `${r.name.replace(/^Hanagiri /, '')} · ${(r.len / 1000).toFixed(1)} km`, route === r, true, () => (s.route = r.id)]));
+    else row('Laps', [3, 5, 8].map((n): Item => [`laps-${n}`, String(n), s.laps === n, true, () => (s.laps = n)]));
+    row('Rivals', (['easy', 'medium', 'hard'] as const).map((d): Item => [`diff-${d}`, d[0].toUpperCase() + d.slice(1), s.difficulty === d, true, () => (s.difficulty = d)]));
     const wx = (w: Settings['weather']) => () => {
       s.weather = w;
       this.h.conditionsChanged();
@@ -341,17 +357,30 @@ export class Screens {
       ['tod-night', 'Night', s.timeOfDay === 'night', true, tod('night')],
       ['tod-dynamic', 'Dusk to night', s.timeOfDay === 'dynamic', true, tod('dynamic')],
     ]);
-    $('event-laps').textContent = String(s.laps);
     const t = this.h.trackShape();
-    $('event-length').innerHTML = `${(t.length / 1000).toFixed(2)}<small>km</small>`;
-    // a lap of the Proving Grounds (3.26 km) takes about 72 s; scale with the venue's lap
-    const avgLap = (({ easy: 77, medium: 72, hard: 68 } as Record<string, number>)[s.difficulty] ?? 72) * (t.length / 3257);
-    $('event-duration').innerHTML = `${Math.max(1, Math.round((avgLap * s.laps) / 60))}<small>min</small>`;
+    const runLen = onRoute && route ? route.len : t.length;
+    const runs = onRoute ? (s.raceType === 'touge' ? 2 : 1) : s.laps;
+    $('event-laps').textContent = onRoute ? (s.raceType === 'touge' ? '2+' : '1') : String(s.laps);
+    $('event-length').innerHTML = `${(runLen / 1000).toFixed(2)}<small>km</small>`;
+    $('event-laps-label').textContent = onRoute ? 'Runs' : 'Laps';
+    $('event-length-label').textContent = onRoute ? 'Route length' : 'Circuit length';
+    // a lap of the Proving Grounds (3.26 km) takes about 72 s; scale with the distance
+    const avgRun = (({ easy: 77, medium: 72, hard: 68 } as Record<string, number>)[s.difficulty] ?? 72) * (runLen / 3257);
+    $('event-duration').innerHTML = `${Math.max(1, Math.round((avgRun * runs) / 60))}<small>min</small>`;
     const wxLabel = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', snow: 'Snow', random: 'Random weather' }[s.weather];
     $('event-title').textContent = this.h.eventName();
-    $('event-mode').textContent = `${s.raceType === 'pursuit' ? 'Pursuit race' : 'Circuit race'} · ${s.laps} laps · ${wxLabel} · ${s.timeOfDay === 'night' ? 'Night' : s.timeOfDay === 'dynamic' ? 'Dusk to night' : 'Dusk'}`;
+    const kindLabel = s.raceType === 'pursuit' ? 'Pursuit race' : s.raceType === 'sprint' ? 'Sprint' : s.raceType === 'touge' ? 'Touge 1v1' : 'Circuit race';
+    const dist = onRoute && route ? route.name.replace(/^Hanagiri /, '') : `${s.laps} laps`;
+    $('event-mode').textContent = `${kindLabel} · ${dist} · ${wxLabel} · ${s.timeOfDay === 'night' ? 'Night' : s.timeOfDay === 'dynamic' ? 'Dusk to night' : 'Dusk'}`;
     const joinLap = Math.floor(0.4 * s.laps) + 1;
-    $('event-sub').textContent = s.raceType === 'pursuit' ? `Lap 1 clean · cameras and work zones from lap 2 · police from lap ${joinLap}` : (VENUES.find((v) => v.id === this.h.venueId())?.blurb ?? 'Apex test circuit · clockwise');
+    $('event-sub').textContent =
+      s.raceType === 'pursuit'
+        ? `Lap 1 clean · cameras and work zones from lap 2 · police from lap ${joinLap}`
+        : s.raceType === 'touge'
+          ? 'One on one, two rounds, roles swap · lead: pull 150 m clear · chase: get past · close at the line: a draw'
+          : s.raceType === 'sprint' && route
+            ? `Point to point · ${route.blurb}`
+            : (VENUES.find((v) => v.id === this.h.venueId())?.blurb ?? 'Apex test circuit · clockwise');
     this.drawTrack();
     this.renderBoard($('event-grid'), this.h.gridRows(), false);
     const again = focusedKey ? (opts.querySelector(`[data-key="${focusedKey}"]`) as HTMLElement | null) : null;
@@ -458,8 +487,9 @@ export class Screens {
     this.resultsT = 0;
     const info = this.h.resultInfo();
     const ord = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
-    $('results-title').textContent = `You finished ${ord(info.place)}`;
-    $('results-sub').textContent = `${this.h.eventName()} · ${VENUES.find((v) => v.id === this.h.venueId())?.name ?? 'Proving Grounds'} · ${info.laps} laps · ${info.field} cars`;
+    const tg = info.touge;
+    $('results-title').textContent = tg ? (tg.winner === 'you' ? `Touge won ${tg.score[0]}–${tg.score[1]}` : tg.winner === 'rival' ? `Touge lost ${tg.score[0]}–${tg.score[1]}` : `Touge drawn ${tg.score[0]}–${tg.score[1]}`) : `You finished ${ord(info.place)}`;
+    $('results-sub').textContent = `${this.h.eventName()} · ${VENUES.find((v) => v.id === this.h.venueId())?.name ?? 'Proving Grounds'} · ${info.dist ?? `${info.laps} laps`} · ${tg ? `vs ${tg.rival}` : `${info.field} cars`}`;
     const next = this.h.nextEventName();
     const btn = $('results-next');
     if (btn.hidden !== !next) btn.hidden = !next;
@@ -475,9 +505,12 @@ export class Screens {
       return `${m}:${sec < 10 ? '0' : ''}${sec.toFixed(2)}`;
     };
     $('results-earned').innerHTML =
-      `<div class="stat-card"><span class="label">Position</span><b class="num">${info.place} / ${info.field}</b></div>` +
-      `<div class="stat-card"><span class="label">Race time</span><b class="num">${total(info.time)}</b></div>` +
-      `<div class="stat-card"><span class="label">Best lap</span><b class="num">${info.best > 0 ? formatLap(info.best) : '—'}</b></div>` +
+      (tg
+        ? `<div class="stat-card"><span class="label">Rounds</span><b class="num">${tg.score[0]} – ${tg.score[1]}</b></div>` +
+          `<div class="stat-card bounty"><span class="label">Round by round</span><small>${tg.rounds.map((r) => esc(r)).join('<br>')}</small></div>`
+        : `<div class="stat-card"><span class="label">Position</span><b class="num">${info.place} / ${info.field}</b></div>` +
+          `<div class="stat-card"><span class="label">Race time</span><b class="num">${total(info.time)}</b></div>`) +
+      `<div class="stat-card"><span class="label">${info.dist ? 'Best run' : 'Best lap'}</span><b class="num">${info.best > 0 ? formatLap(info.best) : '—'}</b></div>` +
       `<div class="stat-card"><span class="label">Speed points</span><b class="num" style="color:var(--accent)">+${Math.round(info.earned).toLocaleString('en-US')}</b></div>` +
       (info.bounty && info.bounty > 0
         ? `<div class="stat-card bounty"><span class="label">Pursuit bounty</span><b class="num">${Math.round(info.bounty).toLocaleString('en-US')}</b><small>${(info.bountyLog ?? []).slice(0, 4).map(([k, v]) => `${k} ${Math.round(v).toLocaleString('en-US')}`).join(' · ')}</small></div>`
@@ -494,8 +527,9 @@ export class Screens {
   // ── home ───────────────────────────────────────────────────────────────
   private buildHome(): void {
     const items: [string, string, string, () => void, boolean][] = [
-      ['race', 'Race', 'Circuit race against 7 rivals', () => {
-        this.h.settings.raceType = 'clean';
+      ['race', 'Race', this.h.routes().length ? 'Circuit, sprint or touge 1v1' : 'Circuit race against 7 rivals', () => {
+        // 5B: keep a sprint or touge chosen on the event card; only Pursuit switches back to a circuit race
+        if (this.h.settings.raceType === 'pursuit') this.h.settings.raceType = 'clean';
         this.h.save();
         this.h.race();
       }, true],

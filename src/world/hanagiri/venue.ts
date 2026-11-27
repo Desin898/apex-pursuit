@@ -94,6 +94,20 @@ function facility(wd: WorldData): void {
     }
   }
 
+  // ── 5B: point-to-point routes: the climb from the village to the shrine, and the descent back ──
+  {
+    let top = 0;
+    for (let i = 0; i < N; i++) if (S[i].y > S[top].y) top = i;
+    const L = wd.trackLength;
+    const along = (a: number, b: number) => (((S[b].s - S[a].s) % L) + L) % L;
+    const upTo = (top + 8) % N;
+    const downFrom = (top + 14) % N;
+    wd.routes.push(
+      { id: 'uphill', name: 'Hanagiri Uphill', blurb: 'Village to the summit shrine: the long straight, four hairpins, the ridge', from: wd.startIndex, to: upTo, len: along(wd.startIndex, upTo) },
+      { id: 'downhill', name: 'Hanagiri Downhill', blurb: 'Summit shrine to the village: fast esses, the steep descent, the valley sweepers', from: downFrom, to: wd.startIndex, len: along(downFrom, wd.startIndex) },
+    );
+  }
+
   // ── The village car park: a level patch of paving near the start (the menus' showroom,
   //    a place to hide from the police) ──
   {

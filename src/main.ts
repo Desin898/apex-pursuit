@@ -30,9 +30,10 @@ import { Cockpit } from './vehicle/Cockpit';
 import { VehicleInput, VehiclePhysics, VehicleState, WHEEL_X, WHEEL_Z } from './vehicle/VehiclePhysics';
 import { PropSystem } from './world/Props';
 import { buildWorld, WorldVisuals } from './world/WorldBuilder';
-import { Surface, WorldData } from './world/WorldData';
+import { RaceRoute, Surface, WorldData } from './world/WorldData';
 import { Conditions, Environment, WEATHERS } from './world/Environment';
 import { PursuitView } from './world/PursuitView';
+import { RouteMarks } from './world/RouteMarks';
 import { staticBatch } from './world/StaticBatch';
 import { PhotoMode } from './ui/PhotoMode';
 import { GpuTimer } from './fx/GpuTimer';
@@ -88,6 +89,8 @@ class Game {
   private props: PropSystem;
   private particles: Particles;
   private pview!: PursuitView;
+  /** 5B: start / finish gantries of a sprint or touge route */
+  private routeMarks: RouteMarks | null = null;
   private skids: SkidMarks;
   private rig: CameraRig;
   private post: PostFX;
@@ -179,12 +182,23 @@ class Game {
       },
       home: () => this.quitToHome(),
       gridRows: () => this.gridRows(),
+      routes: () => this.world.routes.map((r) => ({ id: r.id, name: r.name, blurb: r.blurb, len: r.len })),
       resultRows: () => this.resultRows(),
       resultInfo: () => {
         const p = this.race.player;
         const rows = this.race.results();
         const pz = this.race.pursuit;
-        return { place: p.place, field: rows.length, time: p.finishTime, best: p.lap.best, earned: this.raceEarned, laps: this.race.targetLaps, over: this.race.over, bounty: pz ? pz.bounty : 0, bountyLog: pz ? [...pz.bountyLog.entries()].sort((a, b) => b[1] - a[1]) : [] };
+        const rt = this.race.route;
+        const m = this.race.match;
+        const touge = m
+          ? {
+              winner: m.winner ?? 'draw',
+              score: [m.score[0], m.score[1]] as [number, number],
+              rival: m.rival.name,
+              rounds: m.rounds.map((x) => `R${x.round} ${x.youLed ? 'you led' : 'you chased'}: ${x.winner === 'you' ? 'won' : x.winner === 'rival' ? 'lost' : 'draw'} · ${x.reason}`),
+            }
+          : undefined;
+        return { place: p.place, field: rows.length, time: p.finishTime, best: p.lap.best, earned: this.raceEarned, laps: this.race.targetLaps, over: this.race.over, bounty: pz ? pz.bounty : 0, bountyLog: pz ? [...pz.bountyLog.entries()].sort((a, b) => b[1] - a[1]) : [], dist: rt ? `${(rt.len / 1000).toFixed(2)} km` : undefined, touge };
       },
       trackShape: () => {
         const S = this.world.samples;
@@ -240,6 +254,8 @@ class Game {
     this.props = new PropSystem(this.scene, this.world);
     this.particles = new Particles(this.scene);
     this.pview = new PursuitView(this.scene, this.world, this.particles);
+    this.routeMarks = new RouteMarks(this.scene, this.world);
+    this.routeMarks.set(this.race?.route ?? null);
     this.pview.carRoots = () => this.carVisuals.map((v) => v.root);
     this.pview.carsForShadow = () => this.race.cars.filter((c) => !c.gone).map((c) => ({ x: c.s.x, z: c.s.z, yaw: c.s.yaw }));
     this.pview.attach(this.race.pursuit, this.settings.quality);
@@ -474,6 +490,7 @@ class Game {
     this.visuals.dressing?.setSun?.(this.visuals.sunDir);
     const p = this.env.p;
     this.race.setWet(p.wet);
+    this.race.setSnow(p.snow);
     this.audio.setRain(p.rain);
     this.audio.wet = p.wet;
     this.lookExtras();
@@ -628,7 +645,7 @@ class Game {
   private ghostWasRunning = false;
   private ghostPose = { x: 0, y: 0, z: 0, yaw: 0 };
   private updateGhost(): void {
-    const on = this.mode === 'free' && this.settings.ghost && (this.state === 'playing' || this.state === 'paused' || this.state === 'photo') && this.online.status !== 'online';
+    const on = this.mode === 'free' && !this.race.route && this.settings.ghost && (this.state === 'playing' || this.state === 'paused' || this.state === 'photo') && this.online.status !== 'online';
     const me = this.race.player;
     const lap = me.lap;
     if (on && this.state === 'playing') {
@@ -996,7 +1013,7 @@ class Game {
     const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : -1);
     const fps = n / Math.max(0.1, b.t - 1.5);
     const text =
-      `Apex Pursuit benchmark · ${this.settings.quality.toUpperCase()} · ${this.renderer.domElement.width}×${this.renderer.domElement.height} · ${this.gpuName}\n` +
+      `Apex Pursuit benchmark · ${this.world.venue.name} · ${this.settings.quality.toUpperCase()} · ${this.renderer.domElement.width}×${this.renderer.domElement.height} · ${this.gpuName}\n` +
       `average ${fps.toFixed(1)} fps · 1% low ${(1000 / p99).toFixed(1)} fps · CPU ${avg(b.cpu).toFixed(1)} ms · GPU ${b.gpu.length ? avg(b.gpu).toFixed(1) + ' ms' : 'n/a'} · ${n} frames`;
     this.lastBench = text;
     this.applyConditions(b.prev);
@@ -1149,6 +1166,8 @@ class Game {
   }
   private eventName(): string {
     if (this.mode === 'free') return 'Free run';
+    const route = this.eventRoute();
+    if (route) return `${route.name} ${this.settings.raceType === 'touge' ? 'Touge' : 'Sprint'}`;
     const i = this.eventIndex();
     if (i >= 0) return EVENTS[i].name;
     return this.settings.raceType === 'pursuit' ? 'Pursuit race' : 'Quick race';
@@ -1185,7 +1204,13 @@ class Game {
     const wx = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', snow: 'Snow' }[c.weather] ?? c.weather;
     const tod = c.time === 'night' ? 'Night' : c.time === 'dynamic' ? 'Dusk to night' : 'Dusk';
     const laps = this.race.targetLaps;
-    const sub = free ? `${this.world.venue.name} · ${wx} · ${tod}` : `${kind === 'pursuit' ? 'Pursuit' : 'Circuit'} · ${laps} laps · ${wx} · ${tod}`;
+    const rt = this.race.route;
+    const sub = free
+      ? `${this.world.venue.name} · ${wx} · ${tod}`
+      : rt
+        ? `${this.race.match ? 'Touge 1v1' : 'Sprint'} · ${(rt.len / 1000).toFixed(1)} km · ${wx} · ${tod}`
+        : `${kind === 'pursuit' ? 'Pursuit' : 'Circuit'} · ${laps} laps · ${wx} · ${tod}`;
+    this.hud.kickerText = rt ? (this.race.match ? 'Touge battle' : 'Sprint event') : '';
     this.hud.setEvent(kind, this.eventName(), sub);
     this.hud.setRacingLine(this.race.line);
     this.boardT = 1;
@@ -1204,7 +1229,7 @@ class Game {
     }
     const me = r.player;
     const sorted = r.cars.slice().sort((a, b) => a.place - b.place);
-    const L = this.world.trackLength; // race distance is counted in laps
+    const L = r.route ? r.route.len : this.world.trackLength; // race distance is counted in laps (or routes)
     const myD = r.distanceOf(me) * L;
     const v = Math.max(18, Math.abs(me.s.speed));
     const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
@@ -1272,10 +1297,25 @@ class Game {
     return { stability: s.stability, tractionControl: s.tractionControl, brakeAssist: s.brakeAssist };
   }
 
+  /** 5B: the route this event runs on (sprint, touge), or null for laps */
+  private eventRoute(): RaceRoute | null {
+    const s = this.settings;
+    if (this.mode !== 'race' || this.online?.status === 'online') return null; // sprints and touge are offline for now
+    if (s.raceType !== 'sprint' && s.raceType !== 'touge') return null;
+    return this.world.routes.find((r) => r.id === s.route) ?? this.world.routes[0] ?? null;
+  }
+
   private makeRace(specs?: CarSpec[]): Race {
     const s = this.settings;
-    const r = new Race(this.world, specs ?? Race.soloSpecs(s.rivals ? AI.gridSize - 1 : 0, s.loadout), s.difficulty, s.bestLap, this.aids(), s.steerAssist);
+    const route = specs ? null : this.eventRoute();
+    const touge = !!route && s.raceType === 'touge';
+    const field = touge ? 1 : s.rivals ? AI.gridSize - 1 : 0;
+    const r = new Race(this.world, specs ?? Race.soloSpecs(field, s.loadout), s.difficulty, route ? 0 : s.bestLap, this.aids(), s.steerAssist);
     r.targetLaps = this.mode === 'free' ? 0 : s.laps;
+    if (route) {
+      r.setRoute(route);
+      if (touge) r.enableTouge(false);
+    }
     r.randomHold = true;
     // Pursuit Race: the host (or a solo player) runs the police; guests get them from the host
     const guest = this.online?.status === 'online' && !this.online.isHost;
@@ -1286,12 +1326,13 @@ class Game {
       p.air.dropsOn = s.airDrops;
     }
     r.setWet(this.env?.p.wet ?? 0);
+    r.setSnow(this.env?.p.snow ?? 0);
     return r;
   }
 
   /** The event card's starting grid: the field you will race, in grid order. */
   private gridRows(): BoardRow[] {
-    const specs = Race.soloSpecs(AI.gridSize - 1, this.settings.loadout).slice().sort((a, b) => a.grid - b.grid);
+    const specs = Race.soloSpecs(this.settings.raceType === 'touge' && this.world.routes.length ? 1 : AI.gridSize - 1, this.settings.loadout).slice().sort((a, b) => a.grid - b.grid);
     return specs.map((sp) => ({
       place: sp.grid + 1,
       name: sp.kind === 'player' ? this.settings.name : sp.name,
@@ -1379,6 +1420,20 @@ class Game {
     const p = this.race.player;
     this.finishHandled = true;
     this.finishT = 0;
+    const m = this.race.match;
+    if (m) {
+      // 5B: the touge is decided
+      const bonus = m.winner === 'you' ? 600 : m.winner === 'draw' ? 200 : 60;
+      this.earn(bonus);
+      this.hud.pop(m.message, `${m.messageSub} · +${bonus} Speed Points`, m.winner === 'you', 3.2);
+      m.message = '';
+      this.audio.ui('lap');
+      this.haptics.pulse(0.9, 1, m.winner === 'you' ? 0.7 : 0.35);
+      this.timeScale = 0.35;
+      this.driftScore = 0;
+      saveSettings(this.settings);
+      return;
+    }
     const bonus = PLACE_BONUS[p.place - 1] ?? 50;
     this.earn(bonus);
     const ord = p.place === 1 ? '1st' : p.place === 2 ? '2nd' : p.place === 3 ? '3rd' : `${p.place}th`;
@@ -1864,6 +1919,7 @@ class Game {
   /** Throw the current field away and build a new one (rivals on/off, difficulty change). */
   private rebuildRace(specs?: CarSpec[]): void {
     this.race = this.makeRace(specs);
+    this.routeMarks?.set(this.race.route);
     this.resetRaceFlow();
     this.pview?.attach(this.race.pursuit, this.settings.quality);
     this.pview?.setNight(this.env?.p.carLights ?? 0, this.env?.p.wet ?? 0);
@@ -2255,7 +2311,14 @@ class Game {
 
     // HUD
     if (this.state === 'playing' || this.state === 'paused') {
-      this.hud.update(s, this.lap, this.settings.mph, dt, this.race.player.place, cars.length, this.lap.laps + (this.lap.running ? 1 : 0), this.race.targetLaps);
+      // 5B: on a route the distance to go; in a touge the round
+      const rt = this.race.route;
+      const lapText: [string, string] | undefined = this.race.match
+        ? ['Round', `${this.race.match.round} · ${this.race.match.youLead ? 'Lead' : 'Chase'}`]
+        : rt
+          ? ['To go', `${Math.max(0, (1 - Math.max(0, this.race.distanceOf(this.race.player))) * rt.len / 1000).toFixed(1)} km`]
+          : undefined;
+      this.hud.update(s, this.lap, this.settings.mph, dt, this.race.player.place, cars.length, this.lap.laps + (this.lap.running ? 1 : 0), this.race.targetLaps, lapText);
       this.hud.throttle = this.race.player.input.throttle;
       this.hud.drawMap(rp.x, rp.z, rp.yaw, Math.abs(s.speed), this.rivalBlips(), this.pview.mapIcons(this.icons), this.time, dt);
       this.updateBoard(dt);
@@ -2729,8 +2792,17 @@ class Game {
       this.rig.addShake(0.3);
     }
     this.wasNitro = s.nitroActive;
-    if (this.race.player.finished && !this.finishHandled) this.onPlayerFinish();
-    else if (this.lap.event) {
+    // 5B: a touge ends when the match is decided (rounds in between are not the finish)
+    const m = this.race.match;
+    if (m && m.message && m.state !== 'over') {
+      this.hud.pop(m.message, m.messageSub, m.message === 'ROUND WON', 2.8);
+      if (m.message.startsWith('ROUND ') && m.message !== 'ROUND WON' && m.message !== 'ROUND LOST' && m.message !== 'ROUND DRAWN') this.audio.ui('lap');
+      m.message = '';
+    }
+    if ((m ? m.state === 'over' : this.race.player.finished) && !this.finishHandled) this.onPlayerFinish();
+    else if (m) {
+      /* touge: no lap pops */
+    } else if (this.lap.event) {
       const best = this.lap.event === 2;
       this.audio.ui('lap');
       const total = this.race.targetLaps;
@@ -2738,7 +2810,7 @@ class Game {
       this.haptics.pulse(0.5, 0.8, best ? 0.5 : 0.2);
       this.earn(best ? 500 : 200);
     }
-    if (this.lap.event) {
+    if (this.lap.event && !this.race.route) {
       if (this.lap.event === 2) this.settings.bestLap = this.lap.best;
       saveSettings(this.settings);
     }

@@ -205,7 +205,7 @@ export class Pursuit {
         id: 100 + i, name: UNIT_NAMES[i], number: 0, isPlayer: false, paint: 0, physics, s: physics.s, driver: null,
         lap: new LapTimer(world, 0), input: blankInput(), trackIndex: 0, trackOffset: 0, trackS: 0, onTrack: false, place: 0,
         prev: { x: 0, y: -60, z: 0, yaw: 0, pitch: 0, roll: 0 }, grid: 0, remote: false, netId: `pol:${i}`, net: null, netTime: 0, netDistance: 0,
-        gone: true, edition: 'police', look: race.player.look, finished: false, finishTime: 0,
+        gone: true, edition: 'police', look: race.player.look, finished: false, finishTime: 0, rejoins: 0,
       };
       this.units.push({ id: i, kind, car, driver, active: false, respawnIn: 0, target: null, side: i % 2 === 0 ? 1 : -1, slowT: 0, sees: false, aggroT: 0, aggro: null, damage: 0, hornT: 99, role: 'chase' });
       this.park(this.units[i]);
@@ -311,7 +311,8 @@ export class Pursuit {
     u.car.s.vz = Math.cos(yaw) * v;
     u.car.s.gear = 3;
     u.car.physics.wet = this.race.wet;
-    u.driver.wetK = 1 - this.race.wet * 0.15;
+    u.car.physics.snow = this.race.snow;
+    u.driver.wetK = (1 - this.race.wet * 0.15) * (1 - this.race.snow * 0.3);
     u.driver.reset();
     u.car.gone = false;
     u.active = true;

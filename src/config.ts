@@ -285,6 +285,14 @@ export const WEATHER = {
   wetGripGrass: 0.8,
   wetGripRunoff: 0.8,
   aiWetMargin: 0.975,
+  /** 5B: grip left on packed snow (the wheel tracks are mostly clear: the road-snow map) */
+  snowGrip: 0.5,
+  /** 5B: grip left on snowy grass, gravel and run-off */
+  snowGripOffroad: 0.6,
+  /** 5B: grip lost in the deepest standing water at speed (aquaplaning, from ~95 km/h) */
+  aquaplane: 0.3,
+  /** 5B: the AI's planned speeds in the Snow weather (grip factor it plans for) */
+  aiSnowK: 0.66,
   /** rain streaks drawn around the camera at each graphics preset */
   rainDrops: { low: 2400, medium: 7000, high: 12000, ultra: 16000 }, // at full intensity
   rainSplashes: { low: 0, medium: 260, high: 520, ultra: 820 },

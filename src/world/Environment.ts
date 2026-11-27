@@ -9,6 +9,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { Snow } from '../fx/Snow';
+import { setRoadSnow } from './RoadSnow';
 import { mountainUniforms } from './hanagiri/MountainTerrain';
 import { groundHeight } from './ground';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
@@ -442,6 +443,7 @@ export class Environment {
     const p = this.p;
     this.snow.configure(p.snow, this.conditions.time === 'night' ? 0.4 : this.conditions.time === 'dynamic' ? 1 - 0.6 * this.dynT : 1, q);
     mountainUniforms.uSnowCover.value = p.snow;
+    setRoadSnow(p.snow);
     mountainUniforms.uPetals.value = 1 - p.snow;
     this.rain.configure(WEATHER.rainDrops[q], this.p.rain, this.conditions.time !== 'dusk', WEATHER.rainSplashes[q]);
   }

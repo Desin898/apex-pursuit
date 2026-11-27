@@ -131,11 +131,20 @@ export class VehicleState {
 export class VehiclePhysics {
   readonly s = new VehicleState();
   private prevGround = [0, 0, 0, 0];
+  /** 5B: how fast the ground under each wheel is rising (m/s): the road on a slope moves with the car */
+  private groundRate = [0, 0, 0, 0];
   private wob = 0;
   /** this car's tuning (an edition's values; defaults to the base car) */
   p: VehicleParams;
   /** 0 dry .. 1 fully wet track: scales grip per surface (WEATHER in config) */
   wet = 0;
+  /** 5B: 0 .. 1 the Snow weather: packed snow on the road (the world's road-snow map) holds less */
+  snow = 0;
+  /** 5B: per wheel, what the road cover (standing water, snow) leaves of the grip */
+  private cover = [1, 1, 1, 1];
+  /** 5B: grip under the front tyres relative to a dry road (sizes the steering lock) */
+  private frontK = 1;
+  private rc = { water: 0, snow: 0 };
   // Per-axle spring rates chosen so the car sits level: front and rear carry different loads.
   private K_FRONT: number;
   private K_REAR: number;
@@ -190,6 +199,7 @@ export class VehiclePhysics {
     s.impacts.length = 0;
     for (let i = 0; i < 4; i++) {
       this.prevGround[i] = s.y;
+      this.groundRate[i] = 0;
       s.wheelGround[i] = s.y;
       s.wheelDrop[i] = 0;
       s.wheelSlip[i] = 0;
@@ -237,9 +247,11 @@ export class VehiclePhysics {
 
     // ── Steering ───────────────────────────────────────────────────────────
     // The lock shrinks with speed so that full stick ≈ the tyres' grip limit at any speed.
+    // 5B: sized for the grip the front tyres have now (rain, snow), so full lock in the wet asks
+    // for what the tyres can give instead of washing the nose wide.
     const steerMax = Math.min(
       V.steerMax,
-      V.steerGain * (Math.atan((WHEELBASE * V.steerGripRef) / Math.max(vF * vF, 1)) + V.steerBase),
+      V.steerGain * (Math.atan((WHEELBASE * V.steerGripRef * clamp(this.frontK, 0.5, 1)) / Math.max(vF * vF, 1)) + V.steerBase),
     );
     const target = clamp(inp.steer, -1, 1);
     const turningIn = Math.abs(target) > Math.abs(s.steerInput) && target * s.steerInput >= 0;
@@ -266,6 +278,16 @@ export class VehiclePhysics {
       const wx = s.x + fx * az + lx * ax;
       const wz = s.z + fz * az + lz * ax;
       const surf = W.surfaceAt(wx, wz);
+      // 5B: what lies on the road under this wheel: standing water (aquaplaning at speed) and snow
+      let gk = 1;
+      if (this.wet > 0 || this.snow > 0) {
+        if (surf === Surface.Asphalt) {
+          W.roadCover(wx, wz, this.rc);
+          if (this.snow > 0) gk *= 1 - this.snow * this.rc.snow * (1 - WEATHER.snowGrip);
+          if (this.wet > 0 && this.rc.water > 0) gk *= 1 - this.wet * this.rc.water * WEATHER.aquaplane * smoothstep(26, 44, speed);
+        } else if (this.snow > 0) gk *= 1 - this.snow * (1 - WEATHER.snowGripOffroad);
+      }
+      this.cover[i] = gk;
       // 4E: gravel is lumpy: a little noise in the ground height under each wheel
       const h = W.heightAt(wx, wz) + (surf === Surface.Gravel ? V.gravelWobble * 0.012 * (Math.sin(wx * 3.1 + wz * 1.7) * Math.sin(wz * 2.3 - wx * 0.9) + 0.6) : 0);
       const H = s.y + az * s.pitch + ax * s.roll;
@@ -274,6 +296,7 @@ export class VehiclePhysics {
       if (hdot > 60) hdot = 60;
       if (hdot < -60) hdot = -60;
       this.prevGround[i] = h;
+      this.groundRate[i] = hdot;
       const comp = V.staticCompression - (H - h);
       let F = 0;
       if (comp > 0) {
@@ -313,7 +336,8 @@ export class VehiclePhysics {
     if (s.puncture > 0) s.puncture = Math.max(0, s.puncture - dt);
     const pG = 1 - punct * (1 - POLICE.punctureGrip);
     const mu0 = (i: number) =>
-      s.wheelSurface[i] === Surface.Grass ? V.gripGrass * wG : s.wheelSurface[i] === Surface.Gravel ? V.gripGravel * wG : s.wheelSurface[i] === Surface.Kerb ? V.gripKerb * wK : s.wheelSurface[i] === Surface.Runoff ? V.gripRunoff * wR : V.gripAsphalt * wA;
+      (s.wheelSurface[i] === Surface.Grass ? V.gripGrass * wG : s.wheelSurface[i] === Surface.Gravel ? V.gripGravel * wG : s.wheelSurface[i] === Surface.Kerb ? V.gripKerb * wK : s.wheelSurface[i] === Surface.Runoff ? V.gripRunoff * wR : V.gripAsphalt * wA) * this.cover[i];
+    this.frontK = ((this.cover[0] + this.cover[1]) / 2) * wA;
     const frontOn = s.wheelContact[0] || s.wheelContact[1];
     const rearOn = s.wheelContact[2] || s.wheelContact[3];
     // Tyre load = suspension load. Under braking it is pulled part-way back towards the static
@@ -544,12 +568,17 @@ export class VehiclePhysics {
     s.roll = clamp(s.roll, -0.6, 0.6);
 
     // Hard bump stops (position + velocity projection): the body can never sink through the ground.
+    // 5B: against the ground where the wheel is now (it moved on this step) and at the ground's own
+    // vertical speed. On a steep descent the road falls away at several m/s; measured against a
+    // still ground, a wheel touching its stop had all of that cancelled at one corner, which threw
+    // the car into the air with a pitch and roll kick and a false hard landing.
     let landing = 0;
     for (let iter = 0; iter < 2; iter++) {
       for (let i = 0; i < 4; i++) {
         const ax = WHEEL_X[i];
         const az = WHEEL_Z[i];
-        const gap = s.y + az * s.pitch + ax * s.roll - s.wheelGround[i];
+        const gNow = s.wheelGround[i] + this.groundRate[i] * dt;
+        const gap = s.y + az * s.pitch + ax * s.roll - gNow;
         const pen = -V.bumpTravel - gap;
         if (pen <= 0) continue;
         const w = 1 / V.mass + (az * az) / V.pitchInertia + (ax * ax) / V.rollInertia;
@@ -557,7 +586,7 @@ export class VehiclePhysics {
         s.y += lam / V.mass;
         s.pitch += (lam * az) / V.pitchInertia;
         s.roll += (lam * ax) / V.rollInertia;
-        const vrel = s.vy + az * s.pitchRate + ax * s.rollRate;
+        const vrel = s.vy + az * s.pitchRate + ax * s.rollRate - this.groundRate[i];
         if (vrel < 0) {
           const j = -vrel / w;
           s.vy += j / V.mass;

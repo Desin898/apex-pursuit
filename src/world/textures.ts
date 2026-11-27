@@ -1,6 +1,7 @@
 // Procedural canvas textures. Everything is generated at start-up, so the game ships with no
 // image files at all.
 import * as THREE from 'three';
+import { PUDDLE_SIZE, puddleRoughness } from './surfaceMaps';
 import { rng } from '../core/math';
 
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -443,25 +444,16 @@ export function cloudTexture(): THREE.CanvasTexture {
 
 /** Wet-road roughness: mostly glossy with smooth puddle patches; used as a roughnessMap. */
 export function puddleTexture(): THREE.CanvasTexture {
-  const [c, ctx] = canvas(256, 256);
-  ctx.fillStyle = 'rgb(150,150,150)'; // base roughness ≈ 0.6 × material roughness
-  ctx.fillRect(0, 0, 256, 256);
-  const r = rng(77);
-  for (let i = 0; i < 26; i++) {
-    const x = r() * 256;
-    const y = r() * 256;
-    const rad = 10 + r() * 34;
-    for (const [dx, dy] of [[0, 0], [256, 0], [-256, 0], [0, 256], [0, -256]]) {
-      const g = ctx.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, rad);
-      g.addColorStop(0, 'rgba(70,70,70,0.85)');
-      g.addColorStop(0.6, 'rgba(90,90,90,0.5)');
-      g.addColorStop(1, 'rgba(150,150,150,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.ellipse(x + dx, y + dy, rad, rad * (0.35 + r() * 0.4), r() * 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  // 5B: painted from the shared puddle map, so the physics knows where the standing water is
+  const [c, ctx] = canvas(PUDDLE_SIZE, PUDDLE_SIZE);
+  const m = puddleRoughness();
+  const img = ctx.createImageData(PUDDLE_SIZE, PUDDLE_SIZE);
+  for (let i = 0; i < m.length; i++) {
+    const v = Math.round(m[i]);
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
   }
+  ctx.putImageData(img, 0, 0);
   grain(ctx, 256, 256, 6000, 78, 110, 200, 0.35);
   return finish(c, true, false);
 }

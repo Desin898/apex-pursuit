@@ -30,7 +30,9 @@ export interface Settings {
   brakeAssist: boolean;
   // next race (3C)
   laps: number;
-  raceType: 'clean' | 'pursuit';
+  raceType: 'clean' | 'pursuit' | 'sprint' | 'touge';
+  /** 5B: the route for sprints and touge battles (a venue's route id) */
+  route: string;
   weather: 'clear' | 'cloudy' | 'rain' | 'snow' | 'random';
   /** 'dynamic': dusk to night over the race */
   timeOfDay: 'dusk' | 'night' | 'dynamic';
@@ -126,6 +128,7 @@ export const defaults: Settings = {
   brakeAssist: true,
   laps: 3,
   raceType: 'clean',
+  route: 'downhill',
   weather: 'clear',
   timeOfDay: 'dusk',
   mirror: true,

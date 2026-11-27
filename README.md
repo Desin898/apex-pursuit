@@ -1,7 +1,9 @@
 # Apex Pursuit
 
 Open-world arcade street racer, built in stages from the Phantom X1 concept sketch. **This is
-Phase 5A, Hanagiri Pass:** a second venue, a 10 km mountain lap with snow, cherry blossom, torii
+Phase 5B:** sprints and one-on-one touge battles on Hanagiri Pass, snow that lies on the road and
+changes the grip, better wet handling, and a fixed ride on the mountain (no more bumps or pulling).
+Before that, **Phase 5A, Hanagiri Pass:** a second venue, a 10 km mountain lap with snow, cherry blossom, torii
 gates, a summit shrine and a new Snow weather. Pursuits, Air One and online play all work there
 (see below). Earlier, **Phase 4F, smarter police:** squads that box you in, roadblocks with a gap to aim for, a pursuit
 bounty, and a search you can hide from; plus searchlight shadows and floodlights that light the
@@ -121,6 +123,65 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
   hosts block Gamepad access inside frames.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
+
+## New in Phase 5B: sprints, touge battles, snow grip and a smoother ride
+
+- **Sprint.** A point-to-point race on Hanagiri Pass with the full field, from a START gantry to
+  a FINISH gantry. You pick the route on the event card:
+  - **Uphill:** 6.0 km from the village to the summit shrine;
+  - **Downhill:** 4.1 km from the shrine back down to the village.
+
+  The HUD shows the distance still to go instead of the lap count.
+- **Touge 1v1.** You against one rival on a route, in rounds, and the roles swap each round.
+  - The **leader** wins a round by pulling more than 150 m clear, or by crossing the line 1.5 s or
+    more ahead.
+  - The **chaser** wins by getting past and staying ahead for 2 s.
+  - A chaser still on the leader's bumper at the line makes the round a **draw**.
+  - Going off the road (an automatic reset) loses the round.
+
+  Two rounds are run, then sudden death if it's level. The HUD shows the round and whether you
+  lead or chase. The results show the score and what happened in each round.
+- **The bumps and the "tyre imbalance" are fixed.** Four things caused them:
+  - **The suspension's bump stops.** They worked against the road as if it stood still. On a
+    steep descent the road falls away at several metres a second, so a wheel touching its stop
+    had all of that cancelled at one corner. That threw the car up with a pitch and roll kick.
+    It happened most to the GT3 RS, whose rear squats onto its stops under power and downforce.
+  - **Small steps in the road surface** where the road height was looked up between two points of
+    the track, worst round the hairpins.
+  - **Crests that were too sharp.** The road's height profile is now eased into smooth vertical
+    curves.
+  - **The paved shoulder gripped like run-off.** A car with two wheels on it pulled to one side.
+    It now grips like the road.
+
+  On a full lap with the GT3 RS, the wheel-load spikes went from about 3,000 to 0. The peak vertical
+  acceleration went from 1,600 to 4 m/s².
+- **Handling in the rain.** The speed-sensitive steering lock now follows the grip the front
+  tyres actually have. Full lock in the wet asks for what the tyres can give, instead of washing
+  the nose wide. Standing water (the puddles you can see) makes the tyres aquaplane a little at
+  speed.
+- **Snow you can feel.** In the Snow weather, snow lies on the road:
+  - packed in places, with two darker wheel tracks worn into each lane;
+  - cleaner stretches and drifted patches;
+  - banks along the edges, and the mountain road's shoulders snowed over.
+
+  The tyres read the same map the road is drawn from. Packed snow has about half the grip, the
+  wheel tracks are close to wet tarmac, and snowy grass and gravel are slippery too. The AI slows
+  down for it.
+
+  A GT3 RS lap takes 299 s dry, 330 s wet and 388 s in snow.
+- **Checks:** the physics tests now cover the road surface, the ride dry, wet and in snow, the
+  road snow and puddles, both sprints and a full touge match (62 checks).
+
+| | |
+|---|---|
+| ![Touge on the event card](docs/5b/event-card-touge.jpg) | ![Touge start](docs/5b/touge-start.jpg) |
+| ![Summit start gantry](docs/5b/summit-start-gantry.jpg) | ![Snow on the road](docs/5b/snow-road-wheel-tracks.jpg) |
+| ![Snow at the summit](docs/5b/snow-summit-road.jpg) | |
+
+**Not in this phase:**
+- Sprints and touge are offline only. Online races stay circuit or pursuit.
+- The frame rate on a real RTX 3050 still needs measuring on your PC: start a race on Hanagiri
+  Pass and press **F4**. The result is copied to the clipboard, and it now names the venue.
 
 ## New in Phase 5A: Hanagiri Pass, a 10 km mountain lap
 
@@ -1231,8 +1292,11 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
      (done)
    - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder (next)
 5. Phase 5
-   - **5A. Hanagiri Pass: a 10.1 km mountain lap with height-field terrain, snow, cherry blossom,
+   - 5A. Hanagiri Pass: a 10.1 km mountain lap with height-field terrain, snow, cherry blossom,
      torii, the shrine, the village, guard rails, valley mist, a Snow weather, slope physics, and
-     the pursuit, Air One and online play on the mountain (this build)**
-   - 5B. Sprints and touge battles on Hanagiri (point-to-point races), more mountain events
+     the pursuit, Air One and online play on the mountain (done)
+   - **5B. Sprints and touge battles on Hanagiri, snow on the road with its own grip, wet
+     handling, the ride and bump-stop fix (this build)**
+   - 5C. Hanagiri, winter edition: an isolated alpine look with distinct areas along the lap,
+     realistic snow-laden pines and bushes, natural road snow, realistic landmarks (next)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

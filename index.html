@@ -562,7 +562,7 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
     <span class="marker" id="top-marker"><i></i><span id="top-event">Circuit race</span></span>
     <div class="row">
       <span class="cell" id="race-pos-row"><span class="label">Pos</span><b><span id="race-pos">8</span><small id="race-of">/8</small></b></span>
-      <span class="cell"><span class="label">Lap</span><b id="race-lap">1/3</b></span>
+      <span class="cell"><span class="label" id="race-lap-label">Lap</span><b id="race-lap">1/3</b></span>
       <span class="cell"><span class="label">Time</span><b id="lap-now">0:00.00</b></span>
     </div>
     <div class="gaps" id="top-gaps"><span id="gap-ahead"></span><span id="gap-behind"></span></div>
@@ -676,8 +676,8 @@ kbd { font: 600 12px/1 var(--font); letter-spacing: .02em; min-width: 26px; padd
       </div>
       <canvas class="track-art" id="event-track" width="960" height="540"></canvas>
       <div class="figures">
-        <div><span class="label">Laps</span><b id="event-laps">3</b></div>
-        <div><span class="label">Circuit length</span><b id="event-length">3.26<small>km</small></b></div>
+        <div><span class="label" id="event-laps-label">Laps</span><b id="event-laps">3</b></div>
+        <div><span class="label" id="event-length-label">Circuit length</span><b id="event-length">3.26<small>km</small></b></div>
         <div><span class="label">Duration</span><b id="event-duration">4<small>min</small></b></div>
       </div>
     </div>

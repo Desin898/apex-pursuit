@@ -14,6 +14,7 @@ import { rng } from '../core/math';
 import * as tex from './textures';
 import { WorldData } from './WorldData';
 import { buildMountainTerrain } from './hanagiri/MountainTerrain';
+import { buildRoadSnowMesh } from './RoadSnow';
 import { buildFarRanges, buildMountainRoadside } from './hanagiri/MountainBuild';
 
 export interface WorldVisuals {
@@ -286,6 +287,8 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
   }
   // 5A: a mountain road has a paved shoulder, painted lines, guard rails and rock cuttings
   if (mountain) buildMountainRoadside(scene, world, baked, mats.paved);
+  // 5B: snow lying on the road in the Snow weather (the same map the tyres read)
+  buildRoadSnowMesh(scene, world);
   // Start/finish line and grid slots
   {
     const s = S[world.startIndex];

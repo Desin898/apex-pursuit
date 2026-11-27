@@ -15,6 +15,8 @@ import { VehicleInput, VehiclePhysics, VehicleState } from '../vehicle/VehiclePh
 import { WorldData } from '../world/WorldData';
 import { LapTimer } from './LapTimer';
 import { Pursuit } from './Pursuit';
+import { Touge } from './Touge';
+import type { RaceRoute } from '../world/WorldData';
 
 export interface Pose {
   x: number;
@@ -63,6 +65,8 @@ export interface RaceCar {
   finished: boolean;
   /** race time when it finished (s) */
   finishTime: number;
+  /** 5B: times this car has been put back on the road (recovery) since the grid */
+  rejoins: number;
 }
 
 export interface ResultRow {
@@ -163,11 +167,30 @@ export class Race {
   rejoined = false;
   /** police, Heat and traps (Pursuit Race only) */
   pursuit: Pursuit | null = null;
+  /** 5B: a point-to-point route (sprint, touge) instead of laps */
+  route: RaceRoute | null = null;
+  /** 5B: a one-on-one touge battle (rounds) on the route */
+  match: Touge | null = null;
+
+  /** 5B: race from one point to another (null = back to laps). */
+  setRoute(r: RaceRoute | null): void {
+    this.route = r;
+    for (const c of this.cars) c.lap.setRoute(r ? { from: r.from, len: r.len } : null);
+    if (r) this.targetLaps = 1;
+    this.toGrid();
+  }
+
+  /** 5B: turn this race into a touge battle on its route (two cars: you and one rival). */
+  enableTouge(youLeadFirst = false): Touge {
+    this.match = new Touge(this, youLeadFirst);
+    this.toGrid();
+    return this.match;
+  }
   private trafficBuf: RaceCar[] = [];
   /** steering assist strength for the local player (0 = off) */
   steerAssist = 0;
 
-  constructor(private world: WorldData, specs: CarSpec[], difficulty: Difficulty, bestLap: number, aids: DriverAids = EXPERT_AIDS, steerAssist = 0) {
+  constructor(readonly world: WorldData, specs: CarSpec[], difficulty: Difficulty, bestLap: number, aids: DriverAids = EXPERT_AIDS, steerAssist = 0) {
     this.steerAssist = STEER_ASSIST[steerAssist] ?? 0;
     this.line = new RacingLine(world);
     let player: RaceCar | null = null;
@@ -182,7 +205,7 @@ export class Race {
         lap: new LapTimer(world, sp.kind === 'player' ? bestLap : 0), input: blankInput(),
         trackIndex: 0, trackOffset: 0, trackS: 0, onTrack: true, place: sp.grid + 1, prev: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0 }, grid: sp.grid,
         remote: sp.kind === 'remote', netId: sp.netId ?? '', net: null, netTime: 0, netDistance: 0, gone: false,
-        edition, look: sp.look ?? lookFromPaint(sp.paint, edition), finished: false, finishTime: 0,
+        edition, look: sp.look ?? lookFromPaint(sp.paint, edition), finished: false, finishTime: 0, rejoins: 0,
       };
       if (car.isPlayer && !player) player = car;
       else this.cars.push(car);
@@ -244,17 +267,20 @@ export class Race {
     c.gone = false;
     c.netId = `ai:${c.grid}`;
     c.driver = new AIDriver(this.world, this.line, 'clean', AI.levels[difficulty], seed);
-    c.driver.wetK = 1 - this.wet * (1 - WEATHER.wetGripAsphalt * WEATHER.aiWetMargin);
-    if (c.s.y < -10) c.s.y = 0; // it was parked out of sight
+    c.driver.wetK = this.weatherK;
+    c.physics.snow = this.snow;
+    if (c.s.y < -10) c.s.y = this.world.heightAt(c.s.x, c.s.z); // it was parked out of sight
     // the lap counter carries on from the distance the friend had reached
     c.lap.resumeFrom(c.netDistance);
   }
 
   /** Put everyone back on the grid and restart the countdown. */
   toGrid(): void {
+    const from = this.route ? this.route.from : this.world.startIndex;
     for (const c of this.cars) {
-      const g = this.cars.length > 1 ? this.world.gridPose(c.grid) : this.world.startPose();
+      const g = this.match ? this.match.pose(c, from) : this.cars.length > 1 ? this.world.gridPose(c.grid, from) : this.world.startPose(from);
       c.physics.reset(g.x, g.z, g.yaw);
+      c.rejoins = 0;
       c.s.nitro = 1;
       c.lap.reset();
       c.driver?.reset();
@@ -279,6 +305,7 @@ export class Race {
     this.lastLight = this.stage();
     this.time = 0;
     this.rank();
+    this.match?.onGrid();
   }
 
   private capture(c: RaceCar): void {
@@ -453,14 +480,16 @@ export class Race {
               this.sincePlayerFinish = 0;
               // a cool-down lap on autopilot
               c.driver = new AIDriver(this.world, this.line, 'clean', AI.levels.easy, 99);
-              c.driver.wetK = 1 - this.wet * (1 - WEATHER.wetGripAsphalt * WEATHER.aiWetMargin);
+              c.driver.wetK = this.weatherK;
+              c.physics.snow = this.snow;
             }
           }
         }
         if (this.sincePlayerFinish >= 0) this.sincePlayerFinish += dt;
       }
       this.rank();
-    }
+      this.match?.step(dt);
+    } else if (this.match?.state === 'between') this.match.step(dt);
   }
 
   /** Feed a remote car's newest snapshot (called by the online session). */
@@ -611,6 +640,7 @@ export class Race {
     c.driver?.reset();
     this.capture(c);
     this.locate(c);
+    c.rejoins++;
     if (c.isPlayer) {
       this.recovery.stuckFor = 0;
       this.rejoined = true;
@@ -626,18 +656,33 @@ export class Race {
 
   /** 0 dry .. 1 wet: every car's grip, and the AI's planned speeds. */
   wet = 0;
+  /** 5B: 0 .. 1 the Snow weather (snow on the road: less grip, the AI plans slower) */
+  snow = 0;
+  /** the AI's grip factor for the weather (rain and snow) */
+  get weatherK(): number {
+    return (1 - this.wet * (1 - WEATHER.wetGripAsphalt * WEATHER.aiWetMargin)) * (1 - this.snow * (1 - WEATHER.aiSnowK));
+  }
   setWet(w: number): void {
     this.wet = w;
-    const k = 1 - w * (1 - WEATHER.wetGripAsphalt * WEATHER.aiWetMargin);
+    this.applyWeatherGrip();
+  }
+  setSnow(v: number): void {
+    this.snow = v;
+    this.applyWeatherGrip();
+  }
+  private applyWeatherGrip(): void {
+    const k = this.weatherK;
     for (const c of this.cars) {
-      c.physics.wet = w;
+      c.physics.wet = this.wet;
+      c.physics.snow = this.snow;
       if (c.driver) c.driver.wetK = k;
     }
-    if (this.pursuit) for (const u of this.pursuit.units) (u.car.physics.wet = w), (u.driver.wetK = k);
+    if (this.pursuit) for (const u of this.pursuit.units) (u.car.physics.wet = this.wet), (u.car.physics.snow = this.snow), (u.driver.wetK = k);
   }
 
   /** The race is over once every car has finished, or 40 s after the player did. */
   get over(): boolean {
+    if (this.match) return this.match.state === 'over';
     if (this.targetLaps <= 0 || this.sincePlayerFinish < 0) return false;
     return this.sincePlayerFinish > 40 || this.cars.every((c) => c.finished || c.gone);
   }

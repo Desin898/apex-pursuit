@@ -1282,3 +1282,124 @@ import { HANAGIRI_PASS } from '../src/world/venues';
     check('hanagiri: pursuit', ridge && chased && lowest > 8 && !bad && p.hideSpots.some((h) => h.name === 'village car park'), `ridge blocks sight: ${ridge}; Air One on the chase, never lower than ${lowest.toFixed(0)} m above the land; ${p.hideSpots.length} hiding spots`);
   }
 }
+
+// ── 5B: ride, snow grip, sprints and touge on Hanagiri ──
+// @ts-expect-error node's fs (the tests run in node; the game's tsconfig has no node types)
+import { readFileSync } from 'fs';
+{
+  const hw = new WorldData(HANAGIRI_PASS);
+  const S = hw.samples;
+  const N = S.length;
+  // the road surface is continuous: no slope step over 10 cm anywhere on the road
+  let worst = 0;
+  for (let i = 0; i < N; i += 3)
+    for (const o of [-6, -3, 0, 3, 6]) {
+      let prev = NaN;
+      let prevd = NaN;
+      for (let k = -20; k <= 20; k++) {
+        const s = S[i];
+        const h = hw.heightAt(s.x + s.tx * k * 0.1 + s.nx * o, s.z + s.tz * k * 0.1 + s.nz * o);
+        if (!isNaN(prev)) {
+          const d = h - prev;
+          if (!isNaN(prevd)) worst = Math.max(worst, Math.abs(d - prevd));
+          prevd = d;
+        }
+        prev = h;
+      }
+    }
+  check('5B: road surface continuous', worst < 0.003, `largest slope change over 10 cm: ${(worst * 100).toFixed(2)} cm`);
+  // the GT3 RS laps it dry, wet and in snow with no suspension kicks (the bump-stop fix on descents)
+  const pack = JSON.parse(readFileSync('play/cars/gt3rs.carpack.json', 'utf8'));
+  const P: Record<string, unknown> = { ...V, ...pack.set };
+  for (const [k, m] of Object.entries(pack.tune)) P[k] = (P[k] as number) * (m as number);
+  const laps: string[] = [];
+  let spikes = 0;
+  let maxAy = 0;
+  let ok = true;
+  for (const [wet, snow] of [[0, 0], [1, 0], [0.3, 1]]) {
+    const c = new VehiclePhysics(hw, P as never);
+    c.wet = wet;
+    c.snow = snow;
+    const st = hw.startPose();
+    c.reset(st.x, st.z, st.yaw);
+    const timer = new LapTimer(hw, 0);
+    let n = 0;
+    let prevVy = 0;
+    const prevL = [0, 0, 0, 0];
+    const gk = snow ? 0.55 : wet ? 0.8 : 1;
+    for (let t = 0; t < 800 && n < 1; t += DT) {
+      const hit = hw.nearestTrack(c.s.x, c.s.z);
+      const i = hit ? hit.index : 0;
+      const look = S[(i + Math.round(6 + c.s.speed * 0.45)) % N];
+      let e = Math.atan2(look.x - c.s.x, look.z - c.s.z) - c.s.yaw;
+      e = Math.atan2(Math.sin(e), Math.cos(e));
+      let k = 0;
+      for (let j = 0; j < 70; j++) k = Math.max(k, Math.abs(S[(i + j) % N].curv));
+      const vMax = Math.min(85, Math.sqrt((11 * gk) / Math.max(k, 1e-4)));
+      c.step(input({ steer: Math.max(-1, Math.min(1, -e * 3)), throttle: Math.max(0, Math.min(1, (vMax - c.s.speed) * 0.4)), brake: Math.max(0, Math.min(0.9, (c.s.speed - vMax - 1) * 0.25)), analog: true }), DT);
+      c.s.impacts.length = 0;
+      if (t > 2) maxAy = Math.max(maxAy, Math.abs((c.s.vy - prevVy) / DT));
+      prevVy = c.s.vy;
+      for (let q = 0; q < 4; q++) {
+        if (t > 2 && Math.abs(c.s.wheelLoad[q] - prevL[q]) > 2500) spikes++;
+        prevL[q] = c.s.wheelLoad[q];
+      }
+      timer.update(c.s, DT);
+      if (timer.event) n++;
+    }
+    if (n < 1) ok = false;
+    laps.push(n ? timer.last.toFixed(0) : 'DNF');
+  }
+  check('5B: GT3 RS ride (dry / wet / snow)', ok && spikes === 0 && maxAy < 40, `laps ${laps.join(' / ')} s, wheel-load spikes ${spikes}, peak vertical accel ${maxAy.toFixed(1)} m/s²`);
+  check('5B: snow is slower than wet, wet than dry', +laps[0] < +laps[1] && +laps[1] < +laps[2], laps.join(' < '));
+  // road cover: snow lies on the road with clearer wheel tracks; puddles exist
+  {
+    const rc = { water: 0, snow: 0 };
+    let tracks = 0;
+    let mid = 0;
+    let wet = 0;
+    for (let i = 0; i < N; i += 5) {
+      const s = S[i];
+      const lane = hw.halfWidth / 2;
+      tracks += hw.roadCover(s.x + s.nx * (lane - 0.8), s.z + s.nz * (lane - 0.8), rc).snow;
+      mid += hw.roadCover(s.x + s.nx * lane, s.z + s.nz * lane, rc).snow;
+      if (hw.roadCover(s.x, s.z, rc).water > 0.2) wet++;
+    }
+    check('5B: road snow and puddles', tracks < mid * 0.6 && wet > 10, `snow in the wheel tracks ${(tracks / (N / 5)).toFixed(2)} vs between them ${(mid / (N / 5)).toFixed(2)}; ${wet} samples with standing water`);
+  }
+  // sprints: both routes, the whole field finishes, positions decided
+  const routeRes: string[] = [];
+  let allDone = hw.routes.length === 2;
+  for (const r of hw.routes) {
+    const race = new Race(hw, Race.soloSpecs(7, defaultLoadout()), 'medium', 0);
+    race.setRoute(r);
+    const b = new AIDriver(hw, race.line, 'clean', AI.levels.hard, 4242);
+    let t = 0;
+    while (t < 600 && !race.cars.every((c) => c.finished)) {
+      b.update(race.player, race.cars, DT, race.held ? -race.countdown : race.time, 0);
+      race.step({ ...race.player.input }, DT);
+      for (const c of race.cars) c.s.impacts.length = 0;
+      t += DT;
+    }
+    const done = race.cars.filter((c) => c.finished).length;
+    if (done !== 8 || !race.over) allDone = false;
+    routeRes.push(`${r.id} ${(r.len / 1000).toFixed(2)} km: ${done}/8 in ${race.results()[0].gap}`);
+  }
+  check('5B: sprints', allDone, routeRes.join('; '));
+  // touge: a match runs its rounds, swaps roles and ends with a result
+  {
+    const race = new Race(hw, Race.soloSpecs(1, defaultLoadout()), 'medium', 0);
+    race.setRoute(hw.routes[1]);
+    const m = race.enableTouge(false);
+    const b = new AIDriver(hw, race.line, 'clean', AI.levels.medium, 77);
+    let t = 0;
+    while (t < 1500 && m.state !== 'over') {
+      b.update(race.player, race.cars, DT, race.held ? -race.countdown : race.time, 0);
+      race.step({ ...race.player.input }, DT);
+      for (const c of race.cars) c.s.impacts.length = 0;
+      t += DT;
+    }
+    const swapped = m.rounds.length >= 2 && m.rounds[0].youLed !== m.rounds[1].youLed;
+    check('5B: touge', m.state === 'over' && race.over && swapped && m.winner !== null, `${m.rounds.length} rounds (${m.rounds.map((x) => `${x.youLed ? 'lead' : 'chase'} → ${x.winner}`).join(', ')}), ${m.score.join('–')}, winner ${m.winner}`);
+  }
+}
