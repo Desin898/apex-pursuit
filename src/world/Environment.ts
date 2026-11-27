@@ -8,6 +8,9 @@
 // Rendering only: grip lives in VehiclePhysics.wet, set by Race.setWet().
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
+import { Snow } from '../fx/Snow';
+import { mountainUniforms } from './hanagiri/MountainTerrain';
+import { groundHeight } from './ground';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { WEATHER } from '../config';
 import { Quality } from '../fx/PostFX';
@@ -17,14 +20,15 @@ import * as tex from './textures';
 import { WorldVisuals } from './WorldBuilder';
 import { WorldData } from './WorldData';
 
-export type Weather = 'clear' | 'cloudy' | 'rain';
+export type Weather = 'clear' | 'cloudy' | 'rain' | 'snow';
 /** 'dynamic' = dusk to night over the race */
 export type TimeOfDay = 'dusk' | 'night' | 'dynamic';
 export interface Conditions {
   weather: Weather;
   time: TimeOfDay;
 }
-export const WEATHERS: Weather[] = ['clear', 'cloudy', 'rain'];
+// (5A: snow is last, so the older indices sent online keep their meaning)
+export const WEATHERS: Weather[] = ['clear', 'cloudy', 'rain', 'snow'];
 export const TIMES: TimeOfDay[] = ['dusk', 'night', 'dynamic'];
 
 type RGB = [number, number, number];
@@ -69,6 +73,8 @@ interface Preset {
   sat: number;
   wet: number;
   rain: number;
+  /** 5A: snow falling and lying (0..1) */
+  snow: number;
 }
 
 // 4G: a sunset: the sun low over the hills, orange sky, clouds lit gold underneath purple
@@ -81,7 +87,7 @@ const DUSK: Preset = {
   sunDisc: 26, cover: 0.52, cloudLit: 0xff8a48, cloudDark: 0x3c2240, cloudRim: 0xffd98a,
   windows: 1.6, glass: 0.55, signs: 0.55, lamps: 3.2, pools: 0, carLights: 0,
   exposure: 0.8, bloom: 0.42,
-  shadowTint: [0.86, 1.0, 1.1], highTint: [1.1, 1.0, 0.88], sat: 1.12, wet: 0, rain: 0,
+  shadowTint: [0.86, 1.0, 1.1], highTint: [1.1, 1.0, 0.88], sat: 1.12, wet: 0, rain: 0, snow: 0,
 };
 
 const lerpHex = (a: number, b: number, t: number) => new THREE.Color(a).lerp(new THREE.Color(b), t).getHex();
@@ -118,6 +124,23 @@ export function presetFor(c: Conditions, t = 0): Preset {
   const night = c.time === 'night';
   if (!night) {
     if (c.weather === 'clear') return DUSK;
+    if (c.weather === 'snow') {
+      // 5A: an overcast winter afternoon, the light flat and white, snow falling
+      return {
+        ...DUSK,
+        sky: 'dome',
+        top: 0x7d8794, horizon: 0xc3c9cf, glow: 0x2e2c2a,
+        sunColor: 0xdfe4ea, sunI: 0.95, sunElev: 30, sunAz: -30,
+        hemiSky: 0xd0d8e2, hemiGround: 0x8a8f96, hemiI: 1.45,
+        fog: 0xb9c0c8, fogD: 0.0032, envI: 0.9, envGround: 0x6a6e73,
+        cloud: 0x9aa2ab, cloudO: 1, sunDisc: 0, cover: 1,
+        cloudLit: 0xc8ccd0, cloudDark: 0x5c636b, cloudRim: 0xdfe3e6, ridge: 0xc0c7cf,
+        windows: 1.8, glass: 0.6, signs: 0.7, lamps: 3.8, pools: 0.15, carLights: 0.25,
+        exposure: 0.86, bloom: 0.45,
+        shadowTint: [0.94, 1.0, 1.06], highTint: [0.98, 1.0, 1.04], sat: 0.84,
+        wet: 0.3, rain: 0, snow: 1,
+      };
+    }
     const rain = c.weather === 'rain';
     return {
       ...DUSK,
@@ -161,6 +184,7 @@ export function presetFor(c: Conditions, t = 0): Preset {
   }
   const cloudy = c.weather !== 'clear';
   const rain = c.weather === 'rain';
+  const snow = c.weather === 'snow';
   return {
     ...DUSK,
     sky: 'dome',
@@ -168,8 +192,8 @@ export function presetFor(c: Conditions, t = 0): Preset {
     horizon: cloudy ? (rain ? 0x1d1a18 : 0x2a231d) : 0x101a2c,
     glow: cloudy ? 0x000000 : 0x1c2a44,
     // a cloudy night still has gaps with stars and the moon; rain is one heavy deck
-    stars: rain ? 0 : cloudy ? 0.85 : 1,
-    moon: !rain,
+    stars: rain || snow ? 0 : cloudy ? 0.85 : 1,
+    moon: !rain && !snow,
     sunColor: 0x8ea6ff,
     sunI: cloudy ? 0.12 : 0.42,
     sunElev: 38,
@@ -177,8 +201,8 @@ export function presetFor(c: Conditions, t = 0): Preset {
     hemiSky: cloudy ? 0x3c3a3e : 0x2c3d60,
     hemiGround: 0x0b0907,
     hemiI: cloudy ? 0.45 : 0.5,
-    fog: rain ? 0x0f1215 : cloudy ? 0x16151a : 0x0a111c,
-    fogD: rain ? 0.0026 : cloudy ? 0.0015 : 0.0011,
+    fog: snow ? 0x1e2329 : rain ? 0x0f1215 : cloudy ? 0x16151a : 0x0a111c,
+    fogD: snow ? 0.0024 : rain ? 0.0026 : cloudy ? 0.0015 : 0.0011,
     envI: 0.55,
     envGround: 0x050505,
     envLamps: 1,
@@ -200,9 +224,10 @@ export function presetFor(c: Conditions, t = 0): Preset {
     bloom: 0.62,
     shadowTint: [0.88, 0.98, 1.12],
     highTint: [1.06, 1.0, 0.92],
-    sat: rain ? 0.95 : 1.05,
-    wet: rain ? 1 : 0,
+    sat: rain ? 0.95 : snow ? 0.9 : 1.05,
+    wet: rain ? 1 : snow ? 0.3 : 0,
     rain: rain ? 1 : 0,
+    snow: snow ? 1 : 0,
   };
 }
 
@@ -271,7 +296,14 @@ export class Environment {
         const l = Math.hypot(dx, dz) || 1;
         const out = pole.arm !== undefined ? 3.5 : h.pad ? 7 : 6.5;
         const r = pole.arm !== undefined ? 28 : h.pad ? 34 : 32;
-        m.compose(new THREE.Vector3(h.x + (dx / l) * out, 0.04, h.z + (dz / l) * out), q, new THREE.Vector3(r, 1, r));
+        const px = h.x + (dx / l) * out;
+        const pz = h.z + (dz / l) * out;
+        // 5A: on a slope the pool lies on the road (tilted with it)
+        const g0 = groundHeight(px, pz);
+        const gx = (groundHeight(px + 2, pz) - groundHeight(px - 2, pz)) / 4;
+        const gz = (groundHeight(px, pz + 2) - groundHeight(px, pz - 2)) / 4;
+        q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(-gx, 1, -gz).normalize());
+        m.compose(new THREE.Vector3(px, g0 + 0.04, pz), q, new THREE.Vector3(r, 1, r));
         this.pools.setMatrixAt(i, m);
       });
       this.pools.renderOrder = 6;
@@ -339,7 +371,10 @@ export class Environment {
     this.envSky = new Sky();
     this.envSky.scale.setScalar(9000);
     this.rain = new Rain(scene);
+    this.snow = new Snow(scene);
   }
+  /** 5A: the snow weather's flakes */
+  readonly snow: Snow;
 
   get night(): boolean {
     return this.conditions.time === 'night';
@@ -403,6 +438,11 @@ export class Environment {
   }
   private configureRain(): void {
     const q = this.quality;
+    // 5A: snow falls and lies on the mountain; the cherry petals stop
+    const p = this.p;
+    this.snow.configure(p.snow, this.conditions.time === 'night' ? 0.4 : this.conditions.time === 'dynamic' ? 1 - 0.6 * this.dynT : 1, q);
+    mountainUniforms.uSnowCover.value = p.snow;
+    mountainUniforms.uPetals.value = 1 - p.snow;
     this.rain.configure(WEATHER.rainDrops[q], this.p.rain, this.conditions.time !== 'dusk', WEATHER.rainSplashes[q]);
   }
 
@@ -606,6 +646,8 @@ export class Environment {
     }
     void pxScale;
     this.rain.update(time, cam, this.camVel, player ? player.position.y : cam.y - 1.5);
+    this.snow.setViewport(this.renderer.domElement.height, camera.fov);
+    this.snow.update(time, cam);
 
     // nearest lamp heads to the camera
     const heads = this.world.lampHeads;
@@ -626,7 +668,7 @@ export class Environment {
       }
       const h = heads[n.i];
       l.position.set(h.x, h.y - 0.3, h.z);
-      l.target.position.set(h.x, 0, h.z);
+      l.target.position.set(h.x, groundHeight(h.x, h.z), h.z);
       l.target.updateMatrixWorld();
       // the farthest spot of the set fades as it hands over, so lamps don't pop on and off
       const fade = k === this.lampSpots.length - 1 && near[k + 1] ? Math.min(1, (near[k + 1].d - n.d) / 400) : 1;
@@ -718,7 +760,7 @@ export class Environment {
       const sx = px - ux * len * 0.3;
       const sz = pz - uz * len * 0.3;
       this.tmpQ.setFromAxisAngle(this.tmpV.set(0, 1, 0), Math.atan2(ux, uz));
-      this.tmpM.compose(this.tmpV.set(sx, 0.05, sz), this.tmpQ, this.tmpS.set(width * (1 + dist * 0.012), 1, len));
+      this.tmpM.compose(this.tmpV.set(sx, groundHeight(sx, sz) + 0.05, sz), this.tmpQ, this.tmpS.set(width * (1 + dist * 0.012), 1, len));
       this.streaks.setMatrixAt(n, this.tmpM);
       this.streaks.setColorAt(n, this.tmpC.setRGB(r * fade, g * fade, b * fade));
       n++;

@@ -313,7 +313,7 @@ export class Screens {
       }
       opts.appendChild(o);
     };
-    // 4D: venues — the mountain pass arrives in Phase 5
+    // 4D: venues (5A: the Proving Grounds and Hanagiri Pass)
     row('Venue', VENUES.map((v): Item => [`venue-${v.id}`, v.name, this.h.venueId() === v.id, v.available, () => this.h.switchVenue(v.id), v.available ? undefined : 'Phase 5']));
     row('Laps', [3, 5, 8].map((n): Item => [`laps-${n}`, String(n), s.laps === n, true, () => (s.laps = n)]));
     row('Rivals', (['easy', 'medium', 'hard'] as const).map((d): Item => [`diff-${d}`, d[0].toUpperCase() + d.slice(1), s.difficulty === d, true, () => (s.difficulty = d)]));
@@ -333,6 +333,7 @@ export class Screens {
       ['wx-clear', 'Clear', s.weather === 'clear', true, wx('clear')],
       ['wx-cloudy', 'Cloudy', s.weather === 'cloudy', true, wx('cloudy')],
       ['wx-rain', 'Rain', s.weather === 'rain', true, wx('rain')],
+      ['wx-snow', 'Snow', s.weather === 'snow', true, wx('snow')],
       ['wx-random', 'Random', s.weather === 'random', true, wx('random')],
     ]);
     row('Time', [
@@ -343,9 +344,10 @@ export class Screens {
     $('event-laps').textContent = String(s.laps);
     const t = this.h.trackShape();
     $('event-length').innerHTML = `${(t.length / 1000).toFixed(2)}<small>km</small>`;
-    const avgLap = ({ easy: 77, medium: 72, hard: 68 } as Record<string, number>)[s.difficulty] ?? 72;
+    // a lap of the Proving Grounds (3.26 km) takes about 72 s; scale with the venue's lap
+    const avgLap = (({ easy: 77, medium: 72, hard: 68 } as Record<string, number>)[s.difficulty] ?? 72) * (t.length / 3257);
     $('event-duration').innerHTML = `${Math.max(1, Math.round((avgLap * s.laps) / 60))}<small>min</small>`;
-    const wxLabel = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', random: 'Random weather' }[s.weather];
+    const wxLabel = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', snow: 'Snow', random: 'Random weather' }[s.weather];
     $('event-title').textContent = this.h.eventName();
     $('event-mode').textContent = `${s.raceType === 'pursuit' ? 'Pursuit race' : 'Circuit race'} · ${s.laps} laps · ${wxLabel} · ${s.timeOfDay === 'night' ? 'Night' : s.timeOfDay === 'dynamic' ? 'Dusk to night' : 'Dusk'}`;
     const joinLap = Math.floor(0.4 * s.laps) + 1;
@@ -457,7 +459,7 @@ export class Screens {
     const info = this.h.resultInfo();
     const ord = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
     $('results-title').textContent = `You finished ${ord(info.place)}`;
-    $('results-sub').textContent = `${this.h.eventName()} · Proving Grounds · ${info.laps} laps · ${info.field} cars`;
+    $('results-sub').textContent = `${this.h.eventName()} · ${VENUES.find((v) => v.id === this.h.venueId())?.name ?? 'Proving Grounds'} · ${info.laps} laps · ${info.field} cars`;
     const next = this.h.nextEventName();
     const btn = $('results-next');
     if (btn.hidden !== !next) btn.hidden = !next;
@@ -497,7 +499,7 @@ export class Screens {
         this.h.save();
         this.h.race();
       }, true],
-      ['free', 'Free run', 'The proving grounds, all to yourself', () => this.h.freeRun(), true],
+      ['free', 'Free run', this.h.venueId() === 'hanagiri-pass' ? 'The whole mountain pass, all to yourself' : 'The proving grounds, all to yourself', () => this.h.freeRun(), true],
       ['pursuit', 'Pursuit', 'Police, roadblocks and spike strips', () => {
         this.h.settings.raceType = 'pursuit';
         this.h.save();

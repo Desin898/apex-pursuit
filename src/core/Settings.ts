@@ -31,7 +31,7 @@ export interface Settings {
   // next race (3C)
   laps: number;
   raceType: 'clean' | 'pursuit';
-  weather: 'clear' | 'cloudy' | 'rain' | 'random';
+  weather: 'clear' | 'cloudy' | 'rain' | 'snow' | 'random';
   /** 'dynamic': dusk to night over the race */
   timeOfDay: 'dusk' | 'night' | 'dynamic';
   /** rear-view mirror in the hood and bumper cameras */

@@ -66,6 +66,17 @@ export class RacingLine {
       v[i] = k > 1e-5 ? Math.min(AI.topSpeed, Math.sqrt(AI.cornerGrip / k)) : AI.topSpeed;
       grip[i] = AI.cornerGrip + AI.downforceGain * v[i] * v[i];
     }
+    // 5A: hills. Over a crest the car goes light (and flies past the lift-off speed): plan to take
+    // crests at a speed that keeps the wheels on the road. Braking downhill takes longer, uphill less.
+    const grade = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const y0 = S[(i - 2 + n) % n].y;
+      const y1 = S[i].y;
+      const y2 = S[(i + 2) % n].y;
+      grade[i] = (y2 - y0) / (4 * ds);
+      const kv = -(y2 - 2 * y1 + y0) / (4 * ds * ds); // + over a crest
+      if (kv > 1e-4) v[i] = Math.min(v[i], Math.sqrt((9.81 / kv) * 1.15));
+    }
     // Braking: walk backwards (twice round, so the lap wraps) limiting each point by the next.
     // A tyre that is cornering has less left for braking (friction circle), so the plan finishes
     // most of its braking in a straight line before turn-in instead of deep into the corner.
@@ -73,7 +84,7 @@ export class RacingLine {
       for (let i = n - 1; i >= 0; i--) {
         const next = v[(i + 1) % n];
         const lat = Math.min(1, (next * next * Math.abs(signed[i])) / grip[i]);
-        const decel = AI.brakeDecel * Math.sqrt(Math.max(0.04, 1 - lat * lat));
+        const decel = Math.max(3, AI.brakeDecel * Math.sqrt(Math.max(0.04, 1 - lat * lat)) + 9.81 * grade[i]);
         const lim = Math.sqrt(next * next + 2 * decel * ds);
         if (v[i] > lim) v[i] = lim;
       }

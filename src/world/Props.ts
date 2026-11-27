@@ -1,6 +1,7 @@
 // Knock-over props: traffic cones and barrels. Deliberately simple rigid-ish bodies — they exist
 // to give the car something satisfying to plough through (and the controller something to rumble at).
 import * as THREE from 'three';
+import { groundHeight } from './ground';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { VEHICLE as V } from '../config';
 import { VehicleState } from '../vehicle/VehiclePhysics';
@@ -84,7 +85,7 @@ export class PropSystem {
     const counts = [0, 0];
     for (const s of world.props) {
       const kind = s.kind === 'cone' ? 0 : 1;
-      this.props.push({ kind, slot: counts[kind]++, x: s.x, y: 0, z: s.z, vx: 0, vy: 0, vz: 0, yaw: 0, tilt: 0, yawVel: 0, tiltVel: 0, awake: false, dirty: true, hx: s.x, hz: s.z });
+      this.props.push({ kind, slot: counts[kind]++, x: s.x, y: groundHeight(s.x, s.z), z: s.z, vx: 0, vy: 0, vz: 0, yaw: 0, tilt: 0, yawVel: 0, tiltVel: 0, awake: false, dirty: true, hx: s.x, hz: s.z });
     }
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
     this.meshes = [new THREE.InstancedMesh(coneGeometry(), mat, Math.max(1, counts[0])), new THREE.InstancedMesh(barrelGeometry(), mat, Math.max(1, counts[1]))];
@@ -100,7 +101,7 @@ export class PropSystem {
     for (const p of this.props) {
       p.x = p.hx;
       p.z = p.hz;
-      p.y = 0;
+      p.y = groundHeight(p.hx, p.hz);
       p.vx = p.vy = p.vz = 0;
       p.tilt = p.yaw = p.tiltVel = p.yawVel = 0;
       p.awake = false;
@@ -163,7 +164,7 @@ export class PropSystem {
       p.z += p.vz * dt;
       p.tilt += p.tiltVel * dt;
       p.yaw += p.yawVel * dt;
-      const rest = HALF_H[p.kind] * Math.abs(Math.sin(p.tilt));
+      const rest = groundHeight(p.x, p.z) + HALF_H[p.kind] * Math.abs(Math.sin(p.tilt));
       if (p.y <= rest) {
         p.y = rest;
         if (p.vy < -1.2) {

@@ -210,6 +210,7 @@ class Game {
       },
       cardImages: () => this.cardShots,
     });
+    { const hv = document.getElementById('home-venue'); if (hv) hv.textContent = `${this.world.venue.name} · Phase 5`; }
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.8;
@@ -234,6 +235,7 @@ class Game {
     patchGround(this.visuals.mats.kerb, true);
     for (const m of this.visuals.mats.paved) patchGround(m, true);
     patchGround(this.visuals.mats.ground, false);
+    if (this.world.field) patchGround(this.visuals.mats.terrain, false, 'mtn'); // 5A: far shadows on the mountain
     this.refl.hide.push(this.env.rain.lines);
     this.props = new PropSystem(this.scene, this.world);
     this.particles = new Particles(this.scene);
@@ -486,7 +488,7 @@ class Game {
     const key = `${this.visuals.sunDir.x.toFixed(3)},${this.visuals.sunDir.y.toFixed(3)},${this.visuals.sunDir.z.toFixed(3)}`;
     if (cfg.farShadow && key !== this.bakedFor) {
       this.farShadow ??= new FarShadow();
-      this.farShadow.bake(this.renderer, this.scene, this.visuals.sunDir, WORLD.boundsCenterX, WORLD.boundsCenterZ, WORLD.boundsRadius + 60);
+      this.farShadow.bake(this.renderer, this.scene, this.visuals.sunDir, this.world.bounds.x, this.world.bounds.z, this.world.bounds.r + 60);
       this.bakedFor = key;
     }
   }
@@ -500,7 +502,7 @@ class Game {
     this.pview?.setNight(p.carLights, p.wet);
     const nightK = c.time === 'night' ? 1 : c.time === 'dynamic' ? this.env.dynT : 0;
     groundUniforms.uReflStrength.value = 1 + 0.25 * nightK;
-    const farDay = c.weather === 'rain' ? 0.35 : c.weather === 'cloudy' ? 0.55 : 0.9;
+    const farDay = c.weather === 'rain' ? 0.35 : c.weather === 'cloudy' || c.weather === 'snow' ? 0.55 : 0.9;
     groundUniforms.uFarOn.value = farDay + (0.25 - farDay) * nightK;
     // smoke and spray take the scene's light: sky, sun, and street lamps at night
     const hemi = new THREE.Color(p.hemiSky).multiplyScalar(p.hemiI * 0.75);
@@ -670,7 +672,10 @@ class Game {
     // when the processor is the bottleneck the wet-road mirror refreshes every other frame
     // (it keeps last frame's picture and matrix, so it still lines up: just one frame old)
     this.reflTick = (this.reflTick + 1) % 2;
-    if (this.env.p.wet > 0 && cfg.reflect > 0 && (!this.cpuSaver || this.reflTick === 0)) this.refl.render(this.renderer, this.scene, this.rig.camera);
+    if (this.env.p.wet > 0 && cfg.reflect > 0 && (!this.cpuSaver || this.reflTick === 0)) {
+      this.refl.planeY = this.world.field ? this.world.heightAt(this.race.player.s.x, this.race.player.s.z) : 0;
+      this.refl.render(this.renderer, this.scene, this.rig.camera);
+    }
     const c1 = info.calls;
     const t1 = prof.add('reflect', t0);
     prof.drawCalls('reflect', c1 - c0);
@@ -866,7 +871,7 @@ class Game {
       this.online.requestRestart();
       this.menu.render();
     };
-    const W: Settings['weather'][] = ['clear', 'cloudy', 'rain', 'random'];
+    const W: Settings['weather'][] = ['clear', 'cloudy', 'rain', 'snow', 'random'];
     const T: Settings['timeOfDay'][] = ['dusk', 'night', 'dynamic'];
     const cyc = <X,>(list: X[], cur: X, d: number): X => list[(list.indexOf(cur) + d + list.length) % list.length];
     const cap = (x: string) => x[0].toUpperCase() + x.slice(1);
@@ -1057,7 +1062,7 @@ class Game {
     const label = this.onlineLabel();
     if (label === this.lastOnlineLabel) return;
     this.lastOnlineLabel = label;
-    this.hud.setVenue(this.online.status === 'off' ? 'Proving grounds' : `Online · ${label}`);
+    this.hud.setVenue(this.online.status === 'off' ? this.world.venue.name : `Online · ${label}`);
     if (this.online.status === 'unavailable') {
       this.hud.toast(this.online.failReason || 'Online play could not connect');
       // back to the Online panel with the reason, so they can fix the link or password
@@ -1177,10 +1182,10 @@ class Game {
     const c = this.env.conditions;
     const free = this.mode === 'free';
     const kind = free ? 'free' : this.race.pursuit ? 'pursuit' : 'circuit';
-    const wx = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain' }[c.weather] ?? c.weather;
+    const wx = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', snow: 'Snow' }[c.weather] ?? c.weather;
     const tod = c.time === 'night' ? 'Night' : c.time === 'dynamic' ? 'Dusk to night' : 'Dusk';
     const laps = this.race.targetLaps;
-    const sub = free ? `Proving Grounds · ${wx} · ${tod}` : `${kind === 'pursuit' ? 'Pursuit' : 'Circuit'} · ${laps} laps · ${wx} · ${tod}`;
+    const sub = free ? `${this.world.venue.name} · ${wx} · ${tod}` : `${kind === 'pursuit' ? 'Pursuit' : 'Circuit'} · ${laps} laps · ${wx} · ${tod}`;
     this.hud.setEvent(kind, this.eventName(), sub);
     this.hud.setRacingLine(this.race.line);
     this.boardT = 1;
@@ -1981,7 +1986,8 @@ class Game {
       s.z = P.z;
       s.vx = s.vz = s.speed = s.forwardSpeed = s.sideSlip = s.yawRate = 0;
       s.yaw = 0.6;
-      s.y = s.pitch = s.roll = 0;
+      s.pitch = s.roll = 0;
+      s.y = this.world.heightAt(s.x, s.z);
       s.rpm = 950;
       s.throttle = s.brake = 0;
       s.nitroActive = false;
@@ -2015,7 +2021,7 @@ class Game {
       s.speed = v;
       s.forwardSpeed = v * Math.cos(slip);
       s.sideSlip = -toward * slip;
-      s.y = 0;
+      s.y = this.world.heightAt(nx, nz);
       s.pitch = 0.012;
       s.roll = -toward * 0.035;
       s.steerAngle = -toward * 0.42; // opposite lock
@@ -2573,7 +2579,7 @@ class Game {
       this.smokeTrail -= dt;
       const s = this.race.player.s;
       const n = Math.min(6, Math.round(dt * 40 * Math.min(1, this.smokeTrail)));
-      for (let i = 0; i < n; i++) this.particles.smoke(s.x - Math.sin(s.yaw) * 2.2, 0.6, s.z - Math.cos(s.yaw) * 2.2, s.vx * 0.3, s.vz * 0.3, 0.9);
+      for (let i = 0; i < n; i++) this.particles.smoke(s.x - Math.sin(s.yaw) * 2.2, s.y + 0.6, s.z - Math.cos(s.yaw) * 2.2, s.vx * 0.3, s.vz * 0.3, 0.9);
     }
   }
 

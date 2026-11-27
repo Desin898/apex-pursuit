@@ -10,6 +10,7 @@ import { CAMERA as C } from '../config';
 import { clamp, damp, lerp, smoothstep, wrapAngle } from '../core/math';
 import { VehicleState } from '../vehicle/VehiclePhysics';
 import type { WorldData } from '../world/WorldData';
+import { groundHeight } from '../world/ground';
 
 export const CAMERA_MODES = ['Chase near', 'Chase far', 'Hood', 'Bumper', 'Cockpit', 'Cinematic'] as const;
 export type CameraKind = 'chase-near' | 'chase-far' | 'hood' | 'bumper' | 'cockpit' | 'cinematic';
@@ -203,7 +204,11 @@ export class CameraRig {
       this.pos.x = want.x;
       this.pos.z = want.z;
       this.pos.y = lerp(this.pos.y, want.y, damp(9, dt));
-      if (this.pos.y < 0.35) this.pos.y = 0.35;
+      {
+        // 5A: never below the ground (the land beside a mountain road can rise above the car)
+        const gmin = groundHeight(this.pos.x, this.pos.z) + 0.35;
+        if (this.pos.y < gmin) this.pos.y = gmin;
+      }
       cam.position.copy(this.pos);
       // look slightly ahead of the car, more so at speed
       const ahead = look.back ? -2 : 2.2 + speedN * 3.5;

@@ -140,6 +140,27 @@ function broadleaf(): Species {
   return { geo: mergeGeometries(parts)!, h: 8.6, w: 3.4 };
 }
 
+/** 5A: a cherry tree in full bloom: a short, leaning trunk and a wide, flat crown of blossom */
+function sakura(): Species {
+  const bark = new THREE.Color(0.16, 0.1, 0.08);
+  const parts = [trunk(0.34, 0.2, 2.6, bark, 0.12, 0.3), trunk(0.17, 0.08, 2.6, bark, 0.85, 0.6, 2.0), trunk(0.16, 0.08, 2.4, bark, -0.8, -1.1, 2.2), trunk(0.14, 0.07, 2.2, bark, 0.75, 2.6, 2.4)];
+  const base = new THREE.Color(0.74, 0.46, 0.55);
+  const tip = new THREE.Color(1.0, 0.86, 0.9);
+  const r = rng(303);
+  const centre = new THREE.Vector3(0, 4.4, 0);
+  for (let i = 0; i < 10; i++) {
+    const rad = 1.1 + r() * 0.8;
+    const s = new THREE.IcosahedronGeometry(rad, 1);
+    s.scale(1.25, 0.72, 1.25);
+    const a = r() * Math.PI * 2;
+    const d = i === 0 ? 0 : 1.4 + r() * 1.5;
+    s.translate(Math.cos(a) * d, 4.2 + (r() - 0.4) * 1.4 - d * 0.18, Math.sin(a) * d);
+    jitter(s, 0.6, i * 9 + 4, 0.25);
+    parts.push(foliage(s, centre, base, tip, 2.8, 6.2, i + 40));
+  }
+  return { geo: mergeGeometries(parts)!, h: 7.0, w: 4.4 };
+}
+
 function cypress(): Species {
   const parts = [trunk(0.22, 0.12, 1.6, new THREE.Color(0.18, 0.12, 0.08))];
   const s = new THREE.SphereGeometry(1, 12, 10);
@@ -181,11 +202,15 @@ function windTrees(mat: THREE.MeshStandardMaterial): void {
 }
 
 /** cylindrical billboards: each instance faces the camera, turning about its vertical axis */
+/** 5A: cards standing in for 3D trees vanish within this distance of the camera (the 3D trees are there) */
+export const impostorUniforms = { uNear: { value: 1e9 } };
+
 function impostorMaterial(atlas: THREE.Texture, cells: number): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ map: atlas, alphaTest: 0.42, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
   mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, impostorUniforms);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aCell;\nvarying vec3 vTW;')
+      .replace('#include <common>', '#include <common>\nattribute float aCell;\nattribute float aProxy;\nuniform float uNear;\nvarying vec3 vTW;')
       .replace('#include <uv_vertex>', `#include <uv_vertex>\nvMapUv = vec2((uv.x + aCell) / ${cells.toFixed(1)}, uv.y);`)
       .replace(
         '#include <defaultnormal_vertex>',
@@ -201,7 +226,8 @@ function impostorMaterial(atlas: THREE.Texture, cells: number): THREE.MeshStanda
       )
       .replace(
         '#include <project_vertex>',
-        `vec3 wpB = ipB + rightB * position.x * length(instanceMatrix[0].xyz) + vec3(0.0, position.y * length(instanceMatrix[1].xyz), 0.0);
+        `float showB = (aProxy > 0.5 && length(cameraPosition.xz - ipB.xz) < uNear) ? 0.0 : 1.0;
+        vec3 wpB = ipB + (rightB * position.x * length(instanceMatrix[0].xyz) + vec3(0.0, position.y * length(instanceMatrix[1].xyz), 0.0)) * showB;
         vec4 mvPosition = viewMatrix * vec4(wpB, 1.0);
         gl_Position = projectionMatrix * mvPosition;`,
       )
@@ -354,17 +380,29 @@ export interface VegetationVisuals {
 }
 
 export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRenderer, world: WorldData): VegetationVisuals {
-  const species = [pine(), broadleaf(), cypress()];
+  const species = [pine(), broadleaf(), cypress(), sakura()];
+  // 5A: on a mountain venue everything stands on the height field
+  const F = world.field;
+  const groundY = F ? (x: number, z: number) => F.at(x, z) : terrainHeight;
+  const tint = (c: THREE.Color, k: number, u: () => number) =>
+    k === 3 ? c.setRGB(1, 0.97, 0.98).multiplyScalar(0.85 + u() * 0.25) : c.setHSL(0.27 + (u() - 0.5) * 0.08, 0.35 + u() * 0.3, 0.42 + u() * 0.2).multiplyScalar(1.9);
   const treeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
   windTrees(treeMat);
 
   // ── 3D trees where WorldData put them ──────────────────────────────────────
   const r = rng(9);
   const kinds = world.trees.map((t) => {
+    if (t.k !== undefined) return t.k;
     const u = h3(t.x, 0, t.z, 3);
     return u < 0.55 ? 0 : u < 0.85 ? 1 : 2;
   });
-  const trees = species.map((sp, k) => {
+  // 5A: on the mountain (thousands of trees along 10 km) the 3D trees are grouped in 220 m cells,
+  // each its own instanced mesh, and only the cells near the camera are drawn; further out the same
+  // trees are impostor cards in the forest mesh (see below), so nothing pops.
+  const CELLSZ = 220;
+  const cellMeshes: { mesh: THREE.InstancedMesh; x: number; z: number }[] = [];
+  const proxies: { x: number; y: number; z: number; sc: number; k: number; c: THREE.Color }[] = [];
+  const trees = F ? mountainTrees() : species.map((sp, k) => {
     const list = world.trees.filter((_, i) => kinds[i] === k);
     const im = new THREE.InstancedMesh(sp.geo, treeMat, Math.max(1, list.length));
     im.count = list.length;
@@ -379,9 +417,9 @@ export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRendere
       q.setFromEuler(e.set((r() - 0.5) * 0.06, r() * 6.28, (r() - 0.5) * 0.06));
       const sc = t.s * (1.05 + r() * 0.35);
       s.set(sc * (0.85 + r() * 0.3), sc * (0.9 + r() * 0.3), sc * (0.85 + r() * 0.3));
-      m.compose(v.set(t.x, terrainHeight(t.x, t.z) - 0.15, t.z), q, s);
+      m.compose(v.set(t.x, groundY(t.x, t.z) - 0.15, t.z), q, s);
       im.setMatrixAt(i, m);
-      im.setColorAt(i, c.setHSL(0.27 + (r() - 0.5) * 0.08, 0.35 + r() * 0.3, 0.42 + r() * 0.2).multiplyScalar(1.9));
+      im.setColorAt(i, tint(c, k, r));
     });
     im.castShadow = true;
     im.receiveShadow = true;
@@ -390,14 +428,58 @@ export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRendere
     scene.add(im);
     return im;
   });
+  function mountainTrees(): THREE.InstancedMesh[] {
+    const cells = new Map<number, { x: number; z: number; per: { m: THREE.Matrix4; c: THREE.Color }[][] }>();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const v = new THREE.Vector3();
+    const s = new THREE.Vector3();
+    world.trees.forEach((t, ti) => {
+      const k = kinds[ti];
+      q.setFromEuler(e.set((r() - 0.5) * 0.06, r() * 6.28, (r() - 0.5) * 0.06));
+      const sc = t.s * (1.05 + r() * 0.35);
+      s.set(sc * (0.85 + r() * 0.3), sc * (0.9 + r() * 0.3), sc * (0.85 + r() * 0.3));
+      const y = groundY(t.x, t.z) - 0.15;
+      const m = new THREE.Matrix4().compose(v.set(t.x, y, t.z), q, s);
+      const c = tint(new THREE.Color(), k, r);
+      const ix = Math.floor(t.x / CELLSZ);
+      const iz = Math.floor(t.z / CELLSZ);
+      const key = ix * 100003 + iz;
+      let cell = cells.get(key);
+      if (!cell) cells.set(key, (cell = { x: (ix + 0.5) * CELLSZ, z: (iz + 0.5) * CELLSZ, per: species.map(() => []) }));
+      cell.per[k].push({ m, c });
+      proxies.push({ x: t.x, y, z: t.z, sc: s.y, k, c });
+    });
+    const out: THREE.InstancedMesh[] = [];
+    for (const cell of cells.values()) {
+      cell.per.forEach((list, k) => {
+        if (!list.length) return;
+        const im = new THREE.InstancedMesh(species[k].geo, treeMat, list.length);
+        list.forEach((it, i) => {
+          im.setMatrixAt(i, it.m);
+          im.setColorAt(i, it.c);
+        });
+        im.castShadow = true;
+        im.receiveShadow = true;
+        im.computeBoundingSphere();
+        im.name = 'trees';
+        scene.add(im);
+        out.push(im);
+        cellMeshes.push({ mesh: im, x: cell.x, z: cell.z });
+      });
+    }
+    return out;
+  }
 
   // ── hillside forests (impostors) ──────────────────────────────────────────
   const atlas = bakeImpostors(renderer, species);
-  const MAXF = 14000;
+  const MAXF = (F ? 22000 : 14000) + proxies.length;
   const card = new THREE.PlaneGeometry(1, 1);
   card.translate(0, 0.5, 0);
   const cell = new Float32Array(MAXF);
   card.setAttribute('aCell', new THREE.InstancedBufferAttribute(cell, 1));
+  const proxyA = new Float32Array(MAXF);
+  card.setAttribute('aProxy', new THREE.InstancedBufferAttribute(proxyA, 1));
   const forest = new THREE.InstancedMesh(card, impostorMaterial(atlas.tex, species.length), MAXF);
   {
     const m = new THREE.Matrix4();
@@ -405,7 +487,30 @@ export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRendere
     const fr = rng(31);
     let n = 0;
     let guard = 0;
-    while (n < MAXF && guard++ < 200000) {
+    while (F && n < MAXF && guard++ < 400000) {
+      // 5A: forests over the whole valley, kept back from the road (the 3D trees line it)
+      const x = F.x0 + fr() * (F.nx - 1) * F.cell;
+      const z = F.z0 + fr() * (F.nz - 1) * F.cell;
+      const y = F.at(x, z);
+      if (y > 440) continue;
+      const sl = Math.hypot(F.at(x + 4, z) - y, F.at(x, z + 4) - y) / 4;
+      if (sl > 0.6) continue;
+      if (forestMask(x, z) < 0.42) continue;
+      const hit = world.nearestTrack(x, z);
+      if (hit && Math.abs(hit.offset) < 48) continue;
+      const u = fr();
+      const k = y < 75 ? (u < 0.38 ? 3 : u < 0.62 ? 1 : u < 0.8 ? 2 : 0) : y < 190 ? (u < 0.62 ? 0 : u < 0.9 ? 2 : u < 0.96 ? 3 : 1) : u < 0.85 ? 0 : 2;
+      const sc = k === 3 ? 1.1 + fr() * 0.6 : 1.3 + fr() * 1.0;
+      const f = atlas.frames[k];
+      m.makeScale(f.w * sc, f.h * sc, 1);
+      m.setPosition(x, y - 0.6, z);
+      forest.setMatrixAt(n, m);
+      if (k === 3) forest.setColorAt(n, c.setRGB(1, 0.96, 0.97).multiplyScalar(0.85 + fr() * 0.2));
+      else forest.setColorAt(n, c.setHSL(0.27 + (fr() - 0.5) * 0.06, 0.4, 0.5 + fr() * 0.15).multiplyScalar(2));
+      cell[n] = k;
+      n++;
+    }
+    while (!F && n < MAXF && guard++ < 200000) {
       const a = fr() * Math.PI * 2;
       const d = 1000 + Math.pow(fr(), 0.8) * (TERRAIN.outer - 700 - 1000);
       const x = WORLD.boundsCenterX + Math.cos(a) * d;
@@ -425,7 +530,30 @@ export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRendere
       cell[n] = k;
       n++;
     }
+    // 5A: the roadside 3D trees as cards too, shown only beyond the near radius
+    for (const p of proxies) {
+      if (n >= MAXF) break;
+      const f = atlas.frames[p.k];
+      m.makeScale(f.w * p.sc, f.h * p.sc, 1);
+      m.setPosition(p.x, p.y - 0.1, p.z);
+      forest.setMatrixAt(n, m);
+      forest.setColorAt(n, p.c);
+      cell[n] = p.k;
+      proxyA[n] = 1;
+      n++;
+    }
     forest.count = n;
+  }
+  if (cellMeshes.length) {
+    impostorUniforms.uNear.value = 330;
+    // the near cells of 3D trees follow the camera (decided while the forest draws: one frame late, unseen)
+    const reach = CELLSZ * 0.72;
+    forest.onBeforeRender = (_r, _s, cam) => {
+      const cx = cam.position.x;
+      const cz = cam.position.z;
+      const lim = impostorUniforms.uNear.value + reach;
+      for (const c of cellMeshes) c.mesh.visible = Math.hypot(c.x - cx, c.z - cz) < lim;
+    };
   }
   forest.frustumCulled = false; // spread all around: a bounding sphere would always intersect anyway
   forest.name = 'forest';
@@ -466,10 +594,12 @@ export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRendere
       const hit = world.nearestTrack(x, z);
       if (hit && Math.abs(hit.offset) < hw + 3) continue;
       if (Math.hypot(x - world.pad.x, z - world.pad.z) < world.pad.r + 6) continue;
+      const gyv = F ? F.at(x, z) : 0;
+      if (F && gyv > 135) continue; // 5A: no grass up in the snow
       q.setFromEuler(e.set(0, gr() * 6.28, 0));
       const sc = 0.6 + gr() * 0.9;
       s.set(sc, sc * (0.7 + gr() * 0.6), sc);
-      m.compose(v.set(x, 0, z), q, s);
+      m.compose(v.set(x, gyv, z), q, s);
       grass.setMatrixAt(n, m);
       grass.setColorAt(n, c.setHSL(0.24 + (gr() - 0.5) * 0.05, 0.3, 0.42 + gr() * 0.12).multiplyScalar(1.8));
       n++;
@@ -490,6 +620,7 @@ export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRendere
     grass,
     treeMat,
     setQuality(q: Quality) {
+      if (cellMeshes.length) impostorUniforms.uNear.value = { low: 200, medium: 260, high: 330, ultra: 420 }[q];
       const gk = { low: 0, medium: 0.35, high: 0.7, ultra: 1 }[q];
       const fk = { low: 0.35, medium: 0.6, high: 1, ultra: 1 }[q];
       grass.count = Math.floor(grass.userData.max * gk);

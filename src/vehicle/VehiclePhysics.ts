@@ -488,6 +488,20 @@ export class VehiclePhysics {
     const vFold = vF;
     s.vx += (aF * fx + aL * lx - drag * s.vx) * dt;
     s.vz += (aF * fz + aL * lz - drag * s.vz) * dt;
+    // 5A: gravity along a slope. The ground under the four wheels gives its gradient; the share of
+    // the car's weight that pulls along it slows the climb and speeds the descent (and pulls
+    // sideways on a camber). Zero on the flat Proving Grounds. (Not part of accelF: it causes no
+    // weight transfer, the suspension already sits on the slope.)
+    if (contacts && W.field) {
+      const g = s.wheelGround;
+      const gF = (g[0] + g[1] - g[2] - g[3]) / (2 * WHEELBASE);
+      const gL = (g[0] + g[2] - g[1] - g[3]) / (2 * (WHEEL_X[0] - WHEEL_X[1]));
+      if (gF !== 0 || gL !== 0) {
+        const k = ((G * contacts) / 4) * dt;
+        s.vx -= k * (gF * fx + gL * lx);
+        s.vz -= k * (gF * fz + gL * lz);
+      }
+    }
     s.yawRate += (Mz / V.yawInertia) * dt;
     // 4E: on gravel the car twitches as the stones roll under the tyres
     if (s.onGravel > 0 && speed > 3) s.yawRate += Math.sin(s.x * 0.9 + s.z * 1.3) * Math.sin(this.wob += dt * 17) * V.gravelWobble * 0.9 * s.onGravel * smoothstep(3, 25, speed) * dt;

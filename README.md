@@ -1,7 +1,9 @@
 # Apex Pursuit
 
 Open-world arcade street racer, built in stages from the Phantom X1 concept sketch. **This is
-Phase 4F, smarter police:** squads that box you in, roadblocks with a gap to aim for, a pursuit
+Phase 5A, Hanagiri Pass:** a second venue, a 10 km mountain lap with snow, cherry blossom, torii
+gates, a summit shrine and a new Snow weather. Pursuits, Air One and online play all work there
+(see below). Earlier, **Phase 4F, smarter police:** squads that box you in, roadblocks with a gap to aim for, a pursuit
 bounty, and a search you can hide from; plus searchlight shadows and floodlights that light the
 cars. Before that, **Phase 4E, Air One:** a live police helicopter that chases you from Heat 3 with a real
 searchlight, rotor wash and sound, and drops smoke, spike strips and shock charges; plus gravel
@@ -119,6 +121,72 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
   hosts block Gamepad access inside frames.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
+
+## New in Phase 5A: Hanagiri Pass, a 10 km mountain lap
+
+There's a second venue: **Hanagiri Pass**, a mountain road you lap. Pick it under **Venue** on
+the event card. The Proving Grounds is still the default. The layout came from a mountain-road map
+and was joined into one closed lap using almost every road in it, plus two new link roads. The
+lap is **10.11 km long**, about three times the Proving Grounds circuit, and climbs 163 m. Only the
+shape of the land and roads came from the map: everything you see is drawn by the game, so none of
+its textures, banners or logos are included.
+
+![Layout](docs/5a/layout-map.jpg)
+
+- **The lap.**
+  - It starts in a village on the valley floor, then climbs a long straight to four switchback
+    hairpins.
+  - It runs along the summit ridge past a shrine, about 160 m above the start.
+  - It drops down the far side through fast esses and sweeps round the east valley, then comes back
+    along the village straight.
+  - Grades go up to about 15 %. The tightest hairpin has a 25 m radius.
+  - Cars feel the slopes: gravity pulls them downhill, and the AI brakes earlier going downhill and
+    lifts over crests.
+- **The look.**
+  - The terrain is a real height field (4 m detail, about 3 × 3 km) with three levels of detail.
+  - One GPU shader paints it with grass, cliffs (rock textured from three sides, so it doesn't
+    stretch) and snow. Snow lies above the snow line and on flatter ground.
+  - Cherry petals drift down on the valley floor and gather on the ground.
+  - A paved shoulder runs both sides of the road, with white edge lines and a dashed yellow centre
+    line.
+  - Steel guard rails with reflectors line the drops. Rock faces line the cuttings. Chevron boards
+    stand round the hairpins and red-and-white snow poles up high.
+  - Vermilion torii span the road, and stone lanterns line the summit approach (they light up at
+    night).
+  - Village houses have deep tiled roofs and paper windows that glow at night.
+  - Spectators at the village and the summit jump up as the cars pass.
+  - Mist lies in the low valleys, and far snow-capped ranges surround the whole valley.
+  - Cherry trees, pines and cypresses grow along the road, all moving in the wind. Up close they
+    are 3D, and further out they are image cards. Forests cover the hillsides.
+- **Weather.** Clear, cloudy, rain (with lightning and wet-road reflections) and a new **Snow**
+  weather. In Snow, flakes fall around the camera, snow covers the land, the light goes flat and
+  white, and the road is damp. It works at dusk, at night and dusk-to-night, on either venue.
+- **Everything works the same as on the Proving Grounds.**
+  - Circuit races, free run and the Pursuit: police, roadblocks, spike strips, speed cameras, work
+    zones, breakers, Air One, the bounty and the search all work here.
+  - The AI's racing line, the minimap, the lap timer and ghost, recovery and online play also work.
+    Online, everyone loads the host's venue.
+  - Pursuit distances are 1.4× longer on this bigger map (reinforcements, roadblocks, the search
+    circle).
+  - A hill between you and the police hides you. Air One flies a set height above the land and
+    can't see through ridges.
+  - New hiding spots: the village car park and behind the shrine.
+- **Performance.** The 3D trees are grouped in 220 m blocks, and only the blocks near the camera
+  are drawn. On High, a frame drew about 1.5 M triangles in about 550 draw calls (all passes
+  together), compared with 7.3 M before this change.
+
+| | |
+|---|---|
+| ![Village start at dusk](docs/5a/village-start-dusk.jpg) | ![Summit shrine and torii](docs/5a/summit-shrine-torii.jpg) |
+| ![Hairpins and snow poles](docs/5a/hairpins-snow-poles.jpg) | ![Snow weather](docs/5a/snow-weather.jpg) |
+| ![Night in the village](docs/5a/night-village.jpg) | ![Rain at night](docs/5a/rain-night-reflections.jpg) |
+| ![Venue picker](docs/5a/event-card-venue-picker.jpg) | |
+
+How the map data was made: [`tools/hanagiri/README.md`](tools/hanagiri/README.md).
+
+**Not in this phase:** point-to-point **sprint** and **touge** (one-on-one) races. The race logic is
+still laps only, so Hanagiri runs as a 10 km lap. The frame rate on a real RTX 3050 hasn't been
+measured yet: the pictures and numbers come from a software renderer.
 
 ## New in Phase 4.6: the 911 GT3 RS, as the real thing
 
@@ -1158,10 +1226,13 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
      sync, silent in the menus (done)
    - 4.5. Real cars from car packs: the import tool, car select, own handling, the game's
      materials, cockpit in the model's seat, LODs, online by name with a Phantom X1 stand-in (done)
-   - **4.6. The 911 GT3 RS ships with the game: real engine, gearbox and aero numbers, a flat-six
+   - 4.6. The 911 GT3 RS ships with the game: real engine, gearbox and aero numbers, a flat-six
      voice, factory colours, rivals in it, a middle-distance LOD, its own hood and bumper cameras
-     (this build)**
-   - 5A. Hanagiri Pass, a second venue built from a mountain-road layout (next)
-   - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder
-   - Phase 5: Hanagiri Pass, the mountain venue (sprints and touge battles)
+     (done)
+   - 4H. Garage and career: money from bounties, upgrades, liveries, an event ladder (next)
+5. Phase 5
+   - **5A. Hanagiri Pass: a 10.1 km mountain lap with height-field terrain, snow, cherry blossom,
+     torii, the shrine, the village, guard rails, valley mist, a Snow weather, slope physics, and
+     the pursuit, Air One and online play on the mountain (this build)**
+   - 5B. Sprints and touge battles on Hanagiri (point-to-point races), more mountain events
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

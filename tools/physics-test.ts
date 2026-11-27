@@ -1159,3 +1159,126 @@ import { policeVehicle } from '../src/game/Pursuit';
     check('search and hiding', hid.searching && hid.hiding && !open.hiding && hid.evade > open.evade * 1.3 && hid.maxR > POLICE.searchStart, `in the car park: hiding ${hid.hiding}, Evade ${(hid.evade * 100).toFixed(0)}% in 3 s; out in the open ${(open.evade * 100).toFixed(0)}%; search circle grew to ${hid.maxR.toFixed(0)} m`);
   }
 }
+
+// ── 5A: Hanagiri Pass — the mountain venue (built last: it takes over the shared ground height) ──
+import { HANAGIRI_PASS } from '../src/world/venues';
+{
+  const t0 = Date.now();
+  const hw = new WorldData(HANAGIRI_PASS);
+  const ms = Date.now() - t0;
+  const S = hw.samples;
+  const N = S.length;
+  let ymin = 1e9;
+  let ymax = -1e9;
+  let minApproach = 1e9;
+  for (const s of S) {
+    ymin = Math.min(ymin, s.y);
+    ymax = Math.max(ymax, s.y);
+  }
+  for (let i = 0; i < N; i += 4)
+    for (let j = 0; j < N; j += 4) {
+      const d = Math.abs(i - j);
+      if (Math.min(d, N - d) < 60) continue;
+      minApproach = Math.min(minApproach, Math.hypot(S[i].x - S[j].x, S[i].z - S[j].z));
+    }
+  check('hanagiri: lap', hw.trackLength > 10000 && ymax - ymin > 120 && minApproach > 40, `${(hw.trackLength / 1000).toFixed(2)} km, climbs ${(ymax - ymin).toFixed(0)} m, legs never closer than ${minApproach.toFixed(0)} m, built in ${ms} ms`);
+  // the road surface is exact and meets the land without a step
+  let err = 0;
+  let seam = 0;
+  for (let i = 0; i < N; i += 7) {
+    const s = S[i];
+    for (const o of [-12, -6, 0, 6, 12]) err = Math.max(err, Math.abs(hw.heightAt(s.x + s.nx * o, s.z + s.nz * o) - s.y));
+    for (const sd of [1, -1]) {
+      const o = hw.roadBand;
+      const a = hw.heightAt(s.x + s.nx * (o - 0.01) * sd, s.z + s.nz * (o - 0.01) * sd);
+      const b = hw.heightAt(s.x + s.nx * (o + 0.01) * sd, s.z + s.nz * (o + 0.01) * sd);
+      seam = Math.max(seam, Math.abs(a - b));
+    }
+  }
+  check('hanagiri: road and land', err < 0.01 && seam < 0.1, `road height error ${err.toFixed(3)} m, step at the road band ${seam.toFixed(3)} m`);
+  // a simple robot driver laps it: up the hairpins, over the summit and down
+  {
+    const P = hw.startPose();
+    const c = new VehiclePhysics(hw);
+    c.reset(P.x, P.z, P.yaw);
+    const timer = new LapTimer(hw, 0);
+    let laps = 0;
+    let bad = false;
+    let t = 0;
+    for (t = 0; t < 900 && laps < 1; t += DT) {
+      const hit = hw.nearestTrack(c.s.x, c.s.z);
+      const i = hit ? hit.index : 0;
+      const look = S[(i + Math.round(6 + c.s.speed * 0.45)) % N];
+      let e = Math.atan2(look.x - c.s.x, look.z - c.s.z) - c.s.yaw;
+      e = Math.atan2(Math.sin(e), Math.cos(e));
+      let k = 0;
+      for (let j = 0; j < 70; j++) k = Math.max(k, Math.abs(S[(i + j) % N].curv));
+      const vMax = Math.min(85, Math.sqrt(11 / Math.max(k, 1e-4)));
+      c.step(input({ steer: Math.max(-1, Math.min(1, -e * 3)), throttle: c.s.speed < vMax ? 1 : 0, brake: c.s.speed > vMax + 3 ? 0.9 : 0, analog: true }), DT);
+      c.s.impacts.length = 0;
+      if (!Number.isFinite(c.s.x + c.s.y + c.s.z)) bad = true;
+      timer.update(c.s, DT);
+      if (timer.event) laps++;
+    }
+    check('hanagiri: robot lap', laps === 1 && !bad, `${laps} lap in ${timer.last.toFixed(1)} s, finished at height ${c.s.y.toFixed(1)} m`);
+  }
+  // eight AI cars race a lap, none lost
+  {
+    const race = new Race(hw, Race.soloSpecs(7, defaultLoadout()), 'medium', 0);
+    const b = new AIDriver(hw, race.line, 'clean', AI.levels.medium, 4242);
+    let t = 0;
+    let bad = false;
+    while (t < 700 && Math.min(...race.cars.map((c) => c.lap.laps)) < 1) {
+      b.update(race.player, race.cars, DT, race.held ? -race.countdown : race.time, 0);
+      race.step({ ...race.player.input }, DT);
+      for (const c of race.cars) {
+        c.s.impacts.length = 0;
+        if (!Number.isFinite(c.s.x + c.s.y)) bad = true;
+      }
+      t += DT;
+    }
+    const done = race.cars.filter((c) => c.lap.laps >= 1).length;
+    const best = Math.min(...race.cars.map((c) => c.lap.best));
+    check('hanagiri: AI race', done === 8 && !bad, `${done}/8 finished a lap in ${t.toFixed(0)} s, fastest ${best.toFixed(1)} s`);
+  }
+  // pursuit: the hill between two legs of the road hides you; Air One stays clear of the land
+  {
+    const race = new Race(hw, Race.soloSpecs(0, defaultLoadout()), 'medium', 0);
+    race.targetLaps = 3;
+    const p = race.enablePursuit(23);
+    race.countdown = 0;
+    p.joined = true;
+    p.heat = 2.2;
+    p.air.from = 2;
+    const blocked = (p as unknown as { blocked: (ax: number, az: number, bx: number, bz: number) => boolean }).blocked.bind(p);
+    // find two points on the lap with a ridge between them
+    let ridge = false;
+    for (let i = 0; i < N && !ridge; i += 50)
+      for (let j = i + 200; j < N && !ridge; j += 50) {
+        const a = S[i];
+        const c = S[j];
+        if (Math.hypot(a.x - c.x, a.z - c.z) < 180 && blocked(a.x, a.z, c.x, c.z)) ridge = true;
+      }
+    const b = new AIDriver(hw, race.line, 'clean', AI.levels.hard, 5);
+    let t = 0;
+    let lowest = 1e9;
+    let bad = false;
+    let chased = false;
+    while (t < 70) {
+      const me = race.player;
+      b.update(me, race.cars.concat(p.traffic()), DT, 50, 0);
+      race.step({ ...me.input }, DT);
+      for (const c of race.cars) c.s.impacts.length = 0;
+      if (p.bustedT > 0) p.bustedT = 0.01;
+      p.events.length = 0;
+      t += DT;
+      const h = p.heli;
+      if (h.mode === 'chase') {
+        chased = true;
+        lowest = Math.min(lowest, h.y - hw.field!.at(h.x, h.z));
+      }
+      if (!Number.isFinite(me.s.x + me.s.y + h.y)) bad = true;
+    }
+    check('hanagiri: pursuit', ridge && chased && lowest > 8 && !bad && p.hideSpots.some((h) => h.name === 'village car park'), `ridge blocks sight: ${ridge}; Air One on the chase, never lower than ${lowest.toFixed(0)} m above the land; ${p.hideSpots.length} hiding spots`);
+  }
+}

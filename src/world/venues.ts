@@ -17,8 +17,18 @@ export interface VenueDef {
   blurb: string;
   /** false = shown as "coming" in menus, not selectable yet */
   available: boolean;
-  /** circuit control points (x, z), driven in list order; closed Catch-Rom loop */
-  control: [number, number][];
+  /** circuit control points (x, z) or (x, z, road height), driven in list order; closed Catmull-Rom loop */
+  control: number[][];
+  /** 5A: where the start line goes (the nearest point of the lap); default the PG main straight */
+  start?: [number, number];
+  /** 5A: pursuit distances (reinforcements, roadblocks, the search circle) × this; default 1 */
+  pursuitScale?: number;
+  /** 5A: the play area (centre, radius); default WORLD.boundsCenter/boundsRadius */
+  bounds?: { x: number; z: number; r: number };
+  /** 5A: a mountain venue's land; the Proving Grounds is flat (none) */
+  terrain?: () => import('./hanagiri/terrain').HeightField;
+  /** 5A: which world builder draws it */
+  look?: 'circuit' | 'mountain';
   /** paved areas that are not part of the circuit */
   pad: { x: number; z: number; r: number };
   aprons: { x0: number; z0: number; x1: number; z1: number }[];
@@ -362,7 +372,7 @@ export const PROVING_GROUNDS: VenueDef = {
         for (const b of wd.breakers) if (Math.hypot(b.x - x, b.z - z) < 22) return false;
         for (const t of wd.speedTraps) if (Math.hypot(t.x - x, t.z - z) < 14) return false;
         if (Math.hypot(wd.pad.x - x, wd.pad.z - z) < wd.pad.r + 10) return false;
-        if (Math.hypot(WORLD.boundsCenterX - x, WORLD.boundsCenterZ - z) > WORLD.boundsRadius - 12) return false;
+        if (Math.hypot(wd.bounds.x - x, wd.bounds.z - z) > wd.bounds.r - 12) return false;
         if (z < -226 && z > -246 && x > -340 && x < 230) return false; // the main-straight pit wall has its own row
         // nowhere near another part of the circuit
         for (let k = 0; k < N; k += 3) {
@@ -464,17 +474,9 @@ export const PROVING_GROUNDS: VenueDef = {
     },
 };
 
-// ── Phase 5 (planned): a mountain-pass venue. Listed so menus and online can show it as coming. ──
-export const HANAGIRI_PASS: VenueDef = {
-  id: 'hanagiri-pass',
-  name: 'Hanagiri Pass',
-  blurb: 'Mountain pass · sprints and touge battles · coming in Phase 5',
-  available: false,
-  control: PROVING_GROUNDS.control,
-  pad: PROVING_GROUNDS.pad,
-  aprons: [],
-  facility: () => {},
-};
+// ── 5A: Hanagiri Pass, a 10 km mountain lap (see hanagiri/venue.ts) ──
+import { HANAGIRI_PASS } from './hanagiri/venue';
+export { HANAGIRI_PASS };
 
 export const VENUES: VenueDef[] = [PROVING_GROUNDS, HANAGIRI_PASS];
 

@@ -1,6 +1,7 @@
 // Pooled point-sprite particles: tyre smoke, grass dust, collision sparks. One draw call each
 // for the soft (alpha-blended) and bright (additive) pools.
 import * as THREE from 'three';
+import { groundHeight } from '../world/ground';
 
 const VERT = /* glsl */ `
   attribute float aSize;
@@ -70,6 +71,7 @@ class Pool {
   private grow: Float32Array;
   private alpha0: Float32Array;
   private rgb: Float32Array;
+  private floor: Float32Array;
   private head = 0;
   private mat: THREE.ShaderMaterial;
 
@@ -84,6 +86,7 @@ class Pool {
     this.grow = new Float32Array(n);
     this.alpha0 = new Float32Array(n);
     this.rgb = new Float32Array(n * 3);
+    this.floor = new Float32Array(n);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('aColor', new THREE.BufferAttribute(this.col, 4).setUsage(THREE.DynamicDrawUsage));
@@ -121,6 +124,8 @@ class Pool {
     this.pos[i * 3] = x;
     this.pos[i * 3 + 1] = y;
     this.pos[i * 3 + 2] = z;
+    // 5A: the ground where it was made (they don't travel far): what it bounces off
+    if (this.gravity > 0) this.floor[i] = groundHeight(x, z);
     this.vel[i * 3] = vx;
     this.vel[i * 3 + 1] = vy;
     this.vel[i * 3 + 2] = vz;
@@ -168,8 +173,8 @@ class Pool {
       this.pos[i * 3] += this.vel[i * 3] * dt;
       this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
       this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
-      if (this.gravity > 0 && this.pos[i * 3 + 1] < 0.02) {
-        this.pos[i * 3 + 1] = 0.02;
+      if (this.gravity > 0 && this.pos[i * 3 + 1] < this.floor[i] + 0.02) {
+        this.pos[i * 3 + 1] = this.floor[i] + 0.02;
         this.vel[i * 3 + 1] *= -0.4;
       }
       this.size[i] = this.size0[i] + this.grow[i] * t;
@@ -303,8 +308,9 @@ export class Particles {
     const a = this.rnd() * Math.PI * 2;
     const out = 1.5 + this.rnd() * 3.5;
     const g = 0.88 + this.rnd() * 0.12;
+    const gy = groundHeight(x, z);
     this.cloud.emit(
-      x + r() * 1.2, 0.4 + this.rnd() * 0.6, z + r() * 1.2,
+      x + r() * 1.2, gy + 0.4 + this.rnd() * 0.6, z + r() * 1.2,
       Math.cos(a) * out * spread, 0.5 + this.rnd() * 1.3, Math.sin(a) * out * spread,
       7 + this.rnd() * 4, 2.2 + this.rnd() * 1.2, 12 + this.rnd() * 7,
       red ? 0.95 : g, red ? 0.22 + this.rnd() * 0.08 : g * 0.99, red ? 0.2 : g * 0.97,
@@ -314,15 +320,16 @@ export class Particles {
   /** 4E: a burst of smoke where a shock charge went off */
   blast(x: number, z: number): void {
     const r = () => this.rnd() - 0.5;
+    const gy = groundHeight(x, z);
     for (let i = 0; i < 26; i++) {
       const a = (i / 26) * Math.PI * 2;
       const sp = 4 + this.rnd() * 6;
-      this.cloud.emit(x + r(), 0.3 + this.rnd(), z + r(), Math.cos(a) * sp, 1 + this.rnd() * 3, Math.sin(a) * sp, 2.2 + this.rnd() * 1.6, 1.2, 6 + this.rnd() * 3, 0.5, 0.47, 0.43, 0.6);
+      this.cloud.emit(x + r(), gy + 0.3 + this.rnd(), z + r(), Math.cos(a) * sp, 1 + this.rnd() * 3, Math.sin(a) * sp, 2.2 + this.rnd() * 1.6, 1.2, 6 + this.rnd() * 3, 0.5, 0.47, 0.43, 0.6);
     }
     for (let i = 0; i < 40; i++) {
       const a = this.rnd() * Math.PI * 2;
       const sp = 6 + this.rnd() * 14;
-      this.bright.emit(x, 0.4, z, Math.cos(a) * sp, 3 + this.rnd() * 9, Math.sin(a) * sp, 0.4 + this.rnd() * 0.7, 0.14 + this.rnd() * 0.1, -0.05, 1, 0.65 + this.rnd() * 0.3, 0.25, 3.2);
+      this.bright.emit(x, gy + 0.4, z, Math.cos(a) * sp, 3 + this.rnd() * 9, Math.sin(a) * sp, 0.4 + this.rnd() * 0.7, 0.14 + this.rnd() * 0.1, -0.05, 1, 0.65 + this.rnd() * 0.3, 0.25, 3.2);
     }
   }
   /** 4E: stones and grit flung up by a wheel on gravel */

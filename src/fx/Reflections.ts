@@ -27,17 +27,23 @@ export const groundUniforms = {
   uFarOn: { value: 0 },
   uNearCenter: { value: new THREE.Vector2() },
   uNearRadius: { value: 42 },
+  /** 5A: height of the mirror plane (the road under the player; 0 on the flat venue) */
+  uReflY: { value: 0 },
 };
 
 const patched = new Set<THREE.MeshStandardMaterial>();
 
 /** Teach a ground material (road, kerb, pavement, grass) about wet reflections and far shadows. */
-export function patchGround(mat: THREE.MeshStandardMaterial, reflective: boolean): void {
+export function patchGround(mat: THREE.MeshStandardMaterial, reflective: boolean, tag = ''): void {
   if (patched.has(mat)) return;
   patched.add(mat);
+  // 5A: a material with its own shader (the mountain terrain) keeps it: this patch goes on top
+  const prev = tag ? mat.onBeforeCompile : null;
+  const prevKey = tag ? mat.customProgramCacheKey() : '';
   mat.defines = { ...(mat.defines ?? {}), GROUND_REFL: reflective ? 1 : 0 };
-  mat.customProgramCacheKey = () => `ground-${reflective ? 1 : 0}-${mat.defines?.USE_WET_REFL ? 1 : 0}-${mat.defines?.USE_FAR_SHADOW ? 1 : 0}`;
-  mat.onBeforeCompile = (sh) => {
+  mat.customProgramCacheKey = () => `ground-${tag}${prevKey}-${reflective ? 1 : 0}-${mat.defines?.USE_WET_REFL ? 1 : 0}-${mat.defines?.USE_FAR_SHADOW ? 1 : 0}`;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev.call(mat, sh, r);
     Object.assign(sh.uniforms, groundUniforms);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGroundWorld;')
@@ -49,7 +55,7 @@ export function patchGround(mat: THREE.MeshStandardMaterial, reflective: boolean
         varying vec3 vGroundWorld;
         uniform sampler2D tRefl;
         uniform mat4 uReflMatrix;
-        uniform float uWet, uRain, uReflStrength, uTime, uFarOn, uNearRadius;
+        uniform float uWet, uRain, uReflStrength, uTime, uFarOn, uNearRadius, uReflY;
         uniform sampler2D tFarShadow;
         uniform mat4 uFarMatrix;
         uniform vec2 uNearCenter;
@@ -104,7 +110,7 @@ export function patchGround(mat: THREE.MeshStandardMaterial, reflective: boolean
         `#ifdef USE_WET_REFL
         #if GROUND_REFL == 1
         {
-          vec4 rp = uReflMatrix * vec4(vGroundWorld.x, 0.0, vGroundWorld.z, 1.0);
+          vec4 rp = uReflMatrix * vec4(vGroundWorld.x, uReflY, vGroundWorld.z, 1.0);
           vec2 ruv = rp.xy / rp.w;
           // rain rings on the water film
           vec2 q = vGroundWorld.xz * 2.3;
@@ -154,6 +160,8 @@ export class PlanarReflection {
   private scale = 0.5;
   /** objects not drawn in the mirror (rain streaks, the camera-facing light streaks…) */
   readonly hide: THREE.Object3D[] = [];
+  /** 5A: the mirror plane's height (set each frame to the road under the player) */
+  planeY = 0;
 
   constructor() {
     this.target = new THREE.WebGLRenderTarget(16, 16, { type: THREE.HalfFloatType, depthBuffer: true });
@@ -173,9 +181,10 @@ export class PlanarReflection {
     const cam = this.cam;
     const T = this.tmp;
     const camPos = T.camPos.setFromMatrixPosition(camera.matrixWorld);
-    if (camPos.y <= 0.02) return;
+    if (camPos.y <= this.planeY + 0.02) return;
+    groundUniforms.uReflY.value = this.planeY;
     const normal = T.normal.set(0, 1, 0);
-    const planePoint = T.point.set(0, 0, 0);
+    const planePoint = T.point.set(0, this.planeY, 0);
     // mirrored eye
     const view = T.view.copy(planePoint).sub(camPos).reflect(normal).negate().add(planePoint);
     const rot = T.rot.extractRotation(camera.matrixWorld);

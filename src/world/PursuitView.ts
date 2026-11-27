@@ -15,6 +15,7 @@ import { Helicopter } from '../vehicle/Helicopter';
 import { FlashPattern, PoliceCar } from '../vehicle/PoliceCar';
 import { mergeByMaterial } from '../core/merge';
 import { WorldData } from './WorldData';
+import { groundHeight } from './ground';
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -217,7 +218,7 @@ export class PursuitView {
     sign.emissiveMap = sign.map;
     for (const t of this.world.speedTraps) {
       const grp = new THREE.Group();
-      grp.position.set(t.x, 0, t.z);
+      grp.position.set(t.x, groundHeight(t.x, t.z), t.z);
       grp.rotation.y = t.yaw;
       for (const e of [-hw - 2.6, hw + 2.6]) {
         const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, 7, 0.4), steel);
@@ -285,7 +286,8 @@ export class PursuitView {
       const nz = smp.nz * b.side;
       const grp = new THREE.Group();
       grp.userData.noBake = true; // it falls down: not part of the baked shadow
-      grp.position.set(b.x, 0, b.z);
+      grp.position.set(b.x, groundHeight(b.x, b.z), b.z);
+      grp.userData.y0 = grp.position.y;
       // local +z points at the track (the way it falls); local +x runs along the track
       grp.rotation.y = Math.atan2(-nx, -nz);
       const pivot = new THREE.Group(); // hinge on the track-side bottom edge
@@ -304,7 +306,7 @@ export class PursuitView {
       const mg = new THREE.PlaneGeometry(this.world.halfWidth * 2, 3.2);
       mg.rotateX(-Math.PI / 2);
       const marker = new THREE.Mesh(mg, markMat);
-      marker.position.set(smp.x, 0.05, smp.z);
+      marker.position.set(smp.x, smp.y + 0.05, smp.z);
       marker.rotation.y = Math.atan2(smp.tx, smp.tz) + Math.PI / 2;
       marker.renderOrder = 6;
       marker.visible = false;
@@ -444,7 +446,7 @@ export class PursuitView {
       b.down = false;
       b.fallT = 0;
       b.pivot.rotation.x = 0;
-      b.group.position.y = 0;
+      b.group.position.y = b.group.userData.y0 ?? 0;
       b.group.visible = true;
     }
   }
@@ -508,7 +510,7 @@ export class PursuitView {
       marker = new THREE.Mesh(g.ring, mmat);
       marker.scale.setScalar(3);
     }
-    marker.position.set(d.x, 0.05, d.z);
+    marker.position.set(d.x, groundHeight(d.x, d.z) + 0.05, d.z);
     marker.renderOrder = 7;
     mainOnly(marker);
     this.scene.add(marker);
@@ -530,11 +532,11 @@ export class PursuitView {
       // falling: straight-ish line from the helicopter, accelerating, tumbling
       if (!d.landed) {
         v.obj.visible = d.age >= 0;
-        v.obj.position.set(lerp(d.sx, d.x, u), Math.max(0.12, d.sy * (1 - u * u)), lerp(d.sz, d.z, u));
+        { const gl = groundHeight(d.x, d.z); v.obj.position.set(lerp(d.sx, d.x, u), Math.max(gl + 0.12, gl + (d.sy - gl) * (1 - u * u)), lerp(d.sz, d.z, u)); }
         v.obj.rotation.set(time * 7 + d.id, time * 3, time * 5);
       } else {
         v.obj.visible = d.kind !== 'spikes' && !d.boomed;
-        v.obj.position.set(d.x, d.kind === 'smoke' ? 0.11 : 0, d.z);
+        v.obj.position.set(d.x, groundHeight(d.x, d.z) + (d.kind === 'smoke' ? 0.11 : 0), d.z);
         v.obj.rotation.set(0, d.id, 0);
       }
       // warning marker: blinking, faster as a charge is about to go
@@ -568,8 +570,8 @@ export class PursuitView {
         for (let i = 0; i < 8; i++) this.particles.dust(d.x + (Math.random() - 0.5) * 3, 0, d.z + (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16, 1);
         this.booms.push({ x: d.x, z: d.z });
         this.boomT = 0.35;
-        this.flash.position.set(d.x, 1.2, d.z);
-        if (this.boomLight) this.boomLight.position.set(d.x, 2.5, d.z);
+        this.flash.position.set(d.x, groundHeight(d.x, d.z) + 1.2, d.z);
+        if (this.boomLight) this.boomLight.position.set(d.x, groundHeight(d.x, d.z) + 2.5, d.z);
       }
     }
     for (const [id, v] of this.dropVis) {
@@ -700,7 +702,7 @@ export class PursuitView {
       car.pattern = 'alternate';
       car.root.visible = true;
       // the car's length (local z) lies along the obstacle's long axis
-      car.root.position.set(o.x, 0, o.z);
+      car.root.position.set(o.x, groundHeight(o.x, o.z), o.z);
       car.root.rotation.set(0, Math.atan2(o.ax, o.az), 0);
       return { mesh: car.root, car };
     }
@@ -727,7 +729,7 @@ export class PursuitView {
       mesh = new THREE.Mesh(g.spikes, m.spikes);
       mesh.scale.x = o.hl * 2;
     }
-    mesh.position.set(o.x, 0, o.z);
+    mesh.position.set(o.x, groundHeight(o.x, o.z), o.z);
     mesh.rotation.y = yaw;
     mesh.userData.noBake = true;
     this.scene.add(mesh);
@@ -753,7 +755,7 @@ export class PursuitView {
       } else if (!down && b.down) {
         b.down = false;
         b.pivot.rotation.x = 0;
-        b.group.position.y = 0;
+        b.group.position.y = b.group.userData.y0 ?? 0;
         b.group.visible = true;
       }
       if (b.down) {
@@ -763,11 +765,11 @@ export class PursuitView {
         if (b.fallT > 1.25 && b.fallT < 1.4) {
           for (let i = 0; i < 6; i++) {
             const g = b.group.position;
-            this.particles.dust(g.x + (Math.random() - 0.5) * 10, 0, g.z + (Math.random() - 0.5) * 10, 0, 0, 1);
+            this.particles.dust(g.x + (Math.random() - 0.5) * 10, g.y, g.z + (Math.random() - 0.5) * 10, 0, 0, 1);
           }
         }
         // after a while the wreckage is cleared away
-        if (b.fallT > 7) b.group.position.y = -Math.min(20, (b.fallT - 7) * 3);
+        if (b.fallT > 7) b.group.position.y = (b.group.userData.y0 ?? 0) - Math.min(20, (b.fallT - 7) * 3);
         b.group.visible = b.fallT < 14;
       }
     });
@@ -826,7 +828,7 @@ export class PursuitView {
         mesh.position.z = o.z;
         // a hop, a tumble, then it lies on its side where it stopped
         const hop = Math.max(0, Math.sin(Math.min(1, e.t / 0.55) * Math.PI)) * (o.kind === 'cone' ? 0.9 : 0.6);
-        mesh.position.y = hop;
+        mesh.position.y = groundHeight(o.x, o.z) + hop;
         mesh.rotation.x = Math.min(Math.PI / 2, e.t * Math.abs(e.spin)) * Math.sign(e.spin);
         mesh.rotation.y += e.t < 0.6 ? e.spin * dt * 0.6 : 0;
       }
@@ -876,7 +878,7 @@ export class PursuitView {
         return;
       }
       const r = n.v.root;
-      l.position.set(r.position.x, 2.3, r.position.z);
+      l.position.set(r.position.x, r.position.y + 2.3, r.position.z);
       // one colour at a time: when red and blue are both lit, the light alternates between them
       const g = n.v.glow;
       const both = g.r > 0.05 && g.b > 0.05;

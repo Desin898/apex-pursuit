@@ -166,6 +166,10 @@ export class Pursuit {
   hiding = false;
   /** hiding spots: the pit lane, the car park, behind the grandstands */
   readonly hideSpots: { x: number; z: number; r: number; name: string }[] = [];
+  /** 5A: distances (reinforcements, roadblocks, the search) scale with the venue's size */
+  private get scale(): number {
+    return this.world.venue.pursuitScale ?? 1;
+  }
   private bountyAcc = 0;
   private boxedFor = 0;
   private passedObs = new Set<number>();
@@ -219,6 +223,7 @@ export class Pursuit {
 
   private buildHideSpots(): void {
     const w = this.world;
+    for (const h of w.hides) this.hideSpots.push({ ...h });
     if (w.parked.length) {
       let x = 0;
       let z = 0;
@@ -450,7 +455,7 @@ export class Pursuit {
       const first = this.units.every((o) => !o.active) && this.chaseTime < 1;
       const target = this.nearestHuman(u, humans);
       if (first) this.deploy(u, null, 0);
-      else this.deploy(u, target, POLICE.spawnBehind[0] + this.rand() * (POLICE.spawnBehind[1] - POLICE.spawnBehind[0]));
+      else this.deploy(u, target, (POLICE.spawnBehind[0] + this.rand() * (POLICE.spawnBehind[1] - POLICE.spawnBehind[0])) * this.scale);
       this.deployT = 1.3;
       if (!first && this.radioT > 6) this.radio(`${u.kind === 'rammer' ? 'Heavy unit' : u.kind === 'unmarked' ? 'Unmarked unit' : u.car.name}, joining the pursuit near ${this.sectorName(u.car.trackIndex)}.`);
     }
@@ -843,7 +848,7 @@ export class Pursuit {
   placeRoadblock(target: RaceCar, ahead?: number): boolean {
     const S = this.world.samples;
     const N = S.length;
-    const d = ahead ?? POLICE.roadblockAhead[0] + this.rand() * (POLICE.roadblockAhead[1] - POLICE.roadblockAhead[0]);
+    const d = ahead ?? (POLICE.roadblockAhead[0] + this.rand() * (POLICE.roadblockAhead[1] - POLICE.roadblockAhead[0])) * this.scale;
     let i = (target.trackIndex + Math.round(d / 2)) % N;
     // on a reasonably straight bit, so it can be seen in time
     for (let k = 0; k < 40 && Math.abs(S[i].curv) > 1 / 180; k++) i = (i + 2) % N;
@@ -1119,6 +1124,17 @@ export class Pursuit {
   private blocked(ax: number, az: number, bx: number, bz: number): boolean {
     const segs = this.world.segments;
     const far = Math.hypot(bx - ax, bz - az);
+    // 5A: on a mountain, the hill between two legs of the road hides you
+    const F = this.world.field;
+    if (F && far > 30) {
+      const ay = this.world.heightAt(ax, az) + 1.2;
+      const by = this.world.heightAt(bx, bz) + 1.0;
+      const n = Math.min(24, Math.ceil(far / 8));
+      for (let k = 1; k < n; k++) {
+        const u = k / n;
+        if (F.at(ax + (bx - ax) * u, az + (bz - az) * u) > ay + (by - ay) * u + 0.4) return true;
+      }
+    }
     for (let i = 0; i < segs.length; i++) {
       const sg = segs[i];
       const top = Math.max(sg.top1, sg.top2);
@@ -1217,9 +1233,9 @@ export class Pursuit {
       this.searchR = 0;
       this.searching = false;
     } else {
-      if (!this.searching) this.searchR = POLICE.searchStart;
+      if (!this.searching) this.searchR = POLICE.searchStart * this.scale;
       this.searching = true;
-      this.searchR = Math.min(POLICE.searchMax, this.searchR + POLICE.searchGrow * dt);
+      this.searchR = Math.min(POLICE.searchMax * this.scale, this.searchR + POLICE.searchGrow * this.scale * dt);
     }
     this.hiding = this.hideSpots.some((h) => Math.hypot(s.x - h.x, s.z - h.z) < h.r);
     const outside = this.searching && Math.hypot(s.x - this.lastSeenX, s.z - this.lastSeenZ) > this.searchR;

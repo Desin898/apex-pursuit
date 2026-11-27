@@ -6,6 +6,8 @@
 import { PROVING_GROUNDS, VenueDef } from './venues';
 import { WORLD } from '../config';
 import { rng } from '../core/math';
+import { setGroundHeight } from './ground';
+import type { HeightField } from './hanagiri/terrain';
 
 export const enum Surface {
   Asphalt = 0,
@@ -19,6 +21,8 @@ export const enum Surface {
 export interface TrackSample {
   x: number;
   z: number;
+  /** 5A: road height (0 on the flat Proving Grounds) */
+  y: number;
   /** unit tangent (direction of travel) */
   tx: number;
   tz: number;
@@ -82,6 +86,8 @@ export interface Billboard {
 }
 export interface BarrierRun {
   pts: { x: number; z: number }[];
+  /** 5A: concrete (default), a steel guard rail, or a rock / retaining wall on a cut slope */
+  kind?: 'rail' | 'rock';
 }
 export interface TrackHit {
   index: number;
@@ -121,7 +127,12 @@ export class WorldData {
   pitExitIndex = 0;
   /** where every lamp head is (for night lighting) */
   readonly lampHeads: { x: number; y: number; z: number; pad: boolean }[] = [];
-  readonly trees: { x: number; z: number; s: number }[] = [];
+  /** k (5A): species — 0 pine, 1 broadleaf, 2 cypress, 3 cherry blossom (default: mixed by position) */
+  readonly trees: { x: number; z: number; s: number; k?: number }[] = [];
+  /** 5A: a mountain venue's set dressing: torii gates, lanterns, the shrine, chevrons, snow poles, crowds */
+  readonly decor: { kind: 'torii' | 'lantern' | 'chevron' | 'snowpole' | 'shrine' | 'crowd'; x: number; z: number; yaw: number; s?: number }[] = [];
+  /** 5A: hiding spots the venue adds for the pursuit (on top of the car park, pits and stands) */
+  readonly hides: { x: number; z: number; r: number; name: string }[] = [];
   /** Paved areas that are not part of the circuit (from the venue). */
   readonly pad: { x: number; z: number; r: number };
   readonly aprons: { x0: number; z0: number; x1: number; z1: number }[];
@@ -136,6 +147,13 @@ export class WorldData {
   readonly floodlights: { x: number; z: number; yaw: number; h: number }[] = [];
   /** Start/finish line sits at this sample index. */
   startIndex = 0;
+  /** 5A: a mountain venue's land (null on the flat Proving Grounds) */
+  readonly field: HeightField | null;
+  /** 5A: the play area (centre and radius): fences, trees, the far shadow, the minimap */
+  readonly bounds: { x: number; z: number; r: number };
+  /** 5A: half-width of the band where the ground is the road surface itself (road, kerb, run-off) */
+  readonly roadBand = WORLD.trackHalfWidth + WORLD.kerbWidth + WORLD.runoffWidth + 0.6;
+  private _hh: TrackHit = { index: 0, offset: 0, s: 0 };
 
   private grid = new Map<number, number[]>();
   private segGrid = new Map<number, number[]>();
@@ -145,7 +163,11 @@ export class WorldData {
   constructor(readonly venue: VenueDef = PROVING_GROUNDS) {
     this.pad = { ...venue.pad };
     this.aprons = venue.aprons.map((a) => ({ ...a }));
+    this.field = venue.terrain ? venue.terrain() : null;
+    this.bounds = venue.bounds ?? { x: WORLD.boundsCenterX, z: WORLD.boundsCenterZ, r: WORLD.boundsRadius };
     this.buildTrack();
+    // everything that stands on the ground asks here (flat venue: 0, exactly as before)
+    setGroundHeight(this.field ? (x, z) => this.heightAt(x, z) : () => 0);
     this.buildFacility();
     this.buildColliderGrid();
   }
@@ -155,7 +177,7 @@ export class WorldData {
     // 1. Dense closed Catmull-Rom evaluation
     const CONTROL = this.venue.control;
     const n = CONTROL.length;
-    const dense: [number, number][] = [];
+    const dense: [number, number, number][] = [];
     const SUB = 48;
     for (let i = 0; i < n; i++) {
       const p0 = CONTROL[(i - 1 + n) % n];
@@ -168,7 +190,8 @@ export class WorldData {
         const t3 = t2 * t;
         const cr = (a: number, b: number, c: number, d: number) =>
           0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
-        dense.push([cr(p0[0], p1[0], p2[0], p3[0]), cr(p0[1], p1[1], p2[1], p3[1])]);
+        // (5A: a mountain venue's control points carry the road height as a third value)
+        dense.push([cr(p0[0], p1[0], p2[0], p3[0]), cr(p0[1], p1[1], p2[1], p3[1]), cr(p0[2] ?? 0, p1[2] ?? 0, p2[2] ?? 0, p3[2] ?? 0)]);
       }
     }
     // 2. Arc-length resample at a fixed spacing
@@ -184,14 +207,14 @@ export class WorldData {
     const step = total / count;
     this.trackLength = total;
     let j = 0;
-    const pts: [number, number][] = [];
+    const pts: [number, number, number][] = [];
     for (let i = 0; i < count; i++) {
       const d = i * step;
       while (cum[j + 1] < d) j++;
       const f = (d - cum[j]) / (cum[j + 1] - cum[j]);
       const a = dense[j % m];
       const b = dense[(j + 1) % m];
-      pts.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+      pts.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]);
     }
     // 3. Tangents, normals, curvature
     const headings: number[] = [];
@@ -205,6 +228,7 @@ export class WorldData {
       this.samples.push({
         x: pts[i][0],
         z: pts[i][1],
+        y: pts[i][2],
         tx: tx / len,
         tz: tz / len,
         nx: tz / len,
@@ -229,7 +253,8 @@ export class WorldData {
       this.samples[i].curv = acc / 9;
     }
     // 4. Kerbs: inside of every real corner, both sides of the tight ones
-    for (let i = 0; i < count; i++) {
+    // (5A: a mountain road has a paved shoulder instead)
+    for (let i = 0; i < count && this.venue.look !== 'mountain'; i++) {
       const c = this.samples[i].curv;
       const ac = Math.abs(c);
       if (ac > 1 / 300) {
@@ -252,9 +277,10 @@ export class WorldData {
     // Start/finish: on the main straight
     let best = 0;
     let bd = 1e9;
+    const [sx0, sz0] = this.venue.start ?? [-150, -220];
     for (let i = 0; i < count; i++) {
       const s = this.samples[i];
-      const d = Math.hypot(s.x - -150, s.z - -220);
+      const d = Math.hypot(s.x - sx0, s.z - sz0);
       if (d < bd) {
         bd = d;
         best = i;
@@ -264,7 +290,7 @@ export class WorldData {
   }
 
   /** Nearest point on the circuit centre line. Returns null when further than ~one grid cell away. */
-  nearestTrack(x: number, z: number): TrackHit | null {
+  nearestTrack(x: number, z: number, hit: TrackHit = this._hit): TrackHit | null {
     const ix = Math.floor(x / CELL);
     const iz = Math.floor(z / CELL);
     let best = -1;
@@ -286,7 +312,6 @@ export class WorldData {
     if (best < 0) return null;
     const s = this.samples[best];
     const along = (x - s.x) * s.tx + (z - s.z) * s.tz;
-    const hit = this._hit;
     hit.index = best;
     hit.offset = (x - s.x) * s.nx + (z - s.z) * s.nz;
     hit.s = s.s + along;
@@ -323,8 +348,17 @@ export class WorldData {
     return Surface.Grass;
   }
 
-  /** Ground height. The proving ground is flat; ramps are the only raised surfaces. */
+  /**
+   * Ground height. The proving ground is flat; ramps are the only raised surfaces. On a mountain
+   * venue (5A) the road surface comes exactly from the lap's centre line (level across, so the
+   * car sits flat on it) and the land beyond the run-off from the venue's height field.
+   */
   heightAt(x: number, z: number): number {
+    if (this.field) {
+      const hit = this.nearestTrack(x, z, this._hh);
+      if (hit && Math.abs(hit.offset) <= this.roadBand) return this.roadY(hit.index, x, z);
+      return this.field.at(x, z);
+    }
     let h = 0;
     for (let i = 0; i < this.ramps.length; i++) {
       const r = this.ramps[i];
@@ -341,6 +375,22 @@ export class WorldData {
       if (rh > h) h = rh;
     }
     return h;
+  }
+
+  /** 5A: road height at x, z near sample i (interpolated along the lap). */
+  roadY(i: number, x: number, z: number): number {
+    const S = this.samples;
+    const n = S.length;
+    const s = S[i];
+    const along = (x - s.x) * s.tx + (z - s.z) * s.tz;
+    const o = S[(along >= 0 ? i + 1 : i - 1 + n) % n];
+    const f = Math.min(1, Math.abs(along) / WORLD.sampleSpacing);
+    return s.y + (o.y - s.y) * f;
+  }
+
+  /** 5A: ground height for things that stand on it (0 everywhere on the flat venue). */
+  baseHeight(x: number, z: number): number {
+    return this.field ? this.heightAt(x, z) : 0;
   }
 
   // ── Facility: ramps, buildings, barriers, props ──────────────────────────
@@ -454,6 +504,8 @@ export class WorldData {
     y: number,
     cb: (nx: number, nz: number, pen: number, px: number, pz: number) => void,
   ): void {
+    // 5A: walls and posts are as tall as they are above the ground they stand on
+    if (this.field) y -= this.heightAt(x, z);
     const k = key(Math.floor(x / COL_CELL), Math.floor(z / COL_CELL));
     const segs = this.segGrid.get(k);
     if (segs) {
@@ -501,6 +553,7 @@ export class WorldData {
    * (Phase 4A camera probe). Returns the fraction 0..1 along the line where it is hit, or 1.
    */
   raycastWalls(x0: number, z0: number, x1: number, z1: number, y: number): number {
+    if (this.field) y -= this.heightAt(x0, z0);
     let best = 1;
     const dx = x1 - x0;
     const dz = z1 - z0;

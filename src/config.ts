@@ -378,7 +378,7 @@ export const HUD_FIT = {
 };
 
 /** The event ladder the results screen's "Next event" walks through (invented names only). */
-export const EVENTS: { name: string; type: 'circuit' | 'pursuit'; laps: number; weather: 'clear' | 'cloudy' | 'rain'; time: 'dusk' | 'night' | 'dynamic' }[] = [
+export const EVENTS: { name: string; type: 'circuit' | 'pursuit'; laps: number; weather: 'clear' | 'cloudy' | 'rain' | 'snow'; time: 'dusk' | 'night' | 'dynamic' }[] = [
   { name: 'Neon Mile', type: 'circuit', laps: 3, weather: 'clear', time: 'dusk' },
   { name: 'Wet Asphalt', type: 'circuit', laps: 3, weather: 'rain', time: 'night' },
   { name: 'Blackout Run', type: 'pursuit', laps: 3, weather: 'cloudy', time: 'night' },

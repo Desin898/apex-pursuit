@@ -20,6 +20,7 @@
 import { POLICE } from '../config';
 import { clamp, wrapAngle } from '../core/math';
 import { WorldData } from '../world/WorldData';
+import { groundHeight } from '../world/ground';
 import type { Race, RaceCar } from './Race';
 import type { PursuitEvent } from './Pursuit';
 
@@ -85,6 +86,8 @@ interface Box {
   h: number;
   sn: number;
   cs: number;
+  /** 5A: the ground it stands on */
+  y0: number;
 }
 interface Trunk {
   x: number;
@@ -153,9 +156,13 @@ export class AirOne {
   // ── The world as the pilot sees it ───────────────────────────────────────
   private buildStatic(): void {
     const w = this.world;
-    for (const b of w.buildings) this.boxes.push({ x: b.x, z: b.z, hw: b.w / 2, hd: b.d / 2, h: b.h, sn: Math.sin(b.yaw), cs: Math.cos(b.yaw) });
-    for (const s of w.stands) this.boxes.push({ x: s.x, z: s.z, hw: s.w / 2 + 1.5, hd: s.d / 2 + 1.5, h: 0.6 + s.rows * 0.8 + 5.8, sn: Math.sin(s.yaw), cs: Math.cos(s.yaw) });
-    for (const t of w.trees) this.trunks.push({ x: t.x, z: t.z, r: 2.6 * t.s, y0: 2.2, y1: 9 * t.s + 2 });
+    const G = (x: number, z: number) => (w.field ? w.field.at(x, z) : 0);
+    for (const b of w.buildings) this.boxes.push({ x: b.x, z: b.z, hw: b.w / 2, hd: b.d / 2, h: b.h, sn: Math.sin(b.yaw), cs: Math.cos(b.yaw), y0: G(b.x, b.z) });
+    for (const s of w.stands) this.boxes.push({ x: s.x, z: s.z, hw: s.w / 2 + 1.5, hd: s.d / 2 + 1.5, h: 0.6 + s.rows * 0.8 + 5.8, sn: Math.sin(s.yaw), cs: Math.cos(s.yaw), y0: G(s.x, s.z) });
+    for (const t of w.trees) {
+      const g = G(t.x, t.z);
+      this.trunks.push({ x: t.x, z: t.z, r: 2.6 * t.s, y0: g + 2.2, y1: g + 9 * t.s + 2 });
+    }
     // height map: the lowest it may fly in each 10 m cell (tall things + 6 m)
     let x0 = 1e9;
     let x1 = -1e9;
@@ -172,12 +179,23 @@ export class AirOne {
     this.gnx = Math.ceil((x1 - x0 + 440) / CELL);
     this.gnz = Math.ceil((z1 - z0 + 440) / CELL);
     this.ceil = new Float32Array(this.gnx * this.gnz);
+    // 5A: on a mountain the land itself is the first thing to stay clear of
+    if (w.field) {
+      const F = w.field;
+      for (let k = 0; k < this.gnz; k++)
+        for (let i = 0; i < this.gnx; i++) {
+          const x = this.gx0 + i * CELL;
+          const z = this.gz0 + k * CELL;
+          this.ceil[k * this.gnx + i] = Math.max(F.at(x, z), F.at(x + CELL, z), F.at(x, z + CELL), F.at(x + CELL, z + CELL), F.at(x + CELL / 2, z + CELL / 2)) + 14;
+        }
+    }
     const mark = (x: number, z: number, r: number, h: number) => {
       const i0 = Math.max(0, Math.floor((x - r - this.gx0) / CELL));
       const i1 = Math.min(this.gnx - 1, Math.floor((x + r - this.gx0) / CELL));
       const k0 = Math.max(0, Math.floor((z - r - this.gz0) / CELL));
       const k1 = Math.min(this.gnz - 1, Math.floor((z + r - this.gz0) / CELL));
-      for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) this.ceil[k * this.gnx + i] = Math.max(this.ceil[k * this.gnx + i], h);
+      const hh = h + G(x, z);
+      for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) this.ceil[k * this.gnx + i] = Math.max(this.ceil[k * this.gnx + i], hh);
     };
     for (const b of this.boxes) mark(b.x, b.z, Math.hypot(b.hw, b.hd) + 6, b.h + 6);
     for (const t of this.trunks) mark(t.x, t.z, t.r + 5, t.y1 + 5);
@@ -190,13 +208,21 @@ export class AirOne {
   ceilingAt(x: number, z: number): number {
     const i = Math.floor((x - this.gx0) / CELL);
     const k = Math.floor((z - this.gz0) / CELL);
-    if (i < 0 || k < 0 || i >= this.gnx || k >= this.gnz) return 0;
+    if (i < 0 || k < 0 || i >= this.gnx || k >= this.gnz) return this.world.field ? this.world.field.at(x, z) + 14 : 0;
     return this.ceil[k * this.gnx + i];
   }
 
   /** Is anything between the helicopter (hx, hy, hz) and a car at (tx, tz)? */
   blocked(hx: number, hy: number, hz: number, tx: number, tz: number): boolean {
-    const ty = 1.1;
+    const ty = groundHeight(tx, tz) + 1.1;
+    // 5A: a ridge between them
+    const F = this.world.field;
+    if (F) {
+      for (let k = 1; k < 12; k++) {
+        const u = k / 12;
+        if (F.at(hx + (tx - hx) * u, hz + (tz - hz) * u) > hy + (ty - hy) * u + 0.5) return true;
+      }
+    }
     for (const b of this.boxes) {
       // cheap reject: the box must be near the line on the ground
       const mx = Math.min(hx, tx) - b.hw - b.hd;
@@ -220,7 +246,7 @@ export class AirOne {
         t1 = Math.min(t1, u1);
         return t0 <= t1;
       };
-      if (slab(ax, bx - ax, -b.hw, b.hw) && slab(az, bz - az, -b.hd, b.hd) && slab(hy, ty - hy, 0, b.h) && t1 > 0.001 && t0 < 0.985) return true;
+      if (slab(ax, bx - ax, -b.hw, b.hw) && slab(az, bz - az, -b.hd, b.hd) && slab(hy, ty - hy, b.y0, b.y0 + b.h) && t1 > 0.001 && t0 < 0.985) return true;
     }
     const dx = tx - hx;
     const dz = tz - hz;
@@ -286,7 +312,7 @@ export class AirOne {
     const a = t.s.yaw + Math.PI + (this.rand() - 0.5) * 1.6;
     h.x = t.s.x + Math.sin(a) * 420;
     h.z = t.s.z + Math.cos(a) * 420;
-    h.y = POLICE.heliHeight + 30;
+    h.y = POLICE.heliHeight + 30 + Math.max(groundHeight(h.x, h.z), t.s.y);
     h.vx = h.vz = h.vy = 0;
     h.yaw = Math.atan2(t.s.x - h.x, t.s.z - h.z);
     h.lx = t.s.x;
@@ -343,7 +369,7 @@ export class AirOne {
       gz = h.z + (az / l) * 300;
       gy = 95;
       face = Math.atan2(gx - h.x, gz - h.z);
-      if (l > 900 || h.y > 90) {
+      if (l > 900 || h.y - groundHeight(h.x, h.z) > 90) {
         h.active = false;
         h.mode = 'off';
         h.sees = h.seesTarget = false;
@@ -484,12 +510,14 @@ export class AirOne {
     h.z += h.vz * dt;
     // height: what it wants, never below the height map here or just ahead
     const floor = Math.max(this.ceilingAt(h.x, h.z), this.ceilingAt(h.x + h.vx * 1.5, h.z + h.vz * 1.5), this.ceilingAt(h.x + h.vx * 3, h.z + h.vz * 3));
-    const wantY = Math.max(gy, floor);
+    // 5A: heights are above the ground (the target's road, or the land under it, whichever is higher)
+    const base = this.world.field ? Math.max(groundHeight(h.x, h.z), tg ? tg.s.y : 0) : 0;
+    const wantY = Math.max(gy + base, floor);
     const wvy = clamp((wantY - h.y) * 0.9, -POLICE.heliClimb, POLICE.heliClimb * (h.y < floor ? 2 : 1));
     h.vy += clamp(wvy - h.vy, -dt * 7, dt * 7);
     h.y += h.vy * dt;
     if (h.y < floor - 1) h.y = floor - 1;
-    h.low = clamp((24 - h.y) / 10, 0, 1);
+    h.low = clamp((24 - (h.y - groundHeight(h.x, h.z))) / 10, 0, 1);
     // heading: towards what it watches when slow, along its path when fast
     const sp = Math.hypot(h.vx, h.vz);
     const travel = Math.atan2(h.vx, h.vz);

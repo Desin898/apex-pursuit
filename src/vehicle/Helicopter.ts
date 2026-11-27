@@ -17,6 +17,7 @@
 // speed up, banks into turns, flares to slow and sways a little in wind and rain.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
+import { groundHeight } from '../world/ground';
 import { mainOnly } from '../core/layers';
 import { mergeByMaterial } from '../core/merge';
 
@@ -649,8 +650,9 @@ export class Helicopter {
     this.root.updateMatrixWorld(true);
     const lamp = this.lampPos.set(-0.35, -1.0, 1.6);
     this.body.localToWorld(lamp);
+    const ly = groundHeight(lx, lz); // 5A: where the beam lands (the road or the land under it)
     const dx = lx - lamp.x;
-    const dy = 0 - lamp.y;
+    const dy = ly - lamp.y;
     const dz = lz - lamp.z;
     const len = Math.hypot(dx, dy, dz) || 1;
     this.cone.position.copy(lamp);
@@ -662,7 +664,7 @@ export class Helicopter {
     this.lampMat.emissiveIntensity = 3 + 6 * Math.max(night, 0.3);
     const lit = Math.max(night, this.haze * 0.4, 0.2);
     this.spot.position.copy(lamp);
-    this.spot.target.position.set(lx, 0, lz);
+    this.spot.target.position.set(lx, ly, lz);
     this.spot.target.updateMatrixWorld();
     // 4F: when Air One drops low the beam is close, so it's held to its 30 m brightness
     // instead of burning the car under it white
@@ -691,7 +693,7 @@ export class Helicopter {
     this.pool.visible = !spotOn && show > 0.05;
     if (this.pool.visible) {
       const r = len * spread * 1.05;
-      this.pool.position.set(lx, 0.06, lz);
+      this.pool.position.set(lx, ly + 0.06, lz);
       this.pool.scale.set(r, 1, r);
       const k = 0.9 * show;
       this.poolMat.color.setRGB(k, k * 0.95, k * 0.84);

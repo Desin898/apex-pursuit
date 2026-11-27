@@ -13,6 +13,8 @@ import { WORLD } from '../config';
 import { rng } from '../core/math';
 import * as tex from './textures';
 import { WorldData } from './WorldData';
+import { buildMountainTerrain } from './hanagiri/MountainTerrain';
+import { buildFarRanges, buildMountainRoadside } from './hanagiri/MountainBuild';
 
 export interface WorldVisuals {
   sunDir: THREE.Vector3;
@@ -138,6 +140,9 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
   const hemi = new THREE.HemisphereLight(0xa9c4ff, 0x4d3a26, 0.75);
   scene.add(hemi);
   const mats = {} as WorldVisuals['mats'];
+  // 5A: a mountain venue stands on its height field; the flat venue on y = 0, as before
+  const mountain = world.venue.look === 'mountain' && !!world.field;
+  const gy = (x: number, z: number) => (world.field ? world.field.at(x, z) : 0);
   mats.paved = [];
   mats.buildings = [];
   mats.signs = [];
@@ -161,13 +166,18 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = GROUND_Y - 0.02;
   ground.receiveShadow = true;
-  // 4C: hills and ranges around the circuit
-  {
+  if (mountain) {
+    // 5A: the whole valley is one height field (chunks, three levels of detail)
+    const t = buildMountainTerrain(world, baked.grass, baked.rock);
+    mats.terrain = t.mat;
+    scene.add(t.group);
+  } else {
+    // 4C: hills and ranges around the circuit
     const t = buildTerrain(baked.grass, baked.rock);
     mats.terrain = t.mat;
     scene.add(t.mesh);
+    scene.add(ground);
   }
-  scene.add(ground);
 
   // ── Paved aprons and the skid pad ────────────────────────────────────────
   const concreteMat = (rx: number, rz: number) => {
@@ -194,7 +204,21 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
   pad.position.set(world.pad.x, 0.0, world.pad.z);
   pad.receiveShadow = true;
   pad.renderOrder = 2;
-  scene.add(pad);
+  if (mountain && world.pad.r > 0) {
+    // 5A: the village car park: concrete laid over the land (it follows the ground)
+    const g = new THREE.CircleGeometry(world.pad.r, 48, 0, Math.PI * 2);
+    g.rotateX(-Math.PI / 2);
+    const pa = g.getAttribute('position') as THREE.BufferAttribute;
+    for (let i = 0; i < pa.count; i++) pa.setY(i, gy(pa.getX(i) + world.pad.x, pa.getZ(i) + world.pad.z) + 0.05);
+    g.computeVertexNormals();
+    const uvs = g.getAttribute('uv') as THREE.BufferAttribute;
+    for (let i = 0; i < uvs.count; i++) uvs.setXY(i, pa.getX(i) / 7, pa.getZ(i) / 7);
+    const park = new THREE.Mesh(g, concreteMat(1, 1));
+    park.position.set(world.pad.x, 0, world.pad.z);
+    park.receiveShadow = true;
+    park.renderOrder = 2;
+    scene.add(park);
+  } else if (world.pad.r > 0) scene.add(pad);
 
   // ── Circuit surface ──────────────────────────────────────────────────────
   const S = world.samples;
@@ -206,7 +230,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     const idx: number[] = [];
     for (let i = 0; i <= N; i++) {
       const s = S[i % N];
-      v.push(s.x + s.nx * hw, 0, s.z + s.nz * hw, s.x - s.nx * hw, 0, s.z - s.nz * hw);
+      v.push(s.x + s.nx * hw, s.y, s.z + s.nz * hw, s.x - s.nx * hw, s.y, s.z - s.nz * hw);
       const dist = i * WORLD.sampleSpacing;
       uv.push(0, dist / 14, 1, dist / 14);
       if (i < N) {
@@ -242,10 +266,10 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
         const va = a.s / 3;
         const vb = va + WORLD.sampleSpacing / 3;
         if (side > 0) {
-          v.push(outA[0], 0.035, outA[1], inA[0], 0, inA[1], outB[0], 0.035, outB[1], inB[0], 0, inB[1]);
+          v.push(outA[0], a.y + 0.035, outA[1], inA[0], a.y, inA[1], outB[0], b.y + 0.035, outB[1], inB[0], b.y, inB[1]);
           uv.push(0, va, 1, va, 0, vb, 1, vb);
         } else {
-          v.push(inA[0], 0, inA[1], outA[0], 0.035, outA[1], inB[0], 0, inB[1], outB[0], 0.035, outB[1]);
+          v.push(inA[0], a.y, inA[1], outA[0], a.y + 0.035, outA[1], inB[0], b.y, inB[1], outB[0], b.y + 0.035, outB[1]);
           uv.push(1, va, 0, va, 1, vb, 0, vb);
         }
         idx.push(n, n + 1, n + 2, n + 1, n + 3, n + 2);
@@ -258,8 +282,10 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     );
     kerbs.receiveShadow = true;
     kerbs.renderOrder = 4;
-    scene.add(kerbs);
+    if (n > 0) scene.add(kerbs);
   }
+  // 5A: a mountain road has a paved shoulder, painted lines, guard rails and rock cuttings
+  if (mountain) buildMountainRoadside(scene, world, baked, mats.paved);
   // Start/finish line and grid slots
   {
     const s = S[world.startIndex];
@@ -272,7 +298,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     );
     line.rotation.set(-Math.PI / 2, 0, 0);
     const holder = new THREE.Group();
-    holder.position.set(s.x, 0.002, s.z);
+    holder.position.set(s.x, s.y + 0.002, s.z);
     holder.rotation.y = yaw;
     holder.add(line);
     const slotMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e2, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
@@ -295,7 +321,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     // Gantry over the line
     const steel = new THREE.MeshStandardMaterial({ color: 0x2b2e33, metalness: 0.8, roughness: 0.45 });
     const gantry = new THREE.Group();
-    gantry.position.set(s.x, 0, s.z);
+    gantry.position.set(s.x, s.y, s.z);
     gantry.rotation.y = yaw;
     for (const e of [-hw - 2.6, hw + 2.6]) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 8.4, 0.5), steel);
@@ -327,6 +353,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     const T = 0.28;
     const H = 1.0;
     for (const run of world.barrierRuns) {
+      if (run.kind) continue; // 5A: rails and rock faces are drawn with the mountain roadside
       let dist = 0;
       for (let i = 0; i < run.pts.length; i++) {
         const p = run.pts[i];
@@ -340,7 +367,8 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
         if (i > 0) dist += Math.hypot(p.x - run.pts[i - 1].x, p.z - run.pts[i - 1].z);
         const u = dist / 16; // 4G.2: one 16 m texture (eight panels, each worn differently)
         // cross-section: inner foot, inner top, outer top, outer foot (slightly splayed like a Jersey barrier)
-        v.push(p.x + nx * (T + 0.1), 0, p.z + nz * (T + 0.1), p.x + nx * T * 0.5, H, p.z + nz * T * 0.5, p.x - nx * T * 0.5, H, p.z - nz * T * 0.5, p.x - nx * (T + 0.1), 0, p.z - nz * (T + 0.1));
+        const by = gy(p.x, p.z);
+        v.push(p.x + nx * (T + 0.1), by, p.z + nz * (T + 0.1), p.x + nx * T * 0.5, by + H, p.z + nz * T * 0.5, p.x - nx * T * 0.5, by + H, p.z - nz * T * 0.5, p.x - nx * (T + 0.1), by, p.z - nz * (T + 0.1));
         uv.push(u, 0, u, 0.82, u, 1, u, 0);
         if (i < run.pts.length - 1) {
           for (let k = 0; k < 3; k++) idx.push(n + k, n + k + 4, n + k + 1, n + k + 1, n + k + 4, n + k + 5);
@@ -353,7 +381,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     const barrier = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: withAniso(tex.barrierTexture()), roughness: 0.8, side: THREE.DoubleSide }));
     barrier.castShadow = true;
     barrier.receiveShadow = true;
-    scene.add(barrier);
+    if (v.length) scene.add(barrier);
   }
 
   // ── Ramps ────────────────────────────────────────────────────────────────
@@ -398,7 +426,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
       top.receiveShadow = top.castShadow = true;
       sides.castShadow = true;
       grp.add(top, sides);
-      grp.position.set(r.x, 0.005, r.z);
+      grp.position.set(r.x, gy(r.x, r.z) + 0.005, r.z);
       grp.rotation.y = r.yaw;
       scene.add(grp);
     }
@@ -425,6 +453,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
       mats.buildings.push(mat);
       const grp = new THREE.Group();
       grp.position.set(b.x, 0, b.z);
+      if (mountain) grp.position.y = Math.min(gy(b.x - b.w / 2, b.z - b.d / 2), gy(b.x + b.w / 2, b.z - b.d / 2), gy(b.x - b.w / 2, b.z + b.d / 2), gy(b.x + b.w / 2, b.z + b.d / 2)) - 0.3;
       grp.rotation.y = b.yaw;
       const box = new THREE.Mesh(tiledBox(b.w, b.h, b.d, st.tile, 99), [mat, mat, roofMat, roofMat, mat, mat]);
       box.position.y = b.h / 2;
@@ -487,13 +516,14 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     const q = new THREE.Quaternion();
     let ai = 0;
     world.poles.forEach((p, i) => {
-      m.compose(new THREE.Vector3(p.x, 0, p.z), q.identity(), new THREE.Vector3(1, p.h, 1));
+      const py = gy(p.x, p.z) - (mountain ? 0.3 : 0);
+      m.compose(new THREE.Vector3(p.x, py, p.z), q.identity(), new THREE.Vector3(1, p.h - py + gy(p.x, p.z), 1));
       poles.setMatrixAt(i, m);
       const head = world.lampHeads[i];
       const yaw = Math.atan2(head.x - p.x, head.z - p.z);
       if (p.arm !== undefined) {
         q.setFromEuler(new THREE.Euler(0, yaw, 0));
-        m.compose(new THREE.Vector3(p.x, p.h, p.z), q, new THREE.Vector3(1, 1, p.arm));
+        m.compose(new THREE.Vector3(p.x, p.h + gy(p.x, p.z), p.z), q, new THREE.Vector3(1, 1, p.arm));
         arms.setMatrixAt(ai++, m);
       }
       q.setFromEuler(new THREE.Euler(0, yaw + Math.PI / 2, 0));
@@ -510,7 +540,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     for (const b of world.billboards) {
       const t = withAniso(tex.billboardTexture(b.text, b.sub, b.hue));
       const grp = new THREE.Group();
-      grp.position.set(b.x, 0, b.z);
+      grp.position.set(b.x, gy(b.x, b.z) - (mountain ? 0.4 : 0), b.z);
       grp.rotation.y = b.yaw;
       const panel = new THREE.Mesh(
         new THREE.BoxGeometry(12, 4.9, 0.3),
@@ -538,7 +568,8 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
   mats.trees = veg.treeMat;
 
   // ── Perimeter fence ──────────────────────────────────────────────────────
-  {
+  if (mountain) buildFarRanges(scene, world, sunDir, horizon, mats.ridges);
+  else {
     const ft = tex.fenceTexture();
     ft.repeat.set((Math.PI * 2 * WORLD.boundsRadius) / 3, 1);
     const fence = new THREE.Mesh(
@@ -550,7 +581,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
   }
 
   // ── Distant mountains (two hazy ridgelines) ──────────────────────────────
-  {
+  if (!mountain) {
     const r = rng(1234);
     for (let layer = 0; layer < 2; layer++) {
       const R = 3000 + layer * 900;
