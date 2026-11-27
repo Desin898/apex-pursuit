@@ -1,7 +1,8 @@
 # Apex Pursuit
 
 Open-world arcade street racer, built in stages from the Phantom X1 concept sketch. **This is
-Phase 5B:** sprints and one-on-one touge battles on Hanagiri Pass, snow that lies on the road and
+Phase 5B.1:** 1-, 2- or 3-lap races on Hanagiri Pass with the police joining halfway round lap 1 (or at
+the start of lap 2), tested online with friends. Before that, **Phase 5B:** sprints and one-on-one touge battles on Hanagiri Pass, snow that lies on the road and
 changes the grip, better wet handling, and a fixed ride on the mountain (no more bumps or pulling).
 Before that, **Phase 5A, Hanagiri Pass:** a second venue, a 10 km mountain lap with snow, cherry blossom, torii
 gates, a summit shrine and a new Snow weather. Pursuits, Air One and online play all work there
@@ -123,6 +124,26 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
   hosts block Gamepad access inside frames.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
+
+## New in Phase 5B.1: race length on Hanagiri, and online play there
+
+- **1, 2 or 3 laps on Hanagiri Pass.** A lap there is 10 km, so the circuit's 3/5/8 choices were too
+  long. The event card and the online lobby now offer 1, 2 or 3 laps there; 2 is the default. The
+  Proving Grounds still offers 3, 5 or 8.
+- **Police come in sooner on the long lap.** In a Pursuit race on Hanagiri, speed cameras and work
+  zones go live a quarter of the way round lap 1. The police join **halfway round lap 1** in a 1- or
+  2-lap race, or **at the start of lap 2** in a 3-lap race. The event card and the HUD say when. The
+  Proving Grounds keeps its timing: lap 2 of 3, lap 3 of 5, lap 4 of 8.
+- **Online on Hanagiri is tested.** The online test now runs on either map (`VENUE=hanagiri-pass
+  python3 tools/nettest.py`). On Hanagiri with 2 laps, everything passes:
+  - the lobby, and the host's laps and weather reaching everyone;
+  - the guests racing and seeing the police and Air One;
+  - a laggy friend, a friend dropping out, a friend joining mid-race.
+- **Fix:** when Air One broke off near the Hanagiri village, it vanished in mid-air instead of
+  flying away, because it was removed at a fixed 900 m from the middle of the map. That distance now
+  scales with the map (unchanged on the Proving Grounds).
+
+![Hanagiri laps and police timing](docs/5b1/hanagiri-laps-and-police.jpg)
 
 ## New in Phase 5B: sprints, touge battles, snow grip and a smoother ride
 
@@ -1295,8 +1316,9 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
    - 5A. Hanagiri Pass: a 10.1 km mountain lap with height-field terrain, snow, cherry blossom,
      torii, the shrine, the village, guard rails, valley mist, a Snow weather, slope physics, and
      the pursuit, Air One and online play on the mountain (done)
-   - **5B. Sprints and touge battles on Hanagiri, snow on the road with its own grip, wet
-     handling, the ride and bump-stop fix (this build)**
+   - 5B. Sprints and touge battles on Hanagiri, snow on the road with its own grip, wet
+     handling, the ride and bump-stop fix (done)
+   - **5B.1. 1–3 laps on Hanagiri, police from halfway round lap 1, online tested there (this build)**
    - 5C. Hanagiri, winter edition: an isolated alpine look with distinct areas along the lap,
      realistic snow-laden pines and bushes, natural road snow, realistic landmarks (next)
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

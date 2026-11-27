@@ -34,6 +34,7 @@ import { RaceRoute, Surface, WorldData } from './world/WorldData';
 import { Conditions, Environment, WEATHERS } from './world/Environment';
 import { PursuitView } from './world/PursuitView';
 import { RouteMarks } from './world/RouteMarks';
+import { fitLaps, joinText, lapChoices, pursuitPacing } from './game/pacing';
 import { staticBatch } from './world/StaticBatch';
 import { PhotoMode } from './ui/PhotoMode';
 import { GpuTimer } from './fx/GpuTimer';
@@ -917,7 +918,7 @@ class Game {
           this.menu.render();
         },
       },
-      { label: 'Online: laps', value: () => String(this.race.targetLaps || s.laps), adjust: (d) => (host ? ((s.laps = cyc([3, 5, 8], s.laps, d)), restart()) : ro()) },
+      { label: 'Online: laps', value: () => String(this.race.targetLaps || s.laps), adjust: (d) => (host ? ((s.laps = cyc(lapChoices(this.world.trackLength), fitLaps(this.world.trackLength, s.laps), d)), restart()) : ro()) },
     ];
   }
 
@@ -1311,6 +1312,8 @@ class Game {
     const touge = !!route && s.raceType === 'touge';
     const field = touge ? 1 : s.rivals ? AI.gridSize - 1 : 0;
     const r = new Race(this.world, specs ?? Race.soloSpecs(field, s.loadout), s.difficulty, route ? 0 : s.bestLap, this.aids(), s.steerAssist);
+    // 5B.1: a lap count that suits this venue (1–3 on the 10 km mountain lap, 3–8 on the circuit)
+    s.laps = fitLaps(this.world.trackLength, s.laps);
     r.targetLaps = this.mode === 'free' ? 0 : s.laps;
     if (route) {
       r.setRoute(route);
@@ -2533,10 +2536,9 @@ class Game {
       return;
     }
     const laps = Math.max(1, this.race.targetLaps);
-    const joinLap = Math.floor(POLICE.joinAt * laps) + 1;
     const units = p.units.filter((u) => u.active).length;
     const status = !p.joined
-      ? `${p.trapsLive ? 'Cameras live · ' : ''}Police join on lap ${joinLap}`
+      ? `${p.trapsLive ? 'Cameras live · ' : ''}Police join ${joinText(pursuitPacing(this.world.trackLength, laps))}`
       : p.cooldown > 0
         ? 'Lost you · units searching'
         : `${units} unit${units === 1 ? '' : 's'}${p.obstacles.some((o) => o.group === 'roadblock') ? ' · roadblock' : ''}`;

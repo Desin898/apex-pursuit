@@ -369,7 +369,10 @@ export class AirOne {
       gz = h.z + (az / l) * 300;
       gy = 95;
       face = Math.atan2(gx - h.x, gz - h.z);
-      if (l > 900 || h.y - groundHeight(h.x, h.z) > 90) {
+      // 5B.1: gone once it's well clear of the whole lap (on a big map the start can already be
+      // 900 m from the middle, so a fixed distance made it vanish on the spot)
+      const clear = Math.max(900, Math.hypot(this.gnx * CELL, this.gnz * CELL) / 2 + 60);
+      if (l > clear || h.y - groundHeight(h.x, h.z) > 90) {
         h.active = false;
         h.mode = 'off';
         h.sees = h.seesTarget = false;

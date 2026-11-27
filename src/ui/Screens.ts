@@ -4,6 +4,7 @@
 // DualShock 4 focus. main.ts owns the game; it hands this class a small set of callbacks.
 // ─────────────────────────────────────────────────────────────────────────────
 import { VENUES } from '../world/venues';
+import { fitLaps, joinText, lapChoices, pursuitPacing } from '../game/pacing';
 import { PAINTS } from '../config';
 import { Settings } from '../core/Settings';
 import { formatLap } from '../game/LapTimer';
@@ -335,7 +336,12 @@ export class Screens {
       ['type-touge', 'Touge 1v1', s.raceType === 'touge', routes.length > 0, () => (s.raceType = 'touge'), routes.length ? undefined : 'Mountain'],
     ]);
     if (onRoute && routes.length) row('Route', routes.map((r): Item => [`route-${r.id}`, `${r.name.replace(/^Hanagiri /, '')} · ${(r.len / 1000).toFixed(1)} km`, route === r, true, () => (s.route = r.id)]));
-    else row('Laps', [3, 5, 8].map((n): Item => [`laps-${n}`, String(n), s.laps === n, true, () => (s.laps = n)]));
+    else {
+      // 5B.1: 1–3 laps of a 10 km mountain lap, 3–8 of the circuit
+      const lapLen = this.h.trackShape().length;
+      s.laps = fitLaps(lapLen, s.laps);
+      row('Laps', lapChoices(lapLen).map((n): Item => [`laps-${n}`, String(n), s.laps === n, true, () => (s.laps = n)]));
+    }
     row('Rivals', (['easy', 'medium', 'hard'] as const).map((d): Item => [`diff-${d}`, d[0].toUpperCase() + d.slice(1), s.difficulty === d, true, () => (s.difficulty = d)]));
     const wx = (w: Settings['weather']) => () => {
       s.weather = w;
@@ -372,10 +378,12 @@ export class Screens {
     const kindLabel = s.raceType === 'pursuit' ? 'Pursuit race' : s.raceType === 'sprint' ? 'Sprint' : s.raceType === 'touge' ? 'Touge 1v1' : 'Circuit race';
     const dist = onRoute && route ? route.name.replace(/^Hanagiri /, '') : `${s.laps} laps`;
     $('event-mode').textContent = `${kindLabel} · ${dist} · ${wxLabel} · ${s.timeOfDay === 'night' ? 'Night' : s.timeOfDay === 'dynamic' ? 'Dusk to night' : 'Dusk'}`;
-    const joinLap = Math.floor(0.4 * s.laps) + 1;
+    const pace = pursuitPacing(t.length, s.laps);
     $('event-sub').textContent =
       s.raceType === 'pursuit'
-        ? `Lap 1 clean · cameras and work zones from lap 2 · police from lap ${joinLap}`
+        ? pace.traps < 1
+          ? `Cameras and work zones a quarter of the way round lap 1 · police join ${joinText(pace)}`
+          : `Lap 1 clean · cameras and work zones from lap 2 · police join ${joinText(pace)}`
         : s.raceType === 'touge'
           ? 'One on one, two rounds, roles swap · lead: pull 150 m clear · chase: get past · close at the line: a draw'
           : s.raceType === 'sprint' && route

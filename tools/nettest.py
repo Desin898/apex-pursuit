@@ -1,3 +1,4 @@
+import os
 # Dev helper (4C.2): three players, the way friends at home would play.
 #   Asha hosts (opens the relay's own link), Ben opens the same link, Cara runs the downloaded
 #   single-file game and joins by pasting the link. Pursuit race, rain, dusk, 3 laps.
@@ -11,6 +12,9 @@ import asyncio, json, sys
 from playwright.async_api import async_playwright
 
 RELAY = 'http://localhost:8787/?room=t3'
+# 5B.1: VENUE=hanagiri-pass runs it on the mountain (2 laps of 10 km)
+VENUE = os.environ.get('VENUE', 'proving-grounds')
+LAPS = 2 if VENUE == 'hanagiri-pass' else 3
 FILE = 'http://localhost:8901/index.html'  # stands in for play/ApexPursuit.html (not served by the relay)
 INFO = """(()=>{const g=__apex,o=g.online,r=g.race;return JSON.stringify({st:o.status,host:o.isHost,ph:o.phase,wait:o.waiting,ready:o.ready,
 lobby:o.lobby.map(x=>x.name+(x.host?'*':'')+(x.ready?'+':'')+(x.waiting?'~':'')),kinds:r.cars.map(c=>c.isPlayer?'P':c.remote?(c.netId.startsWith('ai')?'a':'R'):'A').join(''),
@@ -24,7 +28,7 @@ def check(ok, what):
 
 async def player(b, name, extra=None):
     ctx = await b.new_context(viewport={'width': 400, 'height': 240})
-    st = {'quality': 'low', 'qualityChosen': True, 'name': name, 'music': False, 'raceType': 'pursuit', 'weather': 'rain', 'timeOfDay': 'dusk', 'laps': 3, 'rivals': True}
+    st = {'quality': 'low', 'qualityChosen': True, 'name': name, 'music': False, 'raceType': 'pursuit', 'weather': 'rain', 'timeOfDay': 'dusk', 'laps': LAPS, 'rivals': True, 'venue': VENUE}
     if extra: st.update(extra)
     await ctx.add_init_script("try{localStorage.setItem('apex-pursuit-settings-v1', JSON.stringify(%s))}catch(e){}" % json.dumps(st))
     pg = await ctx.new_page()
@@ -70,7 +74,7 @@ async def main():
         a = await info(A); bb = await info(B); c = await info(C); print('   A', a); print('   B', bb); print('   C', c)
         check(len(a['lobby']) == 3 and len(bb['lobby']) == 3 and len(c['lobby']) == 3, 'all three see three players in the lobby')
         check(c['kinds'].count('P') == 1 and c['kinds'].count('R') == 2 and c['kinds'].count('a') == 5, 'Cara: her car, 2 friends, 5 AI (8 on the grid)')
-        check(c['w'] == 'rain' and c['tod'] == 'dusk' and c['laps'] == 3, "Cara gets the host's rain, dusk, 3 laps")
+        check(c['w'] == 'rain' and c['tod'] == 'dusk' and c['laps'] == LAPS, f"Cara gets the host's rain, dusk, {LAPS} laps")
         await B.evaluate("__apex.online.pressStart()")
         await A.wait_for_timeout(1200)
         a = await info(A)
@@ -85,12 +89,13 @@ async def main():
         check(bb['mirror'], "guests see the host's police")
 
         # 4E: Air One: the host flies it and drops a charge; a guest sees both in the same place
-        await A.evaluate("""(()=>{const p=__apex.race.pursuit,me=__apex.race.player,h=p.air.heli;p.joined=true;h.active=true;h.mode='chase';h.x=me.s.x+20;h.z=me.s.z;h.y=30;p.air.dropAhead(me,'charge',1,160);return 1})()""")
+        await A.evaluate("""(()=>{const p=__apex.race.pursuit,me=__apex.race.player,h=p.air.heli;p.joined=true;h.active=true;h.mode='chase';h.x=me.s.x+20;h.z=me.s.z;h.y=30;p.air.dropAhead(me,'charge',1,160);return JSON.stringify({y:me.s.y,hy:h.y,drops:p.air.drops.length})})()""")
         await A.wait_for_timeout(1500)
         ha = json.loads(await A.evaluate("JSON.stringify({h:__apex.race.pursuit.heli.active,d:__apex.race.pursuit.air.drops.map(d=>[d.id,d.x,d.z,d.kind])})"))
         hb = json.loads(await B.evaluate("JSON.stringify({h:__apex.race.pursuit.heli.active,d:__apex.race.pursuit.air.drops.map(d=>[d.id,d.x,d.z,d.kind])})"))
         same = bool(ha['d']) and any(abs(x[1]-y[1]) < 0.2 and abs(x[2]-y[2]) < 0.2 and x[3] == y[3] for x in ha['d'] for y in hb['d'])
-        check(hb['h'] and same, "a guest sees Air One and its drop where the host put it")
+        if not (hb["h"] and same): print("   host", ha, "guest", hb)
+        check(hb["h"] and same, "a guest sees Air One and its drop where the host put it")
 
         # 150 ms extra delay on Ben's outgoing states, like a friend in another city
         await B.evaluate("""(()=>{const ws=__apex.online.transport.ws;const send=ws.send.bind(ws);ws.send=(m)=>setTimeout(()=>{try{send(m)}catch(e){}},150);})()""")

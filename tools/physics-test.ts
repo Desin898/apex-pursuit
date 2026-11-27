@@ -1403,3 +1403,39 @@ import { readFileSync } from 'fs';
     check('5B: touge', m.state === 'over' && race.over && swapped && m.winner !== null, `${m.rounds.length} rounds (${m.rounds.map((x) => `${x.youLed ? 'lead' : 'chase'} → ${x.winner}`).join(', ')}), ${m.score.join('–')}, winner ${m.winner}`);
   }
 }
+
+// ── 5B.1: race length and police timing on the 10 km lap ──
+import { fitLaps, lapChoices, pursuitPacing } from '../src/game/pacing';
+{
+  const hw = new WorldData(HANAGIRI_PASS);
+  const L = hw.trackLength;
+  const rules =
+    lapChoices(L).join(',') === '1,2,3' &&
+    fitLaps(L, 5) === 2 &&
+    pursuitPacing(L, 1).join === 0.5 &&
+    pursuitPacing(L, 2).join === 0.5 &&
+    pursuitPacing(L, 3).join === 1 &&
+    lapChoices(3257).join(',') === '3,5,8' &&
+    pursuitPacing(3257, 3).join === 1 &&
+    pursuitPacing(3257, 5).join === 2 &&
+    pursuitPacing(3257, 3).traps === 1;
+  // a live 2-lap pursuit: cameras a quarter of the way round lap 1, police halfway round lap 1
+  const race = new Race(hw, Race.soloSpecs(3, defaultLoadout()), 'medium', 0);
+  race.targetLaps = 2;
+  const p = race.enablePursuit(31);
+  const b = new AIDriver(hw, race.line, 'clean', AI.levels.hard, 9);
+  let t = 0;
+  let trapsAt = -1;
+  let joinAt = -1;
+  while (t < 400 && joinAt < 0) {
+    b.update(race.player, race.cars, DT, race.held ? -race.countdown : race.time, 0);
+    race.step({ ...race.player.input }, DT);
+    for (const c of race.cars) c.s.impacts.length = 0;
+    p.events.length = 0;
+    const lead = Math.max(...race.cars.map((c) => race.distanceOf(c)));
+    if (trapsAt < 0 && p.trapsLive) trapsAt = lead;
+    if (joinAt < 0 && p.joined) joinAt = lead;
+    t += DT;
+  }
+  check('5B.1: Hanagiri laps and police', rules && Math.abs(trapsAt - 0.25) < 0.02 && Math.abs(joinAt - 0.5) < 0.02, `laps ${lapChoices(L).join('/')} (circuit ${lapChoices(3257).join('/')}); 2 laps: cameras live at lap ${trapsAt.toFixed(2)}, police join at lap ${joinAt.toFixed(2)} (${t.toFixed(0)} s in)`);
+}

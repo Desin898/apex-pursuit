@@ -1,10 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Pursuit — police, Heat and traps for a Pursuit Race (Phase 3C-3).
 //
-// Pacing by share of the race (not fixed laps):
+// Pacing by share of the race (not fixed laps; see game/pacing.ts):
 //   lap 1            clean racing; trap gantries visible but off
 //   from lap 2       speed traps live, work zones narrow the track
 //   from `joinAt`    police leave the pit lane (start of lap 2 of 3, lap 3 of 5, lap 4 of 8)
+//   5B.1: on a 10 km lap: cameras a quarter of the way round lap 1, police halfway round lap 1
+//         (1–2 laps) or at the start of lap 2 (3 laps)
 //   then Heat 1–5    more units, PIT manoeuvres and rolling blocks, roadblocks (3),
 //                    spike strips and rammers (4), the helicopter (5)
 // Heat rises with trap flashes, hitting police, smashing barriers and long chases; it cools
@@ -23,6 +25,7 @@ import { VehiclePhysics } from '../vehicle/VehiclePhysics';
 import type { VehicleParams } from '../vehicle/Cars';
 import { WorldData } from '../world/WorldData';
 import { LapTimer } from './LapTimer';
+import { pursuitPacing } from './pacing';
 import { AirOne, type DropKind, type Heli } from './AirOne';
 export type { Heli, Drop, DropKind } from './AirOne';
 import type { NetCar, Race, RaceCar } from './Race';
@@ -354,17 +357,18 @@ export class Pursuit {
 
     // ── Pacing ──
     if (!this.mirror) {
-      if (!this.trapsLive && lead >= 1) {
+      const pace = pursuitPacing(this.world.trackLength, laps);
+      if (!this.trapsLive && lead >= pace.traps) {
         this.trapsLive = true;
         this.zonesLive = true;
         this.events.push({ type: 'zones' });
-        this.radio('Dispatch: speed cameras are live, and there are road crews out on the circuit.');
+        this.radio(`Dispatch: speed cameras are live, and there are road crews out on the ${this.world.venue.look === 'mountain' ? 'pass' : 'circuit'}.`);
       }
-      if (!this.joined && lead >= Math.floor(POLICE.joinAt * laps) && lead >= 1) {
+      if (!this.joined && lead >= pace.join) {
         this.joined = true;
         this.heat = Math.max(this.heat, 1);
         this.events.push({ type: 'join' });
-        this.radio('All units, suspects on the Proving Grounds circuit. Rolling out of the pit lane now.');
+        this.radio(`All units, suspects on ${this.world.venue.name}. ${this.world.venue.look === 'mountain' ? 'Units moving up the pass now.' : 'Rolling out of the pit lane now.'}`);
         this.deployT = 0;
       }
     }
