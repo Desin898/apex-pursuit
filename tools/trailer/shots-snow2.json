@@ -1,0 +1,85 @@
+{
+ "out": "/tmp/trailer2/rec/snow2",
+ "w": 1600,
+ "h": 900,
+ "settings": {
+  "weather": "snow",
+  "timeOfDay": "dusk",
+  "raceType": "clean",
+  "loadout": {
+   "edition": "gt3rs-jet"
+  }
+ },
+ "setup": "JSON.stringify(__T.skip(45))",
+ "shots": [
+  {
+   "name": "s1",
+   "frames": 64,
+   "cam": {
+    "type": "rel",
+    "back": [
+     3.5,
+     1.0
+    ],
+    "side": 4.6,
+    "up": 0.75,
+    "fov": 44,
+    "ahead": 1.5,
+    "lookUp": 0.6,
+    "yawK": 2.5,
+    "frames": 64
+   },
+   "pre": "JSON.stringify(__T.until(()=>__T.nearest()>16 && __T.turn()>0.2,50))"
+  },
+  {
+   "name": "s2",
+   "frames": 46,
+   "cam": {
+    "type": "road",
+    "ahead": 58,
+    "side": 4.2,
+    "up": 0.45,
+    "fov": [
+     30,
+     38
+    ],
+    "lookUp": 0.5,
+    "frames": 46
+   },
+   "pre": "__T.skip(1);JSON.stringify(__T.until(()=>__T.nearest()>30,30))"
+  },
+  {
+   "name": "s3",
+   "frames": 46,
+   "cam": {
+    "type": "rel",
+    "back": 9,
+    "side": -1,
+    "up": 2.2,
+    "fov": 50,
+    "ahead": 15,
+    "lookUp": 0.6,
+    "frames": 46
+   },
+   "pre": "JSON.stringify(__T.until(()=>__T.rivalAhead()<22,40))"
+  },
+  {
+   "name": "s4",
+   "frames": 38,
+   "cam": {
+    "type": "rel",
+    "back": [
+     -11,
+     -8
+    ],
+    "side": 0.4,
+    "up": 0.9,
+    "fov": 40,
+    "ahead": 0,
+    "lookUp": 0.6,
+    "frames": 38
+   },
+   "pre": "JSON.stringify(__T.until(()=>__T.nearest()>15,20))"
+  }
+ ]
+}

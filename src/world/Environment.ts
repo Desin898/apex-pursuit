@@ -20,6 +20,8 @@ import { SkyDome } from './SkyDome';
 import * as tex from './textures';
 import { WorldVisuals } from './WorldBuilder';
 import { WorldData } from './WorldData';
+import { PetalFall } from './hanagiri/petals';
+import { kmOf, sakuraAt, zoneAtKm } from './hanagiri/zones';
 
 export type Weather = 'clear' | 'cloudy' | 'rain' | 'snow';
 /** 'dynamic' = dusk to night over the race */
@@ -418,6 +420,7 @@ export class Environment {
     this.envSky.scale.setScalar(9000);
     this.rain = new Rain(scene);
     this.snow = new Snow(scene);
+    this.petals = this.world.field ? new PetalFall(scene) : null;
     // 5C: when the winter pano arrives, the Snow weather's reflections switch to it
     winterPano.onReady = () => {
       if (this.p && this.p.snow > 0) this.scene.environment = this.envMap(this.p);
@@ -425,6 +428,8 @@ export class Environment {
   }
   /** 5A: the snow weather's flakes */
   readonly snow: Snow;
+  /** 5D: cherry petals drifting down in the sakura tunnels (Hanagiri) */
+  readonly petals: PetalFall | null;
 
   get night(): boolean {
     return this.conditions.time === 'night';
@@ -734,6 +739,20 @@ export class Environment {
     this.rain.update(time, cam, this.camVel, player ? player.position.y : cam.y - 1.5);
     this.snow.setViewport(this.renderer.domElement.height, camera.fov);
     this.snow.update(time, cam);
+    // 5D: petals falling in the sakura tunnels (and a few round the village), never in the snow
+    if (this.petals) {
+      let amt = 0;
+      if (this.p && this.p.snow <= 0) {
+        const hit = this.world.nearestTrack(cam.x, cam.z);
+        if (hit && Math.abs(hit.offset) < 60) {
+          const km = kmOf(this.world, hit.index);
+          amt = Math.max(sakuraAt(km), zoneAtKm(km).id === 'village' ? 0.18 : 0) * (this.p.rain > 0 ? 0.5 : 1);
+        }
+      }
+      const light = this.conditions.time === 'night' ? 0.35 : this.conditions.time === 'dynamic' ? 1 - 0.6 * this.dynT : 1;
+      this.petals.setViewport(this.renderer.domElement.height, camera.fov);
+      this.petals.update(time, cam, amt, light);
+    }
 
     // nearest lamp heads to the camera
     const heads = this.world.lampHeads;

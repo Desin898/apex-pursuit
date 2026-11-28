@@ -257,7 +257,7 @@ function makeSpecies(): Species[] {
       ],
       h: 1,
       w: 0.5,
-      near: 125,
+      near: 88, // 5D: the heaviest tree (and the tunnels are full of it): its card takes over sooner
       crown: 0.35,
     },
     { parts: [{ geo: partGeo(pine, pp.bare), mat: treeMaterial({ map: bareT, alphaTest: 0.3, side: THREE.DoubleSide }, 'bare', hBare, 0.03 * hBare) }], h: hBare, w: 1.6, near: 300, crown: hBare * 0.3 },
@@ -346,6 +346,8 @@ export function buildMountainTrees(
   {
     const cells = new Map<number, { x: number; z: number; per: THREE.Matrix4[][]; cols: THREE.Color[][] }>();
     const q = new THREE.Quaternion();
+    const qLean = new THREE.Quaternion();
+    const axis = new THREE.Vector3();
     const e = new THREE.Euler();
     const v = new THREE.Vector3();
     const s = new THREE.Vector3();
@@ -355,6 +357,12 @@ export function buildMountainTrees(
       // a lean (more for the young and the bare trees), a random turn and proportions
       const lean = k === 2 || k === 4 ? 0.09 : 0.05;
       q.setFromEuler(e.set((r() - 0.5) * lean, r() * 6.28, (r() - 0.5) * lean));
+      // 5D: the tunnel cherries lean in over the road
+      if (t.lean) {
+        const dx = Math.sin(t.ld ?? 0);
+        const dz = Math.cos(t.ld ?? 0);
+        q.premultiply(qLean.setFromAxisAngle(axis.set(dz, 0, -dx), t.lean));
+      }
       const sc = t.s;
       s.set(sc * (0.85 + r() * 0.3), sc * (0.9 + r() * 0.25), sc * (0.85 + r() * 0.3));
       const y = F.at(t.x, t.z) - 0.12;

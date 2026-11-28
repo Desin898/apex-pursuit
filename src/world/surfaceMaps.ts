@@ -137,3 +137,69 @@ export function buildRoadSnow(samples: number, halfWidth: number, seed = 31): Ui
   }
   return out;
 }
+
+// ── 5D: what the road-snow shader draws, also read by the tyres ─────────────────────────────
+// Black ice and the tongues of blown snow come from this noise, computed the same way on the GPU
+// (ROAD_ICE_GLSL) and here (float32 steps), so the patches you see are the ones you slide on.
+const f32 = Math.fround;
+const fract = (x: number) => f32(x - Math.floor(x));
+function iceHash(x: number, y: number): number {
+  let a = fract(f32(x * 0.1031));
+  let b = fract(f32(y * 0.1031));
+  let c = a;
+  const d = f32(f32(a * f32(b + 33.33)) + f32(b * f32(c + 33.33)) + f32(c * f32(a + 33.33)));
+  a = f32(a + d);
+  b = f32(b + d);
+  c = f32(c + d);
+  return fract(f32(f32(a + b) * c));
+}
+function iceN(x: number, y: number): number {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  let fx = x - ix;
+  let fy = y - iy;
+  fx = fx * fx * (3 - 2 * fx);
+  fy = fy * fy * (3 - 2 * fy);
+  const a = iceHash(ix, iy);
+  const b = iceHash(ix + 1, iy);
+  const c = iceHash(ix, iy + 1);
+  const e = iceHash(ix + 1, iy + 1);
+  return (a + (b - a) * fx) * (1 - fy) + (c + (e - c) * fx) * fy;
+}
+const sstep = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+const WD = [0.82 / Math.hypot(0.82, 0.57), 0.57 / Math.hypot(0.82, 0.57)];
+/** blown snow across the road (0..1) at world x, z; `exposed`: 0..1 how open the ground is */
+export function snowTongue(x: number, z: number, exposed: number): number {
+  const qx = (x * WD[0] + z * WD[1]) * 0.07;
+  const qy = (-x * WD[1] + z * WD[0]) * 0.55;
+  return sstep(0.6, 0.82, iceN(qx, qy) * 0.7 + iceN(qx * 2.3 + 4.1, qy * 2.3 + 4.1) * 0.3) * exposed * 0.85;
+}
+/** black ice (0..1) at world x, z where the snow cover is `r` (0..1, thin snow is where ice forms) */
+export function blackIce(x: number, z: number, r: number): number {
+  return sstep(0.66, 0.8, iceN(x * 0.045, z * 0.045) * 0.75 + iceN(x * 0.21, z * 0.21) * 0.25) * (1 - sstep(0.25, 0.55, r));
+}
+/** how open the road is to the wind at height y (the high ground gets the drifts) */
+export const exposedAt = (y: number) => 0.3 + 0.7 * sstep(95, 140, y);
+export const ROAD_ICE_GLSL = /* glsl */ `
+float iceHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float iceN(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(iceHash(i), iceHash(i + vec2(1.0, 0.0)), f.x), mix(iceHash(i + vec2(0.0, 1.0)), iceHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+`;
+
+/** 5D: the snow bank along the edge of a mountain road's paving: 0..1 of its height at |offset| a */
+export function snowBankAt(a: number, hw: number, edge: number): number {
+  const b0 = hw + 0.6;
+  const b1 = edge + 1.4;
+  if (a <= b0 || a >= b1) return 0;
+  return a < edge ? sstep(b0, edge, a) : 1 - sstep(edge, b1, a);
+}

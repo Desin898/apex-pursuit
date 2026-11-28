@@ -1,0 +1,116 @@
+{
+ "out": "/tmp/trailer2/rec/storm",
+ "w": 1600,
+ "h": 900,
+ "settings": {
+  "weather": "rain",
+  "rainStrength": "downpour",
+  "timeOfDay": "night",
+  "raceType": "pursuit",
+  "lightning": "on",
+  "loadout": {
+   "edition": "gt3rs-jet"
+  },
+  "airSupport": "off"
+ },
+ "setup": "JSON.stringify(__T.skip(10))",
+ "shots": [
+  {
+   "name": "r1",
+   "frames": 46,
+   "cam": {
+    "type": "rel",
+    "back": 6.0,
+    "side": 0.9,
+    "up": 1.0,
+    "fov": 56,
+    "ahead": 12,
+    "lookUp": 0.9,
+    "shake": 1.5,
+    "frames": 46
+   },
+   "pre": "__T.skip(2);__T.callCops(2,26);JSON.stringify(__T.skip(0.6))"
+  },
+  {
+   "name": "r2",
+   "frames": 40,
+   "cam": {
+    "type": "rel",
+    "back": [
+     1.5,
+     0.0
+    ],
+    "side": -4.6,
+    "up": 0.6,
+    "fov": 46,
+    "ahead": 1.5,
+    "lookUp": 0.6,
+    "yawK": 2.5,
+    "frames": 40
+   },
+   "pre": "JSON.stringify(__T.skip(1.5))"
+  },
+  {
+   "name": "r3",
+   "frames": 46,
+   "cam": {
+    "type": "road",
+    "ahead": 60,
+    "side": 6.5,
+    "up": 1.1,
+    "fov": [
+     34,
+     42
+    ],
+    "lookUp": 0.6,
+    "frames": 46
+   },
+   "pre": "JSON.stringify(__T.skip(1.5))"
+  },
+  {
+   "name": "r4",
+   "frames": 64,
+   "cam": {
+    "type": "rel",
+    "back": [
+     -11,
+     -8.5
+    ],
+    "side": 0.6,
+    "up": 1.3,
+    "fov": 46,
+    "ahead": 0,
+    "lookUp": 2.6,
+    "frames": 64
+   },
+   "pre": "__T.callCops(2,22);JSON.stringify(__T.skip(0.4))",
+   "events": {
+    "10": "__T.strike()"
+   }
+  },
+  {
+   "name": "r5",
+   "frames": 52,
+   "cam": {
+    "type": "rel",
+    "back": [
+     16,
+     22
+    ],
+    "side": 2,
+    "up": [
+     5,
+     6.5
+    ],
+    "fov": 52,
+    "ahead": 30,
+    "lookUp": 4,
+    "frames": 52
+   },
+   "pre": "JSON.stringify(__T.skip(1))",
+   "events": {
+    "12": "__T.strike()"
+   }
+  }
+ ]
+}

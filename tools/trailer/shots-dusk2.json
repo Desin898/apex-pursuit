@@ -1,0 +1,66 @@
+{
+ "out": "/tmp/trailer2/rec/dusk2",
+ "w": 1600,
+ "h": 900,
+ "settings": {
+  "weather": "clear",
+  "timeOfDay": "dusk",
+  "raceType": "pursuit",
+  "loadout": {
+   "edition": "gt3rs-jet"
+  },
+  "airSupport": "off"
+ },
+ "setup": "JSON.stringify(__T.skip(25))",
+ "shots": [
+  {
+   "name": "d3",
+   "frames": 46,
+   "cam": {
+    "type": "road",
+    "ahead": 62,
+    "side": -5.5,
+    "up": 1.0,
+    "fov": [
+     34,
+     40
+    ],
+    "lookUp": 0.6,
+    "frames": 46
+   },
+   "pre": "JSON.stringify(__T.skip(1.0))"
+  },
+  {
+   "name": "d4",
+   "frames": 40,
+   "cam": {
+    "type": "rel",
+    "back": 4.4,
+    "side": 0.7,
+    "up": 0.6,
+    "fov": 62,
+    "ahead": 12,
+    "lookUp": 0.9,
+    "shake": 1.2,
+    "frames": 40
+   },
+   "pre": "__T.callCops(2,40);JSON.stringify(__T.skip(1.0))"
+  },
+  {
+   "name": "d5",
+   "frames": 34,
+   "cam": {
+    "type": "rel",
+    "back": 16,
+    "side": -1.5,
+    "up": 2.4,
+    "fov": 48,
+    "ahead": 0,
+    "lookUp": 0.8,
+    "shake": 2.0,
+    "frames": 34
+   },
+   "pre": "__T.callCops(2,14);JSON.stringify(__T.skip(0.3))"
+  }
+ ]
+}

@@ -123,6 +123,8 @@ export class VehicleState {
   airborne = false;
   airTime = 0;
   onGrass = 0; // 0..1 fraction of wheels on grass
+  /** 5D: 0..1 how deep the car is in a snow bank (spray, sound) */
+  inBank = 0;
   onKerb = 0;
   onRunoff = 0;
   /** 4E: 0..1 fraction of wheels on gravel */
@@ -159,7 +161,9 @@ export class VehiclePhysics {
   private cover = [1, 1, 1, 1];
   /** 5B: grip under the front tyres relative to a dry road (sizes the steering lock) */
   private frontK = 1;
-  private rc = { water: 0, snow: 0 };
+  private rc = { water: 0, snow: 0, ice: 0, bank: 0 };
+  /** 5D: how deep in a snow bank each wheel is (0..1) */
+  private bankK = [0, 0, 0, 0];
   /** 5C: ground gradient under each wheel (only sampled when a bump stop is hit) */
   private gx = [0, 0, 0, 0];
   private gz = [0, 0, 0, 0];
@@ -315,16 +319,25 @@ export class VehiclePhysics {
       const surf = W.surfaceAt(wx, wz);
       // 5B: what lies on the road under this wheel: standing water (aquaplaning at speed) and snow
       let gk = 1;
+      let bank = 0;
       if (this.wet > 0 || this.snow > 0) {
+        W.roadCover(wx, wz, this.rc);
         if (surf === Surface.Asphalt) {
-          W.roadCover(wx, wz, this.rc);
-          if (this.snow > 0) gk *= 1 - this.snow * this.rc.snow * (1 - WEATHER.snowGrip);
+          if (this.snow > 0) {
+            gk *= 1 - this.snow * this.rc.snow * (1 - WEATHER.snowGrip);
+            // 5D: black ice under the thin snow: hardly any grip at all
+            if (this.rc.ice > 0) gk *= 1 - this.snow * this.rc.ice * (1 - WEATHER.iceGrip);
+          }
           if (this.wet > 0 && this.rc.water > 0) gk *= 1 - this.wet * this.rc.water * WEATHER.aquaplane * smoothstep(26, 44, speed);
         } else if (this.snow > 0) gk *= 1 - this.snow * (1 - WEATHER.snowGripOffroad);
+        // 5D: the ploughed bank at the edge of the paving is real: the wheel climbs it and ploughs
+        if (this.snow > 0) bank = this.snow * this.rc.bank;
       }
+      this.bankK[i] = bank;
       this.cover[i] = gk;
       // 4E: gravel is lumpy: a little noise in the ground height under each wheel
       let h = W.heightAt(wx, wz) + (surf === Surface.Gravel ? V.gravelWobble * 0.012 * (Math.sin(wx * 3.1 + wz * 1.7) * Math.sin(wz * 2.3 - wx * 0.9) + 0.6) : 0);
+      if (bank > 0) h += bank * WEATHER.bankHeight;
       // 5C: off the road the tyres sink in a little and the ground is lumpy, so the body moves more
       if (W.field && (surf === Surface.Grass || surf === Surface.Gravel)) h += -OFFROAD.sink + OFFROAD.lumps * Math.sin(wx * 1.3 + wz * 0.7) * Math.sin(wz * 1.1 - wx * 0.5);
       const H = s.y + az * s.pitch + ax * s.roll;
@@ -500,7 +513,10 @@ export class VehiclePhysics {
     FbR *= lowSpeedFade;
     const grassFrac = s.onGrass;
     // 4E: gravel bogs the car down; a flat tyre drags (a lower top speed)
-    const rollDecel = V.rollResist * G + grassFrac * (V.grassDragBase + V.grassDragSpeed * speed) + s.onRunoff * 0.25 + s.onGravel * (V.gravelDragBase + V.gravelDragSpeed * speed) + punct * (POLICE.punctureDrag + 0.012 * speed);
+    // 5D: ploughing through a snow bank (the average over the four wheels)
+    const bankDrag = (this.bankK[0] + this.bankK[1] + this.bankK[2] + this.bankK[3]) / 4;
+    s.inBank = bankDrag;
+    const rollDecel = V.rollResist * G + bankDrag * (WEATHER.bankDragBase + WEATHER.bankDragSpeed * speed) + grassFrac * (V.grassDragBase + V.grassDragSpeed * speed) + s.onRunoff * 0.25 + s.onGravel * (V.gravelDragBase + V.gravelDragSpeed * speed) + punct * (POLICE.punctureDrag + 0.012 * speed);
     const Froll = contacts ? rollDecel * V.mass * lowSpeedFade : 0;
 
     const FxR = (s.gear === -1 ? -Fdrive : Fdrive) - dir * FbR - dir * Froll;

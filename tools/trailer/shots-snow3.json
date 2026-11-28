@@ -1,0 +1,33 @@
+{
+ "out": "/tmp/trailer2/rec/snow3",
+ "w": 1600,
+ "h": 900,
+ "settings": {
+  "weather": "snow",
+  "timeOfDay": "dusk",
+  "raceType": "clean",
+  "loadout": {
+   "edition": "gt3rs-jet"
+  }
+ },
+ "setup": "JSON.stringify(__T.skip(45))",
+ "shots": [
+  {
+   "name": "s2",
+   "frames": 46,
+   "cam": {
+    "type": "road",
+    "ahead": 58,
+    "side": 4.2,
+    "up": 0.45,
+    "fov": [
+     30,
+     38
+    ],
+    "lookUp": 0.5,
+    "frames": 46
+   },
+   "pre": "__T.skip(1);JSON.stringify(__T.until(()=>__T.nearest()>30,30))"
+  }
+ ]
+}

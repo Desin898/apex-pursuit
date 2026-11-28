@@ -9,6 +9,7 @@
 // Original art only: no textures, banners or logos from the layout the map was traced from.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
+import { signBlank } from '../props5D';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { rng } from '../../core/math';
 import { mainOnly } from '../../core/layers';
@@ -179,7 +180,11 @@ export function buildHanagiriDressing(ctx: DressingContext): Dressing {
     ctx.signs.push(boardMat);
     const geo = new THREE.PlaneGeometry(1.5, 1.1);
     const fwd = new THREE.InstancedMesh(geo, boardMat, Math.max(1, list.length));
-    const post = new THREE.InstancedMesh(box, new THREE.MeshStandardMaterial({ color: 0x5a5d61, metalness: 0.5, roughness: 0.5 }), Math.max(1, list.length * 2));
+    // 5D: round galvanised posts, and the sign blank's folded aluminium back
+    const galv = new THREE.MeshStandardMaterial({ color: 0xa4a9ae, metalness: 0.7, roughness: 0.4 });
+    const post = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.5, 1, 8), galv, Math.max(1, list.length * 2));
+    const back = new THREE.InstancedMesh(signBlank(1.5, 1.1), new THREE.MeshStandardMaterial({ color: 0x8e9398, metalness: 0.6, roughness: 0.45 }), Math.max(1, list.length));
+    back.count = list.length;
     let pi = 0;
     list.forEach((d, i) => {
       const y = gy(d.x, d.z);
@@ -189,11 +194,12 @@ export function buildHanagiriDressing(ctx: DressingContext): Dressing {
       const xl = [Math.cos(d.yaw), -Math.sin(d.yaw)];
       const flip = s ? xl[0] * s.tx + xl[1] * s.tz < 0 : false;
       fwd.setMatrixAt(i, at(d.x, y + 1.6, d.z, d.yaw, 0, 0, 0, flip ? -1 : 1, 1, 1));
+      back.setMatrixAt(i, at(d.x, y + 1.6, d.z, d.yaw, 0, 0, -0.004));
       for (const e of [-0.6, 0.6]) post.setMatrixAt(pi++, at(d.x, y + 0.8, d.z, d.yaw, e, 0, -0.05, 0.08, 1.6, 0.08));
     });
     fwd.count = list.length;
     post.count = pi;
-    for (const m of [fwd, post]) {
+    for (const m of [fwd, post, back]) {
       m.castShadow = true;
       m.computeBoundingSphere();
       scene.add(m);

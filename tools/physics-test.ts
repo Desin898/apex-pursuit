@@ -1354,7 +1354,7 @@ import { readFileSync } from 'fs';
   check('5B: snow is slower than wet, wet than dry', +laps[0] < +laps[1] && +laps[1] < +laps[2], laps.join(' < '));
   // road cover: snow lies on the road with clearer wheel tracks; puddles exist
   {
-    const rc = { water: 0, snow: 0 };
+    const rc = { water: 0, snow: 0, ice: 0, bank: 0 };
     let tracks = 0;
     let mid = 0;
     let wet = 0;
@@ -1560,4 +1560,94 @@ import { layoutCar, newFrame, newLayout, updateFrame } from '../src/vehicle/whee
   let climbed = 0;
   for (const b of gentle.slice(0, 10)) if (tryBank(b, 3, 6).up > 1.5) climbed++;
   check('5C: gentle banks still drive', gentle.length === 0 || climbed >= Math.ceil(Math.min(10, gentle.length) * 0.7), `${climbed}/${Math.min(10, gentle.length)} grass banks of 15–25° driven up from walking pace`);
+}
+
+// ── 5D: snow banks that hold a car, black ice that really slides ──
+import { blackIce } from '../src/world/surfaceMaps';
+{
+  const hw = new WorldData(HANAGIRI_PASS);
+  const S = hw.samples;
+  const N = S.length;
+  const half = hw.halfWidth;
+  // straight, flat stretches of road with no wall or barrier beside them
+  const straights: number[] = [];
+  for (let i = 0; i < N; i += 37) {
+    let ok = true;
+    for (let k = 0; k < 30 && ok; k++) if (Math.abs(S[(i + k) % N].curv) > 0.004) ok = false;
+    if (ok && Math.abs(S[i].y - S[(i + 30) % N].y) < 2) straights.push(i);
+  }
+  // 1. drifting wide at 70 km/h, 12° off line towards the edge: the bank catches the car
+  const run = (i: number, snow: number) => {
+    const c = new VehiclePhysics(hw);
+    const s = S[i];
+    const sd = 1;
+    const off = half - 1;
+    // heading 12° off the road's direction, towards the edge
+    const hx = s.tx * Math.cos(0.21) + s.nx * Math.sin(0.21);
+    const hz = s.tz * Math.cos(0.21) + s.nz * Math.sin(0.21);
+    c.reset(s.x + s.nx * off * sd, s.z + s.nz * off * sd, Math.atan2(hx, hz));
+    c.snow = snow;
+    const v = 19.5;
+    c.s.vx = Math.sin(c.s.yaw) * v;
+    c.s.vz = Math.cos(c.s.yaw) * v;
+    let maxOff = 0;
+    for (let t = 0; t < 1.6; t += DT) {
+      c.step(input({ throttle: 0.25 }), DT);
+      const h = hw.nearestTrack(c.s.x, c.s.z);
+      if (h) maxOff = Math.max(maxOff, Math.abs(h.offset));
+    }
+    return { maxOff, speed: c.s.speed };
+  };
+  let n = 0;
+  let lostSnow = 0;
+  let lostDry = 0;
+  let offSnow = 0;
+  let offDry = 0;
+  for (const i of straights.slice(0, 12)) {
+    const a = run(i, 1);
+    const b = run(i, 0);
+    // (only the runs that reached the edge of the paving)
+    if (b.maxOff < hw.roadBand - 1) continue;
+    n++;
+    lostSnow += 19.5 - a.speed;
+    lostDry += 19.5 - b.speed;
+    offSnow += a.maxOff;
+    offDry += b.maxOff;
+  }
+  const k = Math.max(1, n);
+  check('5D: snow banks hold a car', n >= 4 && lostSnow / n > lostDry / n + 4 && offSnow < offDry - 0.5, `${n} runs off a straight at 70 km/h on a light throttle, 12° wide: 1.6 s later the car is doing ${((19.5 - lostSnow / k) * 3.6).toFixed(0)} km/h in the snow, ${((19.5 - lostDry / k) * 3.6).toFixed(0)} km/h on a dry road, and got ${(offSnow / k).toFixed(1)} m out from the centre line (dry: ${(offDry / k).toFixed(1)} m; the paving ends at ${(hw.roadBand - 0.6).toFixed(1)} m)`);
+
+  // 2. black ice: where the road shader draws it, the tyres find almost no grip
+  const rc = { water: 0, snow: 0, ice: 0, bank: 0 };
+  let iceSpots = 0;
+  let iceGrip = 0;
+  let snowGrip = 0;
+  let snowSpots = 0;
+  let matched = 0;
+  let total = 0;
+  const probe = new VehiclePhysics(hw);
+  probe.snow = 1;
+  for (let i = 0; i < N; i += 3) {
+    const s = S[i];
+    for (const o of [-half * 0.5, 0, half * 0.5]) {
+      const x = s.x + s.nx * o;
+      const z = s.z + s.nz * o;
+      hw.roadCover(x, z, rc);
+      total++;
+      if (Math.abs(rc.ice - blackIce(x, z, rc.snow)) < 1e-6) matched++;
+      if (rc.ice > 0.8 || (rc.ice < 0.01 && rc.snow < 0.3 && snowSpots < 400)) {
+        probe.reset(x, z, Math.atan2(s.tx, s.tz));
+        probe.step(input(), DT);
+        const g = (probe as unknown as { cover: number[] }).cover.reduce((p, q) => p + q, 0) / 4;
+        if (rc.ice > 0.8) {
+          iceSpots++;
+          iceGrip += g;
+        } else {
+          snowSpots++;
+          snowGrip += g;
+        }
+      }
+    }
+  }
+  check('5D: black ice is slippery', iceSpots > 20 && iceGrip / iceSpots < 0.62 * (snowGrip / Math.max(1, snowSpots)) && matched === total, `${iceSpots} points on black ice: grip ${(iceGrip / Math.max(1, iceSpots)).toFixed(2)} of dry, against ${(snowGrip / Math.max(1, snowSpots)).toFixed(2)} on thin snow nearby; the ice the tyres feel is the ice drawn on the road at ${matched}/${total} points`);
 }

@@ -1,0 +1,40 @@
+{
+ "out": "/tmp/trailer2/rec/storm2",
+ "w": 1600,
+ "h": 900,
+ "settings": {
+  "weather": "rain",
+  "rainStrength": "downpour",
+  "timeOfDay": "night",
+  "raceType": "pursuit",
+  "lightning": "on",
+  "loadout": {
+   "edition": "gt3rs-jet"
+  },
+  "airSupport": "off"
+ },
+ "setup": "JSON.stringify(__T.skip(14))",
+ "shots": [
+  {
+   "name": "r4",
+   "frames": 64,
+   "cam": {
+    "type": "rel",
+    "back": [
+     -12,
+     -7
+    ],
+    "side": 3.6,
+    "up": 1.6,
+    "fov": 48,
+    "ahead": 0,
+    "lookUp": 2.2,
+    "frames": 64
+   },
+   "pre": "__T.callCops(2,22);JSON.stringify(__T.skip(0.4))",
+   "events": {
+    "10": "__T.strike()"
+   }
+  }
+ ]
+}

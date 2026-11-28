@@ -7,7 +7,7 @@ import { PROVING_GROUNDS, VenueDef } from './venues';
 import { WORLD } from '../config';
 import { rng } from '../core/math';
 import { setGroundHeight } from './ground';
-import { buildRoadSnow, puddleDepth, ROAD_V_METRES, SNOW_COLS } from './surfaceMaps';
+import { blackIce, buildRoadSnow, exposedAt, puddleDepth, ROAD_V_METRES, snowBankAt, snowTongue, SNOW_COLS } from './surfaceMaps';
 import { HeightField } from './hanagiri/terrain';
 
 export const enum Surface {
@@ -116,6 +116,16 @@ function key(ix: number, iz: number): number {
   return (ix + 2048) * 4096 + (iz + 2048);
 }
 
+/** 5D: what lies on the road at a point (see WorldData.roadCover) */
+export interface RoadCover {
+  water: number;
+  snow: number;
+  /** black ice under thin snow, 0..1 */
+  ice: number;
+  /** how far up the snow bank at the paving edge, 0..1 */
+  bank: number;
+}
+
 export class WorldData {
   readonly samples: TrackSample[] = [];
   trackLength = 0;
@@ -141,7 +151,8 @@ export class WorldData {
   /** where every lamp head is (for night lighting) */
   readonly lampHeads: { x: number; y: number; z: number; pad: boolean }[] = [];
   /** k (5A): species — 0 pine, 1 broadleaf, 2 cypress, 3 cherry blossom (default: mixed by position) */
-  readonly trees: { x: number; z: number; s: number; k?: number }[] = [];
+  /** k: species (Hanagiri); 5D: lean (rad) towards the bearing ld (rad) — the sakura tunnels */
+  readonly trees: { x: number; z: number; s: number; k?: number; lean?: number; ld?: number }[] = [];
   /** 5A: a mountain venue's set dressing: torii gates, lanterns, the shrine, chevrons, snow poles, crowds */
   readonly decor: {
     kind: 'torii' | 'lantern' | 'chevron' | 'snowpole' | 'shrine' | 'crowd' | 'hut' | 'passsign' | 'plough' | 'fence' | 'avpole' | 'pullout' | 'stonetorii' | 'prayer';
@@ -421,12 +432,13 @@ export class WorldData {
    * the road-snow map; the paved shoulders of a mountain road are banked with snow). Both 0 off
    * the paving. Callers scale them by how wet / how snowy the weather is.
    */
-  roadCover(x: number, z: number, out: { water: number; snow: number }): { water: number; snow: number } {
-    out.water = out.snow = 0;
+  roadCover(x: number, z: number, out: RoadCover): RoadCover {
+    out.water = out.snow = out.ice = out.bank = 0;
     const hit = this.nearestTrack(x, z, this._ch);
     if (!hit) return out;
     const hw = this.halfWidth;
     const a = Math.abs(hit.offset);
+    const mountain = this.venue.look === 'mountain';
     if (a <= hw) {
       const u = (hw - hit.offset) / (2 * hw);
       out.water = puddleDepth(u, hit.s / ROAD_V_METRES);
@@ -441,10 +453,18 @@ export class WorldData {
       const r0 = m[i0 * SNOW_COLS + c0] * (1 - fc) + m[i0 * SNOW_COLS + c1] * fc;
       const r1 = m[i1 * SNOW_COLS + c0] * (1 - fc) + m[i1 * SNOW_COLS + c1] * fc;
       const along = Math.min(1, Math.max(0, (hit.s - this.samples[i0].s) / WORLD.sampleSpacing));
-      out.snow = (r0 + (r1 - r0) * along) / 255;
-    } else if (this.venue.look === 'mountain' && a <= this.roadBand - 0.6) {
+      let r = (r0 + (r1 - r0) * along) / 255;
+      // 5D: as the road-snow shader draws it: tongues of blown snow, black ice where it is thin
+      if (this.field) {
+        r = Math.max(r, snowTongue(x, z, exposedAt(this.samples[i0].y)));
+        out.ice = blackIce(x, z, r);
+      }
+      out.snow = r;
+    } else if (mountain && a <= this.roadBand - 0.6) {
       out.snow = 0.92;
     }
+    // 5D: the bank of ploughed snow along the edge of the paving
+    if (mountain && a > hw) out.bank = snowBankAt(a, hw, this.roadBand - 0.6);
     return out;
   }
 

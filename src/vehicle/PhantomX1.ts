@@ -10,6 +10,7 @@
 // Car space: origin on the ground under the centre of gravity, +Z forward, +Y up, +X left.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
+import { addSnowLayer } from './carSnow';
 import { mainOnly } from '../core/layers';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { COCKPIT, PAINTS, VEHICLE as V } from '../config';
@@ -764,6 +765,11 @@ export function sharedMaterials(): SharedMaterials {
   g.clearcoatNormalMap = matCache.peel;
   g.clearcoatNormalScale = new THREE.Vector2(0.015, 0.015);
   addBeads(g, 'glass-4g2', 'vBeadP.xz * 34.0 + vBeadP.y * 9.0', true);
+  // 5D: snow settles on the car in the snow (glass: the roof only, never the windscreen)
+  addSnowLayer(g, { minUp: 0.86, spray: false });
+  addSnowLayer(matCache.gloss as THREE.MeshStandardMaterial);
+  addSnowLayer(matCache.carbon as THREE.MeshStandardMaterial);
+  addSnowLayer(matCache.matte as THREE.MeshStandardMaterial, { amount: 0.85 });
   return matCache;
 }
 const wheelCache = new Map<number, ReturnType<typeof buildWheelParts>>();
@@ -893,6 +899,7 @@ export class PhantomX1 {
       iridescenceThicknessRange: [220, 520],
     });
     addBeads(this.paint, 'paint-4g2', 'vNormalMapUv * vec2(3.2, 4.0)', false);
+    addSnowLayer(this.paint);
     this.tailMat = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff1508, emissiveIntensity: 2.2 });
     this.reverseMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffffff, emissiveIntensity: 0 });
     this.rimMat = (M.rim as THREE.MeshStandardMaterial).clone();

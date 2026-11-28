@@ -17,6 +17,7 @@
 //   sprite beyond that.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
+import { addSnowLayer } from './carSnow';
 import { mainOnly } from '../core/layers';
 import { mergeByMaterial } from '../core/merge';
 import { POLICE_LOOK as PL } from '../config';
@@ -234,6 +235,10 @@ function getShared(): Shared {
     pool: poolTexture(),
     glow,
   };
+  // 5D: snow settles on the patrol cars too
+  for (const m of [shared.black, shared.white, shared.dark]) addSnowLayer(m);
+  addSnowLayer(shared.trim, { amount: 0.85 });
+  addSnowLayer(shared.glass, { minUp: 0.86, spray: false });
   return shared;
 }
 

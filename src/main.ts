@@ -4,6 +4,7 @@
 //   poll input → fixed-step physics → effects / audio / rumble → camera → HUD → render
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
+import { carSnowUniforms, resetCarSnow, updateCarSnow } from './vehicle/carSnow';
 import { AudioEngine } from './audio/AudioEngine';
 import { CAMERA_MODES, CameraRig, CarPose } from './camera/CameraRig';
 import { AI, PAINTS, PHYSICS_DT, RECOVERY, STEER_ASSIST, StabilityMode, VEHICLE as V, PLAYER_ENGINE } from './config';
@@ -1403,6 +1404,7 @@ class Game {
     const touge = !!route && s.raceType === 'touge';
     const field = touge ? 1 : s.rivals ? AI.gridSize - 1 : 0;
     const r = new Race(this.world, specs ?? Race.soloSpecs(field, s.loadout), s.difficulty, route ? 0 : s.bestLap, this.aids(), s.steerAssist);
+    resetCarSnow(this.snowFall());
     // 5B.1: a lap count that suits this venue (1–3 on the 10 km mountain lap, 3–8 on the circuit)
     s.laps = fitLaps(this.world.trackLength, s.laps);
     r.targetLaps = this.mode === 'free' ? 0 : s.laps;
@@ -2208,6 +2210,12 @@ class Game {
     pr.roll = s.roll;
   }
 
+  /** 5D: 0..1 how hard it is snowing right now (0 = not snowing) */
+  private snowFall(): number {
+    const e = this.env;
+    return e && e.conditions.weather === 'snow' && e.p ? e.p.snow * (0.35 + 0.65 * e.snowK) : 0;
+  }
+
   private frame(now: number): void {
     requestAnimationFrame((t) => this.frame(t));
     // frame cap: on a fast screen (120/144 Hz) skip frames to hold 60 or 120 if asked
@@ -2795,6 +2803,8 @@ class Game {
       e.braking = (s.brake > 0.05 && s.gear !== -1) || s.handbrake;
     }
     this.env.update(this.state === 'paused' ? 0 : dt, this.time, this.rig.camera, list, this.carVisuals[0]?.root ?? null, this.renderer.getPixelRatio());
+    // 5D: snow settles on the cars while it snows
+    updateCarSnow(this.state === 'playing' || this.state === 'results' ? dt : 0, this.snowFall(), this.physics.s.speed);
     this.updateRain(dt, live);
     // Lens drops on the outside cameras (the cockpit has its own windscreen rain). Auto: the
     // amount follows the rain. They gather over a few seconds (faster at speed: you drive into
@@ -2993,10 +3003,11 @@ class Game {
       const snowy = this.env.p.snow;
       if (snowy > 0 && onGround && s.speed > 4) {
         const pk = index * 4 + i + 224;
-        this.smokeAcc[pk] = (this.smokeAcc[pk] || 0) + snowy * (smoothstep(4, 40, s.speed) * (i < 2 ? 5 : 14) + slip * 40) * (index > 0 ? 0.6 : 1) * this.particles.sprayScale * dt;
+        // 5D: ploughing into a snow bank throws up a wall of it
+        this.smokeAcc[pk] = (this.smokeAcc[pk] || 0) + snowy * (smoothstep(4, 40, s.speed) * (i < 2 ? 5 : 14) + slip * 40 + (s.inBank ?? 0) * 160) * (index > 0 ? 0.6 : 1) * this.particles.sprayScale * dt;
         while (this.smokeAcc[pk] >= 1) {
           this.smokeAcc[pk] -= 1;
-          this.particles.powder(wx, wy, wz, s.vx, s.vz, clamp01(slip + s.speed / 60));
+          this.particles.powder(wx, wy, wz, s.vx, s.vz, clamp01(slip + s.speed / 60 + (s.inBank ?? 0) * 2));
         }
       }
       // spray in the wet: rooster tails off the rear tyres, a thinner mist off the fronts
@@ -3163,6 +3174,7 @@ async function boot(): Promise<void> {
     game = new Game(canvas);
     (window as unknown as { __apex: Game }).__apex = game; // handy for debugging from the console
     (window as unknown as { __apexMakeCar: typeof makeCarVisual }).__apexMakeCar = makeCarVisual;
+    (window as unknown as { __apexCarSnow: typeof carSnowUniforms }).__apexCarSnow = carSnowUniforms; // 5D: for screenshots
   } catch (err) {
     document.getElementById('boot-error')!.hidden = false;
     document.getElementById('boot-msg')!.textContent =

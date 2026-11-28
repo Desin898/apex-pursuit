@@ -91,6 +91,7 @@ export function buildMountainRoadside(scene: THREE.Scene, world: WorldData, bake
   const rockI: number[] = [];
   const posts: THREE.Matrix4[] = [];
   const reflectors: THREE.Matrix4[] = [];
+  const spacers: THREE.Matrix4[] = [];
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const up = new THREE.Vector3(0, 1, 0);
@@ -127,20 +128,23 @@ export function buildMountainRoadside(scene: THREE.Scene, world: WorldData, bake
       if (i > 0) dist += Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z);
       const y = ys[i];
       if (run.kind === 'rail') {
-        // W-beam: a pressed steel band 0.32 m tall at 0.55–0.87 m, with a fold along the middle
-        const f = 0.09;
-        v3(railV, p.x, y + 0.55, p.z);
-        v3(railV, p.x - nx * f, y + 0.71, p.z - nz * f);
-        v3(railV, p.x, y + 0.87, p.z);
-        railUV.push(dist / 4, 0, dist / 4, 0.5, dist / 4, 1);
+        // 5D: a real W-beam: a pressed steel band 0.31 m tall from 0.55 m, two ridges facing the road
+        for (const [h, d] of WBEAM) {
+          v3(railV, p.x - nx * d, y + 0.55 + h, p.z - nz * d);
+          railUV.push(dist / 4, h / 0.31);
+        }
         if (i < pts.length - 1) {
-          const n0 = i * 3;
-          railI.push(n0, n0 + 3, n0 + 1, n0 + 1, n0 + 3, n0 + 4, n0 + 1, n0 + 4, n0 + 2, n0 + 2, n0 + 4, n0 + 5);
+          const P = WBEAM.length;
+          const n0 = i * P;
+          for (let k = 0; k < P - 1; k++) railI.push(n0 + k, n0 + k + P, n0 + k + 1, n0 + k + 1, n0 + k + P, n0 + k + P + 1);
         }
         // a post every 4 m (each run point), a reflector every 3rd post
         q.setFromAxisAngle(up, Math.atan2(nx, nz));
-        m4.compose(new THREE.Vector3(p.x + nx * 0.16, F.at(p.x + nx * 0.2, p.z + nz * 0.2) - 0.4, p.z + nz * 0.16), q, new THREE.Vector3(1, Math.max(1, y + 0.9 - (F.at(p.x, p.z) - 0.4)), 1));
+        m4.compose(new THREE.Vector3(p.x + nx * 0.3, F.at(p.x + nx * 0.3, p.z + nz * 0.3) - 0.4, p.z + nz * 0.3), q, new THREE.Vector3(1, Math.max(1, y + 0.9 - (F.at(p.x, p.z) - 0.4)), 1));
         posts.push(m4.clone());
+        // the spacer block between the post and the beam
+        m4.compose(new THREE.Vector3(p.x + nx * 0.16, y + 0.62, p.z + nz * 0.16), q, new THREE.Vector3(1, 1, 1));
+        spacers.push(m4.clone());
         if (i % 3 === 0) {
           m4.compose(new THREE.Vector3(p.x - nx * 0.12, y + 0.95, p.z - nz * 0.12), q, new THREE.Vector3(1, 1, 1));
           reflectors.push(m4.clone());
@@ -173,14 +177,34 @@ export function buildMountainRoadside(scene: THREE.Scene, world: WorldData, bake
   }
   if (rails.v.length) {
     const g = geo(rails.v, rails.uv, rails.i);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xc9ccd0, metalness: 0.65, roughness: 0.38, side: THREE.DoubleSide });
+    g.computeVertexNormals();
+    // 5D: galvanised steel: a dull, mottled sheen
+    const mat = new THREE.MeshStandardMaterial({ color: 0xb7bcc1, metalness: 0.72, roughness: 0.36, side: THREE.DoubleSide });
+    mat.onBeforeCompile = (sh) => {
+      sh.vertexShader = 'varying vec3 vGW;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = 'varying vec3 vGW;\n' + sh.fragmentShader
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          float gm = fract(sin(dot(floor(vGW.xz * 3.0 + vGW.y * 7.0), vec2(12.9898, 78.233))) * 43758.5453);
+          float gm2 = fract(sin(dot(floor(vGW.xz * 0.7), vec2(39.3, 11.1))) * 1731.7);
+          diffuseColor.rgb *= 0.86 + 0.14 * gm2;`)
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + (gm - 0.5) * 0.16 + (gm2 - 0.5) * 0.2, 0.15, 0.8);');
+    };
+    mat.customProgramCacheKey = () => 'wbeam-5d';
     const mesh = new THREE.Mesh(g, mat);
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.name = 'guardrails';
     scene.add(mesh);
-    const postGeo = new THREE.BoxGeometry(0.14, 1, 0.12);
-    postGeo.translate(0, 0.5, 0);
-    const pm = new THREE.InstancedMesh(postGeo, new THREE.MeshStandardMaterial({ color: 0x9a9ea3, metalness: 0.6, roughness: 0.5 }), posts.length);
+    // 5D: C-section steel posts (the open side away from the road) and timber-look spacer blocks
+    const postGeo = cPost();
+    const steelMat = new THREE.MeshStandardMaterial({ color: 0x9da2a7, metalness: 0.68, roughness: 0.46 });
+    const pm = new THREE.InstancedMesh(postGeo, steelMat, posts.length);
+    const spGeo = new THREE.BoxGeometry(0.2, 0.36, 0.15);
+    const sm = new THREE.InstancedMesh(spGeo, steelMat, Math.max(1, spacers.length));
+    sm.count = spacers.length;
+    spacers.forEach((m, i) => sm.setMatrixAt(i, m));
+    sm.castShadow = true;
+    sm.computeBoundingSphere();
+    scene.add(sm);
     posts.forEach((m, i) => pm.setMatrixAt(i, m));
     pm.castShadow = true;
     pm.computeBoundingSphere();
@@ -209,6 +233,32 @@ export function buildMountainRoadside(scene: THREE.Scene, world: WorldData, bake
   rails.v = [];
   rocks.v = [];
   return shoulderMat;
+}
+
+/** 5D: the W-beam's cross-section: (height above its foot, how far it stands out towards the road), m */
+const WBEAM: [number, number][] = [
+  [0, 0], [0.025, 0.03], [0.06, 0.075], [0.09, 0.083], [0.12, 0.055], [0.155, 0.022],
+  [0.19, 0.055], [0.22, 0.083], [0.25, 0.075], [0.285, 0.03], [0.31, 0],
+];
+
+/** 5D: a C-section post 1 m tall (origin at its foot), the open side facing +z (away from the road) */
+function cPost(): THREE.BufferGeometry {
+  const sh = new THREE.Shape();
+  const w = 0.075;
+  const d = 0.06;
+  const t = 0.012;
+  sh.moveTo(-w, -d);
+  sh.lineTo(w, -d);
+  sh.lineTo(w, d);
+  sh.lineTo(w - t, d);
+  sh.lineTo(w - t, -d + t);
+  sh.lineTo(-w + t, -d + t);
+  sh.lineTo(-w + t, d);
+  sh.lineTo(-w, d);
+  sh.closePath();
+  const g = new THREE.ExtrudeGeometry(sh, { depth: 1, bevelEnabled: false });
+  g.rotateX(-Math.PI / 2);
+  return g;
 }
 
 // accumulated runs (each run is appended with its own vertex offset)

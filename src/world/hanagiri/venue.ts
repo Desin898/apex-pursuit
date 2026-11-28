@@ -16,7 +16,7 @@ import type { VenueDef } from '../venues';
 import type { WorldData } from '../WorldData';
 import { HANAGIRI_CONTROL, HANAGIRI_HOUSES } from './data';
 import { hanagiriField } from './terrain';
-import { kmOf, zoneAtKm, ZoneId, zoneWeight } from './zones';
+import { indexAtKm, kmOf, SAKURA_TUNNELS, zoneAtKm, ZoneId, zoneWeight } from './zones';
 import { placeFeatures } from './features';
 
 const control: number[][] = [];
@@ -419,11 +419,11 @@ function facility(wd: WorldData): void {
     const scaleOf = (k: number) => (k === 0 ? 1.55 + rand() * 1.0 : k === 1 ? 1.6 + rand() * 1.1 : k === 2 ? 0.8 + rand() * 0.8 : k === 3 ? 6 + rand() * 2.8 : 2.6 + rand() * 1.9);
     const step = 100 / WORLD.sampleSpacing;
     let forestKm = false;
-    const place = (i: number, sd: number, kind: number, off: number) => {
+    const place = (i: number, sd: number, kind: number, off: number, big?: { s: number; lean: number }) => {
       const s = S[i];
       const x = s.x + s.nx * off * sd + s.tx * (rand() - 0.5) * 8;
       const z = s.z + s.nz * off * sd + s.tz * (rand() - 0.5) * 8;
-      if (!clearOfRoad(x, z, edge + (kind === 3 ? 3 : 3.5))) return false;
+      if (!clearOfRoad(x, z, big ? edge + 0.6 : edge + (kind === 3 ? 3 : 3.5))) return false;
       const y = F.at(x, z);
       // the tree line: nothing above it (ragged), only young trees just below
       const line = 128 + 18 * Math.sin(x * 0.013) * Math.cos(z * 0.011);
@@ -443,7 +443,8 @@ function facility(wd: WorldData): void {
       }
       if (ht && Math.abs(ht.offset) < edge + 14) for (const sp of wd.spans) if (inSpan(ht.index, sp.i0, sp.i1, 6)) return false;
       for (const st of wd.streams) for (const p of st.pts) if (Math.abs(p.x - x) < 6 && Math.abs(p.z - z) < 6) return false;
-      wd.trees.push({ x, z, s: scaleOf(kind), k: kind });
+      if (big) wd.trees.push({ x, z, s: big.s, k: kind, lean: big.lean, ld: Math.atan2(-s.nx * sd, -s.nz * sd) });
+      else wd.trees.push({ x, z, s: scaleOf(kind), k: kind });
       if (off < 40) wd.circles.push({ x, z, r: kind === 2 ? 0.25 : kind === 4 ? 0.3 : 0.45, top: kind === 2 ? 3 : 6 });
       return true;
     };
@@ -471,6 +472,19 @@ function facility(wd: WorldData): void {
     forestKm = false;
     for (let k = -Math.round(160 / WORLD.sampleSpacing); k <= Math.round(90 / WORLD.sampleSpacing); k += 6) {
       for (const sd of [1, -1]) if (rand() < 0.8) place((toriiI + k + N) % N, sd, 3, edge + 4 + rand() * 6);
+    }
+    // 5D: the sakura tunnels: big old cherries close to the road on both sides, leaning in over it
+    for (const t of SAKURA_TUNNELS) {
+      const i0 = indexAtKm(wd, t.from);
+      const n = Math.round(((t.to - t.from) * 1000) / WORLD.sampleSpacing);
+      for (let k = 0; k < n; k += Math.round(12 / WORLD.sampleSpacing)) {
+        for (const sd of [1, -1]) {
+          const i = (i0 + k + (sd > 0 ? 0 : 2)) % N;
+          for (let tries = 0; tries < 3; tries++) {
+            if (place(i, sd, 3, edge + 1.4 + rand() * 1.8 + tries * 1.5, { s: 10.5 + rand() * 4, lean: 0.2 + rand() * 0.16 })) break;
+          }
+        }
+      }
     }
   }
 

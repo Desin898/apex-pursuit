@@ -15,6 +15,8 @@ import * as tex from './textures';
 import { WorldData } from './WorldData';
 import { buildMountainTerrain } from './hanagiri/MountainTerrain';
 import { buildRoadSnowMesh } from './RoadSnow';
+import { buildPetalCarpet } from './hanagiri/petals';
+import { gantryTruss, lampParts } from './props5D';
 import { buildFarRanges, buildMountainRoadside } from './hanagiri/MountainBuild';
 import { buildPeaks } from './hanagiri/Peaks';
 
@@ -290,6 +292,8 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
   if (mountain) buildMountainRoadside(scene, world, baked, mats.paved);
   // 5B: snow lying on the road in the Snow weather (the same map the tyres read)
   buildRoadSnowMesh(scene, world);
+  // 5D: the petal carpet in the sakura tunnels
+  if (mountain) buildPetalCarpet(scene, world);
   // Start/finish line and grid slots
   {
     const s = S[world.startIndex];
@@ -327,22 +331,22 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
     const gantry = new THREE.Group();
     gantry.position.set(s.x, s.y, s.z);
     gantry.rotation.y = yaw;
+    // 5D: lattice towers and a box-truss beam of steel tube
+    const truss = new THREE.Mesh(gantryTruss(hw * 2 + 5.2, 8.4), steel);
+    truss.castShadow = true;
+    gantry.add(truss);
+    // the feet: concrete plinths
     for (const e of [-hw - 2.6, hw + 2.6]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 8.4, 0.5), steel);
-      post.position.set(e, 4.2, 0);
-      post.castShadow = true;
-      gantry.add(post);
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.5, 1.4), new THREE.MeshStandardMaterial({ color: 0x8d8b86, roughness: 0.9 }));
+      foot.position.set(e, 0.1, 0);
+      gantry.add(foot);
     }
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 + 6, 0.5, 0.7), steel);
-    beam.position.y = 8.4;
-    beam.castShadow = true;
-    gantry.add(beam);
     const signTex = tex.billboardTexture('APEX PURSUIT', 'START  ·  FINISH', 0.58);
     const sign = new THREE.Mesh(
       new THREE.PlaneGeometry(13, 2.6),
       (mats.signs[mats.signs.length] = new THREE.MeshStandardMaterial({ map: signTex, emissiveMap: signTex, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.6, side: THREE.DoubleSide })),
     );
-    sign.position.set(0, 7.0, -0.38);
+    sign.position.set(0, 7.0, -0.56);
     sign.rotation.y = Math.PI; // faces cars approaching the line
     gantry.add(sign);
     scene.add(gantry);
@@ -503,7 +507,43 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
   }
 
   // ── Light poles ──────────────────────────────────────────────────────────
-  {
+  if (mountain) {
+    // 5D: real street lamps on the mountain road
+    const P = lampParts();
+    const steel = new THREE.MeshStandardMaterial({ color: 0x5d6166, metalness: 0.7, roughness: 0.42 });
+    mats.lamps = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffe2b0, emissiveIntensity: 3.2, side: THREE.DoubleSide });
+    const n = world.poles.length;
+    const column = new THREE.InstancedMesh(P.column, steel, n);
+    const base = new THREE.InstancedMesh(P.base, steel, n);
+    const arm = new THREE.InstancedMesh(P.arm, steel, n);
+    const head = new THREE.InstancedMesh(P.head, new THREE.MeshStandardMaterial({ color: 0x8c9096, metalness: 0.55, roughness: 0.35, side: THREE.DoubleSide }), n);
+    const lens = new THREE.InstancedMesh(P.lens, mats.lamps, n);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    world.poles.forEach((p, i) => {
+      const g0 = gy(p.x, p.z);
+      const hd = world.lampHeads[i];
+      const yaw = Math.atan2(hd.x - p.x, hd.z - p.z);
+      const reach = Math.max(0.5, Math.hypot(hd.x - p.x, hd.z - p.z));
+      m.compose(new THREE.Vector3(p.x, g0 - 0.3, p.z), q.identity(), new THREE.Vector3(1, hd.y - g0 + 0.3, 1));
+      column.setMatrixAt(i, m);
+      m.compose(new THREE.Vector3(p.x, g0 - 0.3, p.z), q.setFromEuler(e.set(0, i * 0.7, 0)), new THREE.Vector3(1, 1, 1));
+      base.setMatrixAt(i, m);
+      q.setFromEuler(e.set(0, yaw, 0));
+      m.compose(new THREE.Vector3(p.x, hd.y - 0.1, p.z), q, new THREE.Vector3(1, 1, reach));
+      arm.setMatrixAt(i, m);
+      m.compose(new THREE.Vector3(hd.x, hd.y, hd.z), q, new THREE.Vector3(1, 1, 1));
+      head.setMatrixAt(i, m);
+      lens.setMatrixAt(i, m);
+    });
+    for (const im of [column, base, arm, head]) {
+      im.castShadow = true;
+      im.computeBoundingSphere();
+    }
+    lens.computeBoundingSphere();
+    scene.add(column, base, arm, head, lens);
+  } else {
     const poleGeo = new THREE.CylinderGeometry(0.11, 0.17, 1, 8);
     poleGeo.translate(0, 0.5, 0);
     const poles = new THREE.InstancedMesh(poleGeo, new THREE.MeshStandardMaterial({ color: 0x33363b, metalness: 0.7, roughness: 0.5 }), world.poles.length);

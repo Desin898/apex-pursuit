@@ -130,6 +130,104 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
 
+## New in Phase 5D: snow on the car, sakura tunnels, real snow banks and black ice
+
+### Snow that settles on the car
+In the Snow weather, snow now settles on every car, the police cars included. It covers the
+bonnet, roof, wing, rear deck and the tops of the wings, and builds up the longer and harder it
+snows. A race in the snow starts with the cars already dusted, because they waited on the grid.
+Driving into the snowfall packs snow onto the nose, slush from the tyres streaks the sills, and at
+speed the wind takes a little back off. Snow only lies on panels flat enough to hold it: the doors
+stay clean, the windscreen stays clear, and the roof glass gets covered. The layer is drawn on the
+car's own paint, carbon, trim and glass, so the car keeps its exact shape. Out of the snow there is none.
+
+![Snow on the car](docs/5d/snow-on-car.jpg)
+
+### Sakura tunnels at dusk
+In three stretches of the lap, big old cherry trees (10–14 m) line both sides of the road and lean
+in over it, like a cherry-blossom avenue:
+- out of the village (km 0.3–0.8);
+- along the valley floor (km 8.5–9.0);
+- on the run back into the village (km 9.5–10).
+
+Petals carpet the road there. They lie thick along the edges and the shoulders, more thinly across
+the lanes, and are swept almost clear in the wheel tracks. In the rain they look wet. Petals drift
+down round the camera as you drive through, and a few fall in the village too. In the Snow weather
+the same trees stand bare with snow along their limbs.
+
+![Sakura tunnels](docs/5d/sakura-tunnels.jpg)
+![The tunnels in winter](docs/5d/sakura-winter.jpg)
+
+### Snow banks you can't drive through, and black ice that really slides
+- **Snow banks:** the ploughed bank along the edge of the paving is now solid and soft. The wheels
+  climb it (up to 42 cm), and it drags the car down hard and throws up a wall of powder. Running wide
+  onto it at 70 km/h on a light throttle, the car is doing 72 km/h 1.6 s later. On a dry road it is
+  doing 93 km/h, and it gets 0.8 m less far off the road in the snow. The bank you see is the bank
+  the tyres climb.
+- **Black ice:** the dark, glossy patches where the snow has worn thin now cost grip. On them a tyre
+  has 0.40 of its dry grip, against 0.96 on thin snow next to them. The patches come from one noise
+  pattern, worked out the same way on the GPU and in the physics, so you slide exactly where you
+  see ice: 5,055 of 5,055 test points agree. Blown snow across the road (the drifts up on the pass)
+  now lowers the grip as well, where before it was only drawn.
+
+![Banks, ice and snowfall](docs/5d/banks-ice-snowfall.jpg)
+
+### Better snowfall
+Flakes now come in different sizes. Each one spirals a little as it falls, a few catch the light
+and sparkle, and the ones right in front of the lens are big, soft and out of focus. There are
+also more flakes: 13,000 at Ultra.
+
+### Roadside hardware, rebuilt
+These were the last pieces still made of plain boxes:
+- **Start gantry:** two lattice towers and a box-truss beam of steel tube, on concrete feet.
+- **Street lamps:** a tapered octagonal column on a stepped base, a swept bracket arm, and a shallow
+  "cobra head" lamp with a glowing lens underneath.
+- **Guard rails:** a real W-beam profile with two ridges facing the road, in mottled galvanised steel,
+  on C-section posts with spacer blocks.
+- **Chevron boards:** a sign blank with a folded aluminium back, on round galvanised posts.
+
+![Roadside](docs/5d/roadside.jpg)
+
+### The bank picture, redone
+The 5C picture of a car against a steep bank was taken too late: the car had already climbed out of
+view. The new one is a sequence of frames: full throttle at the foot of a 45° bank, then the same car
+1, 2 and 3.5 s later, still at the foot.
+
+![Into a 45° bank](docs/5d/bank.jpg)
+
+### Performance
+- The cherry tree is still the heaviest model, and the tunnels are full of it. Its 3D model now
+  gives way to a flat card at 88 m (it was 125 m).
+- With the tunnels in place, the counts are in the same range as 5C (all passes, headless Chrome):
+  - village: 2.57M triangles;
+  - first tunnel: 2.44M;
+  - valley tunnel: 2.12M.
+- The snow on the cars is a few shader instructions on the car pixels only, and the petal carpet
+  is one draw.
+- **The RTX 3050 frame rate still needs your F4 run on Hanagiri.**
+
+### Tests
+`npm run test:physics` passes 69/69, including two new tests:
+- **5D: snow banks hold a car:** 11 runs off a straight at 70 km/h, 12° wide. They end at 72 km/h
+  in the snow against 93 km/h on a dry road, and 0.8 m less far out.
+- **5D: black ice is slippery:** 197 points on ice have 0.40 of dry grip, against 0.96 on thin snow.
+  The ice the tyres feel matches the ice drawn on the road at every test point.
+
+The trailer pieces (`tools/trailer/`) record real in-game footage frame by frame: a fixed clock,
+the player's car on autopilot, cinematic cameras, and the lightning on cue.
+
+## Coming next: phases to make it more real
+
+| Phase | What it adds |
+|---|---|
+| 5E: Cutscenes and the intro | The trailer as a skippable intro (once you approve it), and live in-engine cutscenes: a flyover of the lap before the start, the police arriving, a replay at the finish. Same camera system as the trailer; no video files. |
+| 5F: Lighting | Light that bounces off the ground onto the cars (a light probe grid along the lap), soft shadows that blur with distance, the headlights lighting up falling snow and rain, and volumetric light shafts through the sakura canopies. |
+| 5G: Surfaces | Wet roads that dry in a racing line, puddles that ripple, tyre marks that stay in the snow lap after lap, snow that piles up on the road and gets cleared in the wheel tracks during a race, and frost on the glass at night. |
+| 5H: Cars that get dirty and damaged | Mud and slush that build up low on the body, a soft dent model, and panels that rattle loose. The paint gets duller with dirt and comes clean in the rain. |
+| 5I: Sound realism | Engine sound recorded from both sides of the car (exhaust and intake), tyre sounds that change with the surface (snow crunch, wet hiss, ice), wind noise and echo in the tunnel and cuttings. |
+| 5J: Living world | Traffic on the road, birds that scatter, smoke from the chimneys drifting with the wind, people at the shrine, and wildlife on the mountain. |
+| 6: Graphics engine | A move to WebGPU for many more trees and grass blades on the same GPU, temporal upscaling, and screen-space reflections on the wet road. |
+
 ## New in Phase 5C: Hanagiri Winter
 
 ### Fixed first: the start and the wheels

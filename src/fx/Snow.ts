@@ -11,7 +11,7 @@ export class Snow {
   private u = { uTime: { value: 0 }, uCam: { value: new THREE.Vector3() }, uR: { value: 34 }, uH: { value: 26 }, uAmt: { value: 0 }, uLight: { value: new THREE.Color(1, 1, 1) }, uScale: { value: 600 }, uGust: { value: 0 } };
   private max: number;
 
-  constructor(scene: THREE.Scene, max = 9000) {
+  constructor(scene: THREE.Scene, max = 13000) {
     this.max = max;
     const pos = new Float32Array(max * 3);
     const ph = new Float32Array(max);
@@ -35,6 +35,8 @@ export class Snow {
         uniform float uTime, uR, uH, uScale, uGust;
         uniform vec3 uCam;
         varying float vA;
+        varying float vSoft;
+        varying float vSpark;
         void main() {
           vec3 p = position;
           float t = uTime + aPh;
@@ -43,23 +45,34 @@ export class Snow {
           p.y -= t * fall * (1.0 - 0.55 * uGust);
           p.x += t * (0.9 + 11.0 * uGust) + sin(t * 0.8 + aPh) * 0.9;
           p.z += sin(t * 0.6 + aPh * 1.7) * 0.9;
+          // 5D: each flake spirals a little as it falls
+          p.xz += vec2(cos(t * 2.1 + aPh * 3.0), sin(t * 2.1 + aPh * 3.0)) * 0.12 * (0.5 + fract(aPh * 5.3));
           p.xz = mod(p.xz - uCam.xz + uR, 2.0 * uR) - uR + uCam.xz;
           p.y = mod(p.y - uCam.y + 8.0, uH) - 8.0 + uCam.y;
           vec4 mv = viewMatrix * vec4(p, 1.0);
           float d = max(0.3, -mv.z);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = clamp(uScale * 0.045 / d, 1.0, 26.0);
-          vA = smoothstep(0.3, 1.6, d) * (1.0 - smoothstep(uR * 0.55, uR, length(p.xz - uCam.xz)));
+          // 5D: flakes of different sizes; the ones right in front of the lens are big, soft and
+          // out of focus, the far ones fine points; a few catch the light and sparkle
+          float sz = 0.55 + 1.15 * fract(aPh * 3.71) * fract(aPh * 1.37 + 0.3);
+          float nearK = 1.0 - smoothstep(0.6, 3.0, d);
+          gl_PointSize = clamp(uScale * 0.045 * sz * (1.0 + nearK * 1.6) / d, 1.0, 44.0);
+          vA = smoothstep(0.25, 1.2, d) * (1.0 - smoothstep(uR * 0.55, uR, length(p.xz - uCam.xz))) * (1.0 - nearK * 0.55);
+          vSoft = nearK;
+          vSpark = step(0.93, fract(aPh * 11.3)) * (0.6 + 0.4 * sin(t * 9.0 + aPh * 5.0));
         }`,
       fragmentShader: /* glsl */ `
         uniform float uAmt;
         uniform vec3 uLight;
         varying float vA;
+        varying float vSoft;
+        varying float vSpark;
         void main() {
           float e = length(gl_PointCoord - 0.5);
-          float a = (1.0 - smoothstep(0.15, 0.5, e)) * vA * 0.85;
+          // a crisp flake with a soft edge; out of focus near the lens (a flat, faint disc)
+          float a = mix(1.0 - smoothstep(0.12, 0.5, e), (1.0 - smoothstep(0.38, 0.5, e)) * 0.55, vSoft) * vA * 0.85;
           if (a < 0.02) discard;
-          gl_FragColor = vec4(uLight, a);
+          gl_FragColor = vec4(uLight * (1.0 + vSpark * 0.8), a);
         }`,
     });
     this.points = new THREE.Points(g, mat);

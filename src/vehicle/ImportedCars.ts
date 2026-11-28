@@ -19,6 +19,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { VEHICLE as V } from '../config';
 import { CAR_MODELS, ImportedCarInfo, modelOf, registerImportedCar } from './Cars';
+import { addSnowLayer } from './carSnow';
 import { addBeads, CarKit, CarKitBuilder, KitMats, PhantomX1, sharedMaterials } from './PhantomX1';
 
 interface PackWheel {
@@ -93,6 +94,8 @@ export async function loadImportedCars(onProgress?: (name: string) => void): Pro
     try {
       const lod0 = await parse(loader, e.lod0);
       const lodm = e.lodm ? await parse(loader, e.lodm).catch(() => null) : null;
+      // 5D: body meshes in plain car-space floats (the snow layer reads positions in metres)
+      for (const g of [lod0, lodm]) if (g) for (const n of ['body', 'cabin']) bakePart(g, g.getObjectByName(n));
       const lod1 = e.lod1 ? await parse(loader, e.lod1).catch(() => null) : null;
       let shadow: THREE.Texture | null = null;
       if (e.shadow) {
@@ -177,6 +180,9 @@ function sharedSlots(): Shared {
     int_red: std(0x8c1010, 0.62, 0.02),
     int_trim: std(0x5a5c61, 0.32, 0.85),
   };
+  // 5D: snow settles on the outside of the car (the roof glass only)
+  addSnowLayer(glass, { minUp: 0.86, spray: false });
+  for (const k of ['black', 'trim', 'metal', 'dark_chrome']) addSnowLayer(shared[k] as THREE.MeshStandardMaterial, { amount: k === 'black' ? 1 : 0.85 });
   return shared;
 }
 
@@ -198,8 +204,45 @@ function texturedSlots(id: string, src: Record<string, THREE.MeshStandardMateria
     g.alphaMap = g.map;
     g.map = null;
   }
+  addSnowLayer(t.carbon as THREE.MeshStandardMaterial); // 5D: the carbon bonnet and roof hold snow too
   texturedCache.set(id, t);
   return t;
+}
+
+/**
+ * 5D: meshopt packs store positions quantized (small integers plus a scale on the node). Bake each
+ * mesh under a part into float positions in the model's space (car space less dz), so shaders
+ * see metres, y up and z forward.
+ */
+function bakePart(root: THREE.Object3D, part: THREE.Object3D | undefined): void {
+  if (!part) return;
+  root.updateMatrixWorld(true);
+  const inv = root.matrixWorld.clone().invert();
+  const meshes: THREE.Mesh[] = [];
+  part.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh);
+  });
+  for (const m of meshes) {
+    const rel = inv.clone().multiply(m.matrixWorld);
+    const pos = m.geometry.getAttribute('position');
+    if (!pos || (rel.equals(new THREE.Matrix4()) && pos.array instanceof Float32Array && !(pos as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute)) continue;
+    const g = m.geometry.clone();
+    for (const name of ['position', 'normal']) {
+      const a = g.getAttribute(name);
+      if (!a) continue;
+      const f = new Float32Array(a.count * a.itemSize);
+      for (let i = 0; i < a.count; i++) for (let k = 0; k < a.itemSize; k++) f[i * a.itemSize + k] = a.getComponent(i, k);
+      g.setAttribute(name, new THREE.BufferAttribute(f, a.itemSize));
+    }
+    g.deleteAttribute('tangent');
+    g.applyMatrix4(rel);
+    m.geometry = g;
+    // the mesh's vertices are now in model space: cancel the transforms between it and the root
+    const relParent = inv.clone().multiply(m.parent!.matrixWorld).invert();
+    relParent.decompose(m.position, m.quaternion, m.scale);
+    m.updateMatrix();
+  }
+  part.updateMatrixWorld(true);
 }
 
 function kitBuilder(lm: LoadedModel): CarKitBuilder {

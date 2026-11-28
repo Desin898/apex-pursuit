@@ -74,3 +74,23 @@ export function zoneWeight(km: number, id: ZoneId, blend = 0.15): number {
   }
   return w;
 }
+
+/**
+ * 5D: the sakura tunnels: stretches where big old cherry trees lean in over the road from both
+ * sides and their petals carpet the tarmac (bare and snow-laden in the Snow weather).
+ */
+export const SAKURA_TUNNELS: { from: number; to: number }[] = [
+  { from: 0.32, to: 0.82 }, // out of the village, past the houses
+  { from: 8.48, to: 8.98 }, // the valley floor
+  { from: 9.52, to: 9.98 }, // the run back into the village
+];
+
+/** 0..1 how deep into a sakura tunnel a lap distance is (fades over `fade` km at each end) */
+export function sakuraAt(km: number, fade = 0.06): number {
+  let k = 0;
+  for (const t of SAKURA_TUNNELS) {
+    const a = Math.min(km - t.from, t.to - km) / fade;
+    if (a > -1) k = Math.max(k, Math.min(1, Math.max(0, a + 1) / 2) ** 1.5);
+  }
+  return k;
+}

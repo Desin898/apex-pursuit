@@ -308,6 +308,12 @@ export const WEATHER = {
   snowGrip: 0.5,
   /** 5B: grip left on snowy grass, gravel and run-off */
   snowGripOffroad: 0.6,
+  /** 5D: grip left on black ice (on top of the snow factor) */
+  iceGrip: 0.35,
+  /** 5D: the ploughed snow bank at the edge of a mountain road: its height (m) and how hard it holds a car (m/s² base, per m/s) */
+  bankHeight: 0.42,
+  bankDragBase: 3.5,
+  bankDragSpeed: 0.22,
   /** 5B: grip lost in the deepest standing water at speed (aquaplaning, from ~95 km/h) */
   aquaplane: 0.3,
   /** 5B: the AI's planned speeds in the Snow weather (grip factor it plans for) */
