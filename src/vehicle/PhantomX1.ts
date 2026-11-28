@@ -16,6 +16,8 @@ import { COCKPIT, PAINTS, VEHICLE as V } from '../config';
 import { CarLook, FINISHES } from './Cars';
 import { clamp, curve1, smoothstep } from '../core/math';
 import { VehicleState, WHEEL_X, WHEEL_Z } from './VehiclePhysics';
+import { frameEuler, layoutCar, newFrame, newLayout, updateFrame } from './wheelPose';
+import { buildWheelParts, WheelLook } from './wheelLook';
 import { beamTexture, poolTexture } from '../world/textures';
 import { groundUniforms } from '../fx/Reflections';
 
@@ -442,61 +444,6 @@ export function buildCanopy(): { glass: THREE.BufferGeometry; paint: THREE.Buffe
 }
 
 // ── Wheels: low-profile tyre, deep-dish barrel, twisted turbine spokes ───────
-const RIM_R = 0.272;
-function buildWheelParts(width: number): { tyre: THREE.BufferGeometry; rim: THREE.BufferGeometry; disc: THREE.BufferGeometry } {
-  const R = V.wheelRadius;
-  const hw = width / 2;
-  const profile = [
-    [RIM_R - 0.006, -hw],
-    [RIM_R + 0.028, -hw],
-    [R - 0.034, -hw * 0.985],
-    [R - 0.01, -hw * 0.86],
-    [R, -hw * 0.6],
-    [R, hw * 0.6],
-    [R - 0.01, hw * 0.86],
-    [R - 0.034, hw * 0.985],
-    [RIM_R + 0.028, hw],
-    [RIM_R - 0.006, hw],
-  ].map(([r, y]) => new THREE.Vector2(r, y));
-  const tyre = new THREE.LatheGeometry(profile, 44);
-  tyre.rotateZ(-Math.PI / 2); // lathe axis Y → wheel axle X  (+X = outer face)
-
-  const parts: THREE.BufferGeometry[] = [];
-  const barrel = new THREE.CylinderGeometry(RIM_R, RIM_R * 0.985, width * 0.96, 44, 1, true);
-  barrel.rotateZ(-Math.PI / 2);
-  parts.push(barrel);
-  const lip = new THREE.TorusGeometry(RIM_R - 0.003, 0.011, 8, 44);
-  lip.rotateY(Math.PI / 2);
-  lip.translate(hw - 0.012, 0, 0);
-  parts.push(lip);
-  const SPOKES = 20;
-  const face = hw - 0.05;
-  for (let i = 0; i < SPOKES; i++) {
-    const len = RIM_R - 0.05;
-    const spoke = new THREE.BoxGeometry(0.036, len, 0.014);
-    spoke.translate(0, 0.045 + len / 2, 0);
-    spoke.rotateY(0.62); // turbine pitch: each blade is twisted about its own length
-    const m = new THREE.Matrix4().makeRotationX((i / SPOKES) * Math.PI * 2);
-    spoke.applyMatrix4(m);
-    spoke.translate(face - (i % 2) * 0.012, 0, 0);
-    parts.push(spoke);
-  }
-  const hub = new THREE.CylinderGeometry(0.062, 0.075, 0.07, 20);
-  hub.rotateZ(-Math.PI / 2);
-  hub.translate(face - 0.01, 0, 0);
-  parts.push(hub);
-  const nut = new THREE.CylinderGeometry(0.026, 0.026, 0.03, 6);
-  nut.rotateZ(-Math.PI / 2);
-  nut.translate(face + 0.035, 0, 0);
-  parts.push(nut);
-  const rim = mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)))!;
-
-  const disc = new THREE.CylinderGeometry(0.2, 0.2, 0.026, 36);
-  disc.rotateZ(-Math.PI / 2);
-  disc.translate(hw * 0.2, 0, 0);
-  return { tyre, rim, disc };
-}
-
 function flakeNormalMap(): THREE.CanvasTexture {
   // Tiny random normal perturbations: reads as metallic flake under the clear coat.
   const S = 128;
@@ -873,6 +820,16 @@ export class PhantomX1 {
   readonly paint: THREE.MeshPhysicalMaterial;
   paintIndex = 0;
   private wheels: WheelRig[] = [];
+  /** 5C: the chassis frame and the drawn layout (see wheelPose.ts) */
+  private frame = newFrame();
+  private layout = newLayout();
+  private wheelXs: number[] = [0, 0, 0, 0];
+  private wheelZs: number[] = [0, 0, 0, 0];
+  /** 5C: per-frame wheel effects (spoke blur, brake glow, dirt), set up with the wheels */
+  private wheelFx: ((s: VehicleState, dt: number) => void) | null = null;
+  private wheelLook: WheelLook | null = null;
+  /** 5C: the scene's rain and snow, for what the tyres pick up (set once a frame by the game) */
+  static weather = { wet: 0, snow: 0 };
   private tailMat: THREE.MeshStandardMaterial;
   private reverseMat: THREE.MeshStandardMaterial;
   private flames: THREE.Mesh[] = [];
@@ -966,7 +923,6 @@ export class PhantomX1 {
       this.body.add(m);
       this.skin.push(m);
     }
-    const tyreMat = M.tyre;
     // rims and calipers are per car so the garage can colour them (made above, before the kit)
     const rimMat = this.rimMat;
     const discMat = M.disc;
@@ -1026,7 +982,14 @@ export class PhantomX1 {
     }
     const frontParts = sharedWheel(0.275);
     const rearParts = sharedWheel(0.335);
-    for (let i = 0; i < 4 && !kit; i++) {
+    // 5C: per-car wheel look (brake heat, spoke blur, what's on the tyres)
+    const look = kit ? null : new WheelLook(this.rimMat);
+    if (look) {
+      this.wheelLook = look;
+      this.wheelFx = (st, dt) => look.update(st, dt, PhantomX1.weather, this.lod < 1);
+      caliperMat.side = THREE.DoubleSide;
+    }
+    for (let i = 0; i < 4 && look; i++) {
       const parts = i < 2 ? frontParts : rearParts;
       const width = i < 2 ? 0.275 : 0.335;
       const dir = WHEEL_X[i] > 0 ? 1 : -1;
@@ -1034,21 +997,31 @@ export class PhantomX1 {
       const side = new THREE.Group();
       const spin = new THREE.Group();
       side.rotation.y = dir > 0 ? 0 : Math.PI;
-      const tyre = new THREE.Mesh(parts.tyre, tyreMat);
+      const tyre = new THREE.Mesh(parts.tyre, look.tyre);
       const rim = new THREE.Mesh(parts.rim, rimMat);
-      const disc = new THREE.Mesh(parts.disc, discMat);
+      const disc = new THREE.Mesh(parts.disc, i < 2 ? look.discF : look.discR);
       tyre.castShadow = rim.castShadow = true;
       spin.add(tyre, rim, disc);
-      const cal = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.1, 0.17), caliperMat);
-      cal.position.set(width * 0.1, 0.12, -0.13);
-      cal.rotation.x = -0.8;
-      side.add(spin, cal);
-      pivot.add(side);
+      const blur = new THREE.Mesh(parts.blur, look.blur);
+      blur.visible = false;
+      blur.renderOrder = 3;
+      look.blurMeshes.push(blur);
+      side.add(spin, blur);
+      // the caliper doesn't turn with the wheel; mirrored (not rotated) on the right, so both
+      // sides have it behind the axle
+      const cal = new THREE.Mesh(parts.caliper, caliperMat);
+      cal.scale.x = dir;
+      pivot.add(side, cal);
       // tuck the wheel just inside the fender lip
       const lipX = (i < 2 ? HALF_W(V.cgToFront) : HALF_W(-V.cgToRear)) - 0.012;
       pivot.position.set(dir * (lipX - width / 2), V.wheelRadius, WHEEL_Z[i]);
       this.root.add(pivot);
       this.wheels.push({ pivot, spin, dir, x: WHEEL_X[i], z: WHEEL_Z[i], r: V.wheelRadius });
+    }
+
+    for (let i = 0; i < 4 && i < this.wheels.length; i++) {
+      this.wheelXs[i] = this.wheels[i].x;
+      this.wheelZs[i] = this.wheels[i].z;
     }
 
     // Soft contact shadow so the car stays grounded even with shadow maps off
@@ -1102,7 +1075,7 @@ export class PhantomX1 {
     this.root.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
-      if (m.material === discMat || m.material === caliperMat) {
+      if (m.material === discMat || m.material === caliperMat || (this.wheelLook && (m.material === this.wheelLook.discF || m.material === this.wheelLook.discR || m.material === this.wheelLook.blur))) {
         this.lodFar1.push(m);
         mainOnly(m);
       }
@@ -1249,28 +1222,25 @@ export class PhantomX1 {
     time: number,
     dt: number,
   ): void {
-    // Ground frame: follows position and heading only, so wheels stay planted while the body moves.
-    let ground = 0;
-    for (let i = 0; i < 4; i++) ground += s.wheelGround[i];
-    ground /= 4;
-    const base = s.airborne ? pose.y : Math.min(pose.y, ground + 0.3);
-    this.root.position.set(pose.x, base, pose.z);
-    this.root.rotation.set(0, pose.yaw, 0);
-
-    // Sprung body: heave relative to the wheel frame plus (slightly exaggerated) pitch and roll.
-    this.body.position.y = pose.y - base;
-    this.body.rotation.set(-pose.pitch * 1.25, 0, pose.roll * 1.35, 'YXZ');
+    // 5C: the whole car sits in a frame tilted with the ground under its wheels (wheelPose.ts):
+    // the wheels stay within their travel under the body instead of standing upright beside it.
+    updateFrame(s, pose, this.frame, dt);
+    const L = layoutCar(s, pose, this.frame, this.wheelXs, this.wheelZs, this.layout);
+    const e = frameEuler(this.frame);
+    this.root.position.set(pose.x, this.frame.y, pose.z);
+    this.root.rotation.set(e.x, pose.yaw, e.z, 'YXZ');
+    // Sprung body: heave relative to the ground plane plus (slightly exaggerated) spring pitch and roll.
+    this.body.position.y = L.bodyY;
+    this.body.rotation.set(-L.bodyPitch, 0, L.bodyRoll, 'YXZ');
 
     for (let i = 0; i < 4; i++) {
       const w = this.wheels[i];
-      // wheel height: on the ground when loaded, hanging at full droop in the air
-      const drop = s.wheelDrop[i];
-      const bodyAtWheel = pose.y + w.z * pose.pitch + w.x * pose.roll;
-      w.pivot.position.y = bodyAtWheel - drop - base + w.r;
+      w.pivot.position.y = L.wheelY[i] + w.r;
       if (i < 2) w.pivot.rotation.y = s.steerAngle;
       // (a bigger wheel turns a little slower for the same road speed)
       w.spin.rotation.x = w.dir * s.wheelRot[i] * (V.wheelRadius / w.r);
     }
+    this.wheelFx?.(s, dt);
     // an imported car's own steering wheel (seen in the cockpit view)
     if (this.steerWheel) this.steerWheel.obj.quaternion.setFromAxisAngle(this.steerWheel.axis, -s.steerAngle * COCKPIT.steeringRatio);
 
@@ -1290,6 +1260,8 @@ export class PhantomX1 {
     }
 
     // Contact shadow fades and shrinks with height
+    const ground = (s.wheelGround[0] + s.wheelGround[1] + s.wheelGround[2] + s.wheelGround[3]) / 4;
+    const base = this.frame.y;
     const h = Math.max(0, pose.y - ground);
     const sm = this.shadowBlob.material as THREE.MeshBasicMaterial;
     sm.opacity = 0.55 * clamp(1 - h / 5, 0, 1);

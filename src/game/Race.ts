@@ -11,7 +11,7 @@ import { AI, PAINTS, RACE_FLOW, RECOVERY, RIVALS, STEER_ASSIST, VEHICLE as V, WE
 import { clamp, wrapAngle } from '../core/math';
 import { CarLook, DriverAids, EXPERT_AIDS, Loadout, lookFromPaint, lookOf, modelOf, rivalEdition, tunedVehicle } from '../vehicle/Cars';
 import { collideCars } from '../vehicle/CarCollisions';
-import { VehicleInput, VehiclePhysics, VehicleState } from '../vehicle/VehiclePhysics';
+import { VehicleInput, VehiclePhysics, VehicleState, WHEEL_X, WHEEL_Z } from '../vehicle/VehiclePhysics';
 import { WorldData } from '../world/WorldData';
 import { LapTimer } from './LapTimer';
 import { Pursuit } from './Pursuit';
@@ -415,7 +415,9 @@ export class Race {
         const x = s.x;
         const z = s.z;
         const yaw = s.yaw;
+        c.physics.pinned = true;
         c.physics.step(c.input, dt);
+        c.physics.pinned = false;
         s.x = x;
         s.z = z;
         s.yaw = yaw;
@@ -551,8 +553,11 @@ export class Race {
     s.speed = Math.hypot(n[4], n[5]);
     s.forwardSpeed = n[4] * Math.sin(s.yaw) + n[5] * Math.cos(s.yaw);
     s.sideSlip = 0;
+    const sy = Math.sin(s.yaw);
+    const cy = Math.cos(s.yaw);
     for (let i = 0; i < 4; i++) {
-      s.wheelGround[i] = s.airborne ? 0 : s.y;
+      // 5C: the real ground under each wheel, so a friend's car is drawn sitting on the slope
+      s.wheelGround[i] = s.airborne ? 0 : this.world.heightAt(s.x + sy * WHEEL_Z[i] + cy * WHEEL_X[i], s.z + cy * WHEEL_Z[i] - sy * WHEEL_X[i]);
       s.wheelDrop[i] = s.airborne ? V.staticCompression : 0;
       s.wheelContact[i] = !s.airborne;
       s.wheelSlip[i] = i >= 2 ? n[11] : 0;

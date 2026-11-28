@@ -8,6 +8,25 @@
 export const PHYSICS_HZ = 120;
 export const PHYSICS_DT = 1 / PHYSICS_HZ;
 
+/** 5C: tyres: load sensitivity and warm-up */
+export const TYRE = {
+  loadSens: 0.08, // grip per newton falls by this share for each 100% of extra axle load
+  coldLoss: 0.035, // cold tyres hold this much less
+  ambient: 0.5, // where tyres settle with no work (0 cold .. 1 hot)
+  warmTime: 9, // seconds to most of the way warm
+};
+
+/** 5C: off the road and on steep ground */
+export const OFFROAD = {
+  sink: 0.025, // m the tyres sink into grass and gravel
+  lumps: 0.014, // m of lumps in the ground off the road
+  steepFrom: 0.62, // rise per metre (≈32°) where grip starts to fade
+  steepTo: 1.0, // ≈45°: almost nothing left
+  steepLoss: 0.82,
+  bodyClear: 0.2, // m: how high above its own plane the bodywork's lowest edge sits
+  wallSlope: 0.9, // rise per metre (≈42°) from which ground that reaches the bodywork is a wall
+};
+
 export const VEHICLE = {
   // Chassis
   mass: 1450,

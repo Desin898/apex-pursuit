@@ -338,6 +338,16 @@ export class Particles {
     const c = 0.42 + this.rnd() * 0.2;
     this.grit.emit(x + r() * 0.3, y + 0.05, z + r() * 0.3, vx * 0.45 + r() * 4, 1.5 + this.rnd() * 4.5 * amount, vz * 0.45 + r() * 4, 0.5 + this.rnd() * 0.5, 0.05 + this.rnd() * 0.05, 0, c, c * 0.95, c * 0.85, 1);
   }
+  /** 5C: clods of earth and grass torn up by a tyre off the road */
+  clods(x: number, y: number, z: number, vx: number, vz: number, amount: number): void {
+    const r = () => this.rnd() - 0.5;
+    const green = this.rnd() < 0.45;
+    const c = 0.16 + this.rnd() * 0.08;
+    const cr = green ? c * 0.85 : c * 1.25;
+    const cg = green ? c * 1.55 : c * 0.95;
+    const cb = green ? c * 0.55 : c * 0.6;
+    this.grit.emit(x + r() * 0.3, y + 0.05, z + r() * 0.3, -vx * 0.15 + r() * 3, 1.2 + this.rnd() * 3.5 * amount, -vz * 0.15 + r() * 3, 0.45 + this.rnd() * 0.45, 0.04 + this.rnd() * 0.06, 0, cr, cg, cb, 1);
+  }
   /** 4E: rotor wash pushes smoke and spray away from under the helicopter */
   wash(x: number, z: number, r: number, strength: number, dt: number): void {
     this.cloud.push(x, z, r, strength, dt);

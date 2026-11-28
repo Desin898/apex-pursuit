@@ -22,6 +22,7 @@ import { mergeByMaterial } from '../core/merge';
 import { POLICE_LOOK as PL } from '../config';
 import { beamTexture, poolTexture } from '../world/textures';
 import type { VehicleState } from './VehiclePhysics';
+import { frameEuler, layoutCar, newFrame, newLayout, updateFrame } from './wheelPose';
 
 export type PoliceStyle = 'sedan' | 'unmarked' | 'pickup';
 export type FlashPattern = 'alternate' | 'wigwag' | 'quad' | 'cruise' | 'off';
@@ -265,6 +266,12 @@ export class PoliceCar {
   private wet = 0;
   private phase: number;
   private wheelR: number;
+  /** 5C: chassis frame and wheel layout (wheelPose.ts) */
+  private frame = newFrame();
+  private layout = newLayout();
+  private wheelXs: number[] = [0, 0, 0, 0];
+  private wheelZs: number[] = [0, 0, 0, 0];
+  private lastT = -1;
   private lod = 0;
   /** current light levels (for the shared dynamic lights and the rain): red, blue, white */
   readonly glow = { r: 0, b: 0, w: 0 };
@@ -438,6 +445,8 @@ export class PoliceCar {
       pivot.add(spin);
       pivot.position.set(x, r, z);
       this.root.add(pivot);
+      this.wheelXs[this.wheels.length] = x;
+      this.wheelZs[this.wheels.length] = z;
       this.wheels.push({ pivot, spin });
     });
 
@@ -536,9 +545,23 @@ export class PoliceCar {
   /** Pose from a physics state (moving units), or just animate the lights (`s` null: parked). */
   update(s: VehicleState | null, pose: { x: number; y: number; z: number; yaw: number; pitch: number; roll: number } | null, time: number, camDist = 0): void {
     if (pose) {
-      this.root.position.set(pose.x, pose.y - 0.02, pose.z);
-      this.root.rotation.set(0, pose.yaw, 0);
-      this.body.rotation.set(-(pose.pitch ?? 0) * 1.1, 0, (pose.roll ?? 0) * 1.2, 'YXZ');
+      if (s) {
+        // 5C: the car sits in a frame tilted with the ground; wheels stay within their travel
+        const dt = this.lastT < 0 ? 0 : Math.min(0.1, Math.max(0, time - this.lastT));
+        this.lastT = time;
+        updateFrame(s, pose, this.frame, dt);
+        const L = layoutCar(s, pose, this.frame, this.wheelXs, this.wheelZs, this.layout, 1.1, 1.2);
+        const e = frameEuler(this.frame);
+        this.root.position.set(pose.x, this.frame.y - 0.02, pose.z);
+        this.root.rotation.set(e.x, pose.yaw, e.z, 'YXZ');
+        this.body.position.y = L.bodyY;
+        this.body.rotation.set(-L.bodyPitch, 0, L.bodyRoll, 'YXZ');
+        for (let i = 0; i < 4; i++) this.wheels[i].pivot.position.y = L.wheelY[i] + this.wheelR;
+      } else {
+        this.root.position.set(pose.x, pose.y - 0.02, pose.z);
+        this.root.rotation.set(0, pose.yaw, 0);
+        this.body.rotation.set(-(pose.pitch ?? 0) * 1.1, 0, (pose.roll ?? 0) * 1.2, 'YXZ');
+      }
     }
     // level of detail
     const lod = camDist > PL.lodFar ? 2 : camDist > PL.lodDetail ? 1 : 0;

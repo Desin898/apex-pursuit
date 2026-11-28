@@ -1,6 +1,6 @@
 // Headless sanity checks for the vehicle model. Run with:  npm run test:physics
 import { PHYSICS_DT as DT, VEHICLE as V } from '../src/config';
-import { VehicleInput, VehiclePhysics } from '../src/vehicle/VehiclePhysics';
+import { VehicleInput, VehiclePhysics, WHEEL_X, WHEEL_Z } from '../src/vehicle/VehiclePhysics';
 import { WorldData } from '../src/world/WorldData';
 
 const world = new WorldData();
@@ -1438,4 +1438,112 @@ import { fitLaps, lapChoices, pursuitPacing } from '../src/game/pacing';
     t += DT;
   }
   check('5B.1: Hanagiri laps and police', rules && Math.abs(trapsAt - 0.25) < 0.02 && Math.abs(joinAt - 0.5) < 0.02, `laps ${lapChoices(L).join('/')} (circuit ${lapChoices(3257).join('/')}); 2 laps: cameras live at lap ${trapsAt.toFixed(2)}, police join at lap ${joinAt.toFixed(2)} (${t.toFixed(0)} s in)`);
+}
+
+// ── 5C: a still grid, wheels that stay on the car, banks that can't be climbed ──
+import { layoutCar, newFrame, newLayout, updateFrame } from '../src/vehicle/wheelPose';
+{
+  // 1. the start: every car sits still on its springs from the first frame, on both maps
+  const moves: string[] = [];
+  let still = true;
+  for (const venue of [undefined, HANAGIRI_PASS]) {
+    const w = venue ? new WorldData(venue) : new WorldData();
+    const race = new Race(w, Race.soloSpecs(7, defaultLoadout()), 'medium', 0);
+    const ref = race.cars.map((c) => [c.s.y, c.s.pitch, c.s.roll]);
+    let worst = 0;
+    while (race.held) {
+      race.step(input(), DT);
+      race.cars.forEach((c, i) => {
+        // how far the body moves at its corners: heave plus pitch and roll at the wheels
+        const m = Math.abs(c.s.y - ref[i][0]) + V.cgToFront * Math.abs(c.s.pitch - ref[i][1]) + V.halfTrack * Math.abs(c.s.roll - ref[i][2]);
+        worst = Math.max(worst, m);
+      });
+    }
+    if (worst >= 0.01) still = false;
+    moves.push(`${venue ? 'Hanagiri' : 'Proving Grounds'} ${(worst * 100).toFixed(2)} cm`);
+  }
+  check('5C: still on the grid', still, `8 cars, the most any body moved through the countdown: ${moves.join(', ')}`);
+
+  const hw = new WorldData(HANAGIRI_PASS);
+  const S = hw.samples;
+  const slopeAt = (x: number, z: number) => {
+    const e = 0.5;
+    return Math.hypot((hw.heightAt(x + e, z) - hw.heightAt(x - e, z)) / (2 * e), (hw.heightAt(x, z + e) - hw.heightAt(x, z - e)) / (2 * e));
+  };
+  // banks beside the road, by how steep they get a few metres up
+  const banks: { i: number; sd: number; o: number; sl: number }[] = [];
+  for (let i = 0; i < S.length; i += 9) {
+    const s = S[i];
+    for (const sd of [1, -1]) {
+      // the steepest 4 m stretch within 10 m of the road's edge (how steep it is from its foot)
+      let best = { i, sd, o: 0, sl: 0 };
+      for (let o = hw.roadBand + 1; o < hw.roadBand + 10; o++) {
+        const x = s.x + s.nx * o * sd;
+        const z = s.z + s.nz * o * sd;
+        const rise = hw.heightAt(s.x + s.nx * (o + 4) * sd, s.z + s.nz * (o + 4) * sd) - hw.heightAt(x, z);
+        if (rise / 4 > best.sl) best = { i, sd, o, sl: rise / 4 };
+      }
+      if (best.sl > 0.25) banks.push(best);
+    }
+  }
+  // where along a bank's line it first gets as steep as 45° (over 1 m): distance from the road
+  // centre, or −1 if it never does within 30 m of the edge
+  const foot45 = (b: { i: number; sd: number }) => {
+    const s = S[b.i];
+    for (let o = hw.roadBand; o < hw.roadBand + 30; o += 0.5) {
+      const h0 = hw.heightAt(s.x + s.nx * o * b.sd, s.z + s.nz * o * b.sd);
+      const h1 = hw.heightAt(s.x + s.nx * (o + 1) * b.sd, s.z + s.nz * (o + 1) * b.sd);
+      if (h1 - h0 >= 1) return o;
+    }
+    return -1;
+  };
+  /** Drive straight at a bank from `from` m off the road centre at `v0`, full throttle. */
+  const tryBank = (b: { i: number; sd: number }, v0: number, secs: number, from = hw.roadBand - 2) => {
+    const s = S[b.i];
+    const c = new VehiclePhysics(hw);
+    const yaw = Math.atan2(s.nx * b.sd, s.nz * b.sd);
+    c.reset(s.x + s.nx * from * b.sd, s.z + s.nz * from * b.sd, yaw);
+    c.s.vx = Math.sin(yaw) * v0;
+    c.s.vz = Math.cos(yaw) * v0;
+    const start = c.s.y;
+    let up = 0;
+    let wheelsOk = true;
+    const f = newFrame();
+    const L = newLayout();
+    for (let t = 0; t < secs; t += DT) {
+      c.step(input({ throttle: 1 }), DT);
+      c.s.impacts.length = 0;
+      up = Math.max(up, c.s.y - start);
+      // the drawn wheels: each within its suspension travel below its corner of the body
+      updateFrame(c.s, c.s, f, DT);
+      layoutCar(c.s, c.s, f, WHEEL_X, WHEEL_Z, L);
+      for (let i = 0; i < 4; i++) {
+        const corner = L.bodyY + WHEEL_Z[i] * (c.s.pitch - f.pitch) + WHEEL_X[i] * (c.s.roll - f.roll);
+        const travel = corner - L.wheelY[i];
+        if (travel < -V.bumpTravel - 1e-6 || travel > V.staticCompression + 0.04 + 1e-6 || !Number.isFinite(travel)) wheelsOk = false;
+      }
+    }
+    return { up, wheelsOk };
+  };
+  // 3. a 45° bank (or steeper): from walking pace on full throttle the car gets nowhere up it
+  const steep = banks.filter((b) => b.sl > 1.0 && foot45(b) > 0);
+  let worstSlow = 0;
+  let worstFast = 0;
+  let wheels = true;
+  for (const b of steep.slice(0, 16)) {
+    // at walking pace from the foot of the 45° face (the car's nose 1 m short of it)
+    const a = tryBank(b, 3, 8, foot45(b) - V.cgToFront - 1.9);
+    // and straight off the road at 90 km/h
+    const f = tryBank(b, 25, 6);
+    worstSlow = Math.max(worstSlow, a.up);
+    worstFast = Math.max(worstFast, f.up);
+    wheels = wheels && a.wheelsOk && f.wheelsOk;
+  }
+  check('5C: no climbing a 45° bank', steep.length >= 8 && worstSlow < 1.2 && worstFast < 10, `${steep.length} banks with a 45° face beside the road; from walking pace at its foot on full throttle no car gets more than ${worstSlow.toFixed(1)} m up; hitting one at 90 km/h a car gets ${worstFast.toFixed(1)} m up at most, gentle foot included (5B.1: 33 m and 110 m)`);
+  check('5C: wheels stay on the car', wheels, 'every drawn wheel stays within its suspension travel under its corner of the body, through every bank hit');
+  // 4. gentle grass slopes still drive: a car on a 15–25° bank pulls up it
+  const gentle = banks.filter((b) => b.sl > 0.27 && b.sl < 0.47);
+  let climbed = 0;
+  for (const b of gentle.slice(0, 10)) if (tryBank(b, 3, 6).up > 1.5) climbed++;
+  check('5C: gentle banks still drive', gentle.length === 0 || climbed >= Math.ceil(Math.min(10, gentle.length) * 0.7), `${climbed}/${Math.min(10, gentle.length)} grass banks of 15–25° driven up from walking pace`);
 }

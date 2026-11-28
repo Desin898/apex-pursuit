@@ -2218,6 +2218,8 @@ class Game {
     const al = live ? clamp01(this.acc / PHYSICS_DT) : 1;
     let tSec = prof.now();
     const cars = this.race.cars;
+    PhantomX1.weather.wet = this.env.p.wet;
+    PhantomX1.weather.snow = this.env.p.snow;
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
       const p = this.renderPoses[i];
@@ -2852,6 +2854,16 @@ class Game {
           this.smokeAcc[gk] -= 1;
           this.particles.stones(wx, wy, wz, s.vx, s.vz, clamp01(s.speed / 35));
           if (Math.random() < 0.5 * (1 - wet)) this.particles.dust(wx, wy, wz, s.vx, s.vz, clamp01(s.speed / 30));
+        }
+      }
+      // 5C: off the road a working tyre tears up clods of earth and grass
+      if (grass && onGround && s.speed > 1.5) {
+        const ck = index * 4 + i + 192;
+        const work = Math.max(slip, i >= 2 ? s.wheelSpinSlip : 0);
+        this.smokeAcc[ck] = (this.smokeAcc[ck] || 0) + (work * 38 + smoothstep(10, 35, s.speed) * 6) * (1 - wet * 0.3) * (index > 0 ? 0.5 : 1) * dt;
+        while (this.smokeAcc[ck] >= 1) {
+          this.smokeAcc[ck] -= 1;
+          this.particles.clods(wx, wy, wz, s.vx, s.vz, clamp01(0.4 + work));
         }
       }
       // 4E: a flat tyre: sparks off the rim
