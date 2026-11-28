@@ -10,6 +10,8 @@
 // Density follows the graphics quality (setQuality).
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
+import { buildMountainTrees, MountainTrees, treeUniforms } from './hanagiri/Trees5C';
+import { mountainUniforms } from './hanagiri/MountainTerrain';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { rng } from '../core/math';
 import { mainOnly } from '../core/layers';
@@ -372,6 +374,8 @@ function bakeImpostors(renderer: THREE.WebGLRenderer, species: Species[]): { tex
 }
 
 export interface VegetationVisuals {
+  /** 5C: the mountain's trees (shake, snow and petals; per-zone counts) */
+  mountain?: MountainTrees;
   trees: THREE.InstancedMesh[];
   forest: THREE.InstancedMesh;
   grass: THREE.InstancedMesh;
@@ -380,6 +384,8 @@ export interface VegetationVisuals {
 }
 
 export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRenderer, world: WorldData): VegetationVisuals {
+  // 5C: the mountain has its own trees (real models from the packs, by zone, snow by weather)
+  if (isMountain(world)) return buildMountainVegetation(scene, renderer, world);
   const species = [pine(), broadleaf(), cypress(), sakura()];
   // 5A: on a mountain venue everything stands on the height field
   const F = world.field;
@@ -560,7 +566,56 @@ export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRendere
   mainOnly(forest);
   scene.add(forest);
 
-  // ── grass clumps near the track ────────────────────────────────────────────
+  const grass = buildGrass(scene, world);
+
+  const forestMax = forest.count;
+  return {
+    trees,
+    forest,
+    grass,
+    treeMat,
+    setQuality(q: Quality) {
+      if (cellMeshes.length) impostorUniforms.uNear.value = { low: 200, medium: 260, high: 330, ultra: 420 }[q];
+      const gk = { low: 0, medium: 0.35, high: 0.7, ultra: 1 }[q];
+      const fk = { low: 0.35, medium: 0.6, high: 1, ultra: 1 }[q];
+      grass.count = Math.floor(grass.userData.max * gk);
+      grass.visible = grass.count > 0;
+      forest.count = Math.floor(forestMax * fk);
+    },
+  };
+}
+
+/** 5C: the mountain venue: the pack trees (hanagiri/Trees5C.ts) plus the grass tufts. */
+function buildMountainVegetation(scene: THREE.Scene, renderer: THREE.WebGLRenderer, world: WorldData): VegetationVisuals {
+  treeUniforms.uTime = vegUniforms.uTime;
+  treeUniforms.uWind = vegUniforms.uWind;
+  const mt = buildMountainTrees(scene, renderer, world, forestMask);
+  const grass = buildGrass(scene, world);
+  // the grass tufts are buried in the Snow weather
+  const upd = mt.update;
+  mt.update = (cars, dt) => {
+    upd(cars, dt);
+    grass.visible = grass.count > 0 && mountainUniforms.uSnowCover.value < 0.5;
+  };
+  const treeMat = new THREE.MeshStandardMaterial();
+  return {
+    mountain: mt,
+    trees: mt.meshes,
+    forest: mt.forest,
+    grass,
+    treeMat,
+    setQuality(q: Quality) {
+      mt.setQuality(q);
+      const gk = { low: 0, medium: 0.35, high: 0.7, ultra: 1 }[q];
+      grass.count = Math.floor(grass.userData.max * gk);
+      grass.visible = grass.count > 0;
+    },
+  };
+}
+
+/** grass clumps near the track (both venues) */
+function buildGrass(scene: THREE.Scene, world: WorldData): THREE.InstancedMesh {
+  const F = world.field;
   const MAXG = 24000;
   const tuft = mergeGeometries(
     [0, 1, 2].map((i) => {
@@ -613,19 +668,9 @@ export function buildVegetation(scene: THREE.Scene, renderer: THREE.WebGLRendere
   mainOnly(grass);
   scene.add(grass);
 
-  const forestMax = forest.count;
-  return {
-    trees,
-    forest,
-    grass,
-    treeMat,
-    setQuality(q: Quality) {
-      if (cellMeshes.length) impostorUniforms.uNear.value = { low: 200, medium: 260, high: 330, ultra: 420 }[q];
-      const gk = { low: 0, medium: 0.35, high: 0.7, ultra: 1 }[q];
-      const fk = { low: 0.35, medium: 0.6, high: 1, ultra: 1 }[q];
-      grass.count = Math.floor(grass.userData.max * gk);
-      grass.visible = grass.count > 0;
-      forest.count = Math.floor(forestMax * fk);
-    },
-  };
+  return grass;
+}
+
+function isMountain(world: WorldData): boolean {
+  return !!world.field;
 }

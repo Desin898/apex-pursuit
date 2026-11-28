@@ -16,6 +16,8 @@ import type { VenueDef } from '../venues';
 import type { WorldData } from '../WorldData';
 import { HANAGIRI_CONTROL, HANAGIRI_HOUSES } from './data';
 import { hanagiriField } from './terrain';
+import { kmOf, zoneAtKm, ZoneId, zoneWeight } from './zones';
+import { placeFeatures } from './features';
 
 const control: number[][] = [];
 for (let i = 0; i < HANAGIRI_CONTROL.length; i += 3) control.push([HANAGIRI_CONTROL[i], HANAGIRI_CONTROL[i + 1], HANAGIRI_CONTROL[i + 2]]);
@@ -56,8 +58,9 @@ function facility(wd: WorldData): void {
   // ── Guard rails on the drops and round the outside of the bends; rock walls along the cuttings ──
   {
     const railOff = edge + 0.4;
-    const runs: { pts: { x: number; z: number }[]; kind: 'rail' | 'rock' }[] = [];
-    const cur: (null | { pts: { x: number; z: number }[]; kind: 'rail' | 'rock' })[] = [null, null];
+    const runs: { pts: { x: number; z: number; b?: number }[]; kind: 'rail' | 'rock' }[] = [];
+    const cur: (null | { pts: { x: number; z: number; b?: number }[]; kind: 'rail' | 'rock' })[] = [null, null];
+    wd.rockBack = new Float32Array(N * 2);
     const STEP = 2; // every 4 m
     for (let i = 0; i <= N; i += STEP) {
       const s = S[i % N];
@@ -74,15 +77,28 @@ function facility(wd: WorldData): void {
           return !!hit && lapDist(hit.index, i % N) > 40;
         })();
         let want: 'rail' | 'rock' | null = null;
-        if (!other) {
+        // 5C: on the cliff descent the mountain side rises hard 20-40 m out: a rock face is cut
+        // right up from the road's edge to meet it (the road "cut along a huge dark rock face")
+        let back = 14;
+        const cliff = zoneAtKm(kmOf(wd, i % N)).id === 'cliff';
+        if (cliff && !other) {
+          const p35 = F.at(s.x + s.nx * (edge + 34) * sd, s.z + s.nz * (edge + 34) * sd) - s.y;
+          if (p35 > 9) {
+            want = 'rock';
+            back = 34;
+          }
+        }
+        if (!other && !want) {
           if (-drop > 4.5) want = 'rock';
           else if (drop > 2.2 || outside) want = 'rail';
         }
+        if (want === 'rock') for (let q = -1; q <= STEP; q++) wd.rockBack[(((i + q) % N + N) % N) * 2 + (sd > 0 ? 1 : 0)] = back;
         const c = cur[k];
-        if (want && c && c.kind === want) c.pts.push({ x: s.x + s.nx * railOff * sd, z: s.z + s.nz * railOff * sd });
+        const pt = { x: s.x + s.nx * railOff * sd, z: s.z + s.nz * railOff * sd, b: back };
+        if (want && c && c.kind === want) c.pts.push(pt);
         else {
           if (c && c.pts.length > 3) runs.push(c);
-          cur[k] = want ? { kind: want, pts: [{ x: s.x + s.nx * railOff * sd, z: s.z + s.nz * railOff * sd }] } : null;
+          cur[k] = want ? { kind: want, pts: [pt] } : null;
         }
       }
     }
@@ -238,10 +254,8 @@ function facility(wd: WorldData): void {
   }
 
   // ── Spectators: the village straight and the summit ──
-  for (const [i0, n] of [
-    [wd.startIndex, 40],
-    [top, 30],
-  ]) {
+  // (5C: the high pass is isolated: few or no spectators up there, so only the village has them)
+  for (const [i0, n] of [[wd.startIndex, 40]]) {
     for (let k = -n; k <= n; k += 4) {
       const s = S[(i0 + k + N) % N];
       for (const sd of [1, -1]) {
@@ -257,9 +271,21 @@ function facility(wd: WorldData): void {
   // ── Street lamps: the whole lap (it is lit at night), on whichever side the land is level ──
   {
     const back = edge + 2.8;
-    const step = Math.round(70 / WORLD.sampleSpacing);
+    // 5C: lamps by zone: the village is lit, the forest and the cliff now and then, the open
+    // slopes only at the hairpins, the valley sparsely, and the high pass not at all
+    const every: Record<ZoneId, number> = { village: 50, forest: 140, switchbacks: 0, summit: 0, cliff: 150, valley: 210 };
+    const step = Math.round(10 / WORLD.sampleSpacing);
+    let last = -1e9;
     for (let i = 0; i < N; i += step) {
       const smp = S[i];
+      const km = kmOf(wd, i);
+      const zid = zoneAtKm(km).id;
+      const gap = every[zid];
+      const hairpin = zid === 'switchbacks' && Math.abs(smp.curv) > 1 / 32;
+      const along = i * WORLD.sampleSpacing;
+      if (!hairpin && (gap === 0 || along - last < gap)) continue;
+      if (hairpin && along - last < 60) continue;
+      last = along;
       const sd0 = smp.curv > 0.0015 ? 1 : smp.curv < -0.0015 ? -1 : (i / step) % 2 === 0 ? 1 : -1;
       for (const sd of [sd0, -sd0]) {
         const x = smp.x + smp.nx * back * sd;
@@ -369,29 +395,82 @@ function facility(wd: WorldData): void {
     });
   }
 
-  // ── Trees: cherry blossom low down, pines higher up, never on the road or in the village ──
+  // ── 5C: the new landmarks (and what you can hit) ──
+  placeFeatures(wd, edge, clearOfRoad);
+
+  // ── Trees (5C): by zone. Kinds on the mountain: 0 tall spruce, 1 spruce, 2 young spruce,
+  //    3 cherry, 4 bare birch. A dense corridor through the forest climb, scattered on the open
+  //    slopes, none above the tree line, cherry trees and bare birches round the village. ──
   {
-    let guard = 0;
-    while (wd.trees.length < 2600 && guard++ < 60000) {
-      const s = S[Math.floor(rand() * N)];
-      const sd = rand() < 0.5 ? -1 : 1;
-      const off = edge + 5 + Math.pow(rand(), 1.4) * 70;
+    // per zone: trees per 100 m of road on each side, how far back they reach, and the mix
+    const MIX: Record<ZoneId, { per100: number; reach: number; mix: number[] }> = {
+      village: { per100: 3.2, reach: 60, mix: [0.06, 0.12, 0.08, 0.5, 0.24] },
+      forest: { per100: 27, reach: 58, mix: [0.42, 0.3, 0.13, 0.0, 0.15] },
+      switchbacks: { per100: 3.6, reach: 70, mix: [0.28, 0.36, 0.16, 0.02, 0.18] },
+      summit: { per100: 1.0, reach: 45, mix: [0.1, 0.35, 0.55, 0, 0] },
+      cliff: { per100: 2.6, reach: 50, mix: [0.35, 0.35, 0.2, 0, 0.1] },
+      valley: { per100: 2.2, reach: 80, mix: [0.62, 0.2, 0.06, 0.02, 0.1] },
+    };
+    const pick = (mix: number[]) => {
+      let u = rand();
+      for (let k = 0; k < mix.length; k++) if ((u -= mix[k]) < 0) return k;
+      return 0;
+    };
+    const scaleOf = (k: number) => (k === 0 ? 1.55 + rand() * 1.0 : k === 1 ? 1.6 + rand() * 1.1 : k === 2 ? 0.8 + rand() * 0.8 : k === 3 ? 6 + rand() * 2.8 : 2.6 + rand() * 1.9);
+    const step = 100 / WORLD.sampleSpacing;
+    let forestKm = false;
+    const place = (i: number, sd: number, kind: number, off: number) => {
+      const s = S[i];
       const x = s.x + s.nx * off * sd + s.tx * (rand() - 0.5) * 8;
       const z = s.z + s.nz * off * sd + s.tz * (rand() - 0.5) * 8;
-      if (!clearOfRoad(x, z, edge + 4)) continue;
+      if (!clearOfRoad(x, z, edge + (kind === 3 ? 3 : 3.5))) return false;
       const y = F.at(x, z);
+      // the tree line: nothing above it (ragged), only young trees just below
+      const line = 128 + 18 * Math.sin(x * 0.013) * Math.cos(z * 0.011);
+      if (y > line) return false;
+      if (y > line - 18 && kind !== 2) kind = 2;
       const sl = Math.hypot(F.at(x + 3, z) - y, F.at(x, z + 3) - y) / 3;
-      if (sl > 0.7) continue;
-      let near = false;
-      for (const b of wd.buildings) if (Math.abs(b.x - x) < b.w / 2 + 4 && Math.abs(b.z - z) < b.d / 2 + 4) near = true;
-      for (const d of wd.decor) if ((d.kind === 'shrine' || d.kind === 'torii') && Math.hypot(d.x - x, d.z - z) < 14) near = true;
-      if (Math.hypot(x - wd.pad.x, z - wd.pad.z) < wd.pad.r + 4) near = true;
-      if (near) continue;
-      // cherry blossom on the lower slopes and lining the road, conifers above the snow line
-      const sakura = y < 70 ? (off < 30 ? 0.75 : 0.45) : y < 110 ? 0.25 : 0.04;
-      const k = rand() < sakura ? 3 : rand() < 0.75 ? 0 : 2;
-      wd.trees.push({ x, z, s: k === 3 ? 0.85 + rand() * 0.5 : 0.8 + rand() * 0.9, k });
-      if (off < 40) wd.circles.push({ x, z, r: 0.45, top: 6 });
+      // (spruces cling to steeper banks in the forest climb: it is a corridor, not a cutting)
+      if (sl > (forestKm ? 1.45 : kind === 2 ? 0.8 : 0.7)) return false;
+      for (const b of wd.buildings) if (Math.abs(b.x - x) < b.w / 2 + 4 && Math.abs(b.z - z) < b.d / 2 + 4) return false;
+      for (const d of wd.decor) if ((d.kind === 'shrine' || d.kind === 'torii' || d.kind === 'hut' || d.kind === 'pullout' || d.kind === 'plough' || d.kind === 'stonetorii' || d.kind === 'fence') && Math.hypot(d.x - x, d.z - z) < (d.kind === 'pullout' ? 22 : 15)) return false;
+      if (Math.hypot(x - wd.pad.x, z - wd.pad.z) < wd.pad.r + 4) return false;
+      // nothing growing up through the gallery or shelter roofs, a rock face, or in the stream
+      const ht = wd.nearestTrack(x, z);
+      if (ht) {
+        const rb = wd.rockBack[ht.index * 2 + (ht.offset > 0 ? 1 : 0)];
+        if (rb > 0 && Math.abs(ht.offset) < edge + rb + 4) return false;
+      }
+      if (ht && Math.abs(ht.offset) < edge + 14) for (const sp of wd.spans) if (inSpan(ht.index, sp.i0, sp.i1, 6)) return false;
+      for (const st of wd.streams) for (const p of st.pts) if (Math.abs(p.x - x) < 6 && Math.abs(p.z - z) < 6) return false;
+      wd.trees.push({ x, z, s: scaleOf(kind), k: kind });
+      if (off < 40) wd.circles.push({ x, z, r: kind === 2 ? 0.25 : kind === 4 ? 0.3 : 0.45, top: kind === 2 ? 3 : 6 });
+      return true;
+    };
+    for (let i0 = 0; i0 < N; i0 += step) {
+      const km = kmOf(wd, i0);
+      const zone = zoneAtKm(km).id;
+      const z = MIX[zone];
+      forestKm = zone === 'forest';
+      // the forest thins into the slopes at its ends
+      const fw = zoneWeight(km, 'forest', 0.12);
+      const per = z.per100 * (zone === 'forest' ? 0.35 + 0.65 * fw : 1);
+      for (const sd of [1, -1]) {
+        let n = Math.floor(per) + (rand() < per % 1 ? 1 : 0);
+        let guard = 0;
+        while (n > 0 && guard++ < n * 5 + 10) {
+          const i = (i0 + Math.floor(rand() * step)) % N;
+          // the forest crowds right up to the road; elsewhere trees stand further back
+          const off = edge + (zone === 'forest' ? 3.5 + Math.pow(rand(), 1.25) * z.reach : 6 + Math.pow(rand(), 1.4) * z.reach);
+          if (place(i, sd, pick(z.mix), off)) n--;
+        }
+      }
+    }
+    // the cherry avenue: blossom lining the road up to the village torii
+    const toriiI = (wd.startIndex + Math.round(240 / WORLD.sampleSpacing)) % N;
+    forestKm = false;
+    for (let k = -Math.round(160 / WORLD.sampleSpacing); k <= Math.round(90 / WORLD.sampleSpacing); k += 6) {
+      for (const sd of [1, -1]) if (rand() < 0.8) place((toriiI + k + N) % N, sd, 3, edge + 4 + rand() * 6);
     }
   }
 
@@ -405,4 +484,10 @@ function facility(wd: WorldData): void {
       wd.segments.push({ x1: cx + Math.cos(a0) * R, z1: cz + Math.sin(a0) * R, x2: cx + Math.cos(a1) * R, z2: cz + Math.sin(a1) * R, top1: 80, top2: 80 });
     }
   }
+}
+
+/** 5C: whether lap index i lies within [i0, i1] (wrapping), with a margin in samples */
+function inSpan(i: number, i0: number, i1: number, m: number): boolean {
+  if (i0 <= i1) return i >= i0 - m && i <= i1 + m;
+  return i >= i0 - m || i <= i1 + m;
 }

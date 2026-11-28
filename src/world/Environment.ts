@@ -125,8 +125,8 @@ export function presetFor(c: Conditions, t = 0): Preset {
   const night = c.time === 'night';
   if (!night) {
     if (c.weather === 'clear') return DUSK;
-    if (c.weather === 'snow') {
-      // 5A: an overcast winter afternoon, the light flat and white, snow falling
+    if (c.weather === 'snow' && !snowLook.mountain) {
+      // 5A: an overcast winter afternoon, the light flat and white, snow falling (the Proving Grounds)
       return {
         ...DUSK,
         sky: 'dome',
@@ -139,6 +139,25 @@ export function presetFor(c: Conditions, t = 0): Preset {
         windows: 1.8, glass: 0.6, signs: 0.7, lamps: 3.8, pools: 0.15, carLights: 0.25,
         exposure: 0.86, bloom: 0.45,
         shadowTint: [0.94, 1.0, 1.06], highTint: [0.98, 1.0, 1.04], sat: 0.84,
+        wet: 0.3, rain: 0, snow: 1,
+      };
+    }
+    if (c.weather === 'snow') {
+      // 5C: a winter dusk: a low golden sun under the cloud deck, long shadows and light through
+      // the forest; as the snowfall thickens it turns into a flat, white overcast day
+      // (Environment.setSnowIntensity blends between the two)
+      return {
+        ...DUSK,
+        sky: 'dome',
+        top: 0x6e7a8c, horizon: 0xe2c49e, glow: 0x7a5432,
+        sunColor: 0xffcf98, sunI: 1.55, sunElev: 11, sunAz: -30,
+        hemiSky: 0xc6d0de, hemiGround: 0x8a8f96, hemiI: 1.2,
+        fog: 0xc8c2ba, fogD: 0.0026, envI: 0.9, envGround: 0x6a6e73,
+        cloud: 0x9aa2ab, cloudO: 1, sunDisc: 0.55, cover: 0.78,
+        cloudLit: 0xe8cfb0, cloudDark: 0x5c636b, cloudRim: 0xffe2bd, ridge: 0xc0c7cf,
+        windows: 1.8, glass: 0.6, signs: 0.7, lamps: 3.8, pools: 0.15, carLights: 0.25,
+        exposure: 0.88, bloom: 0.55,
+        shadowTint: [0.9, 0.98, 1.12], highTint: [1.06, 1.0, 0.9], sat: 0.9,
         wet: 0.3, rain: 0, snow: 1,
       };
     }
@@ -186,6 +205,24 @@ export function presetFor(c: Conditions, t = 0): Preset {
   const cloudy = c.weather !== 'clear';
   const rain = c.weather === 'rain';
   const snow = c.weather === 'snow';
+  if (snow && snowLook.mountain) {
+    // 5C: a blue-hour winter night: the snow holds the last of the light, the village glows warm
+    return {
+      ...DUSK,
+      sky: 'dome',
+      top: 0x0b1428, horizon: 0x2a3d63, glow: 0x16243f,
+      stars: 0, moon: false,
+      sunColor: 0x9db4ff, sunI: 0.3, sunElev: 30, sunAz: 120,
+      hemiSky: 0x5d73a3, hemiGround: 0x1a2030, hemiI: 0.85,
+      fog: 0x23314d, fogD: 0.0022, envI: 0.6, envGround: 0x161c2a, envLamps: 1,
+      cloud: 0x2d3a55, cloudO: 1, sunDisc: 0, cover: 0.85,
+      cloudLit: 0x3a4a6c, cloudDark: 0x0d1220, cloudRim: 0x5d6f96, ridge: 0x2a3756,
+      windows: 3.6, glass: 1.3, signs: 1.3, lamps: 6, pools: 1, carLights: 1,
+      exposure: 1.0, bloom: 0.62,
+      shadowTint: [0.86, 0.96, 1.18], highTint: [1.05, 0.98, 0.9], sat: 0.95,
+      wet: 0.3, rain: 0, snow: 1,
+    };
+  }
   return {
     ...DUSK,
     sky: 'dome',
@@ -233,6 +270,14 @@ export function presetFor(c: Conditions, t = 0): Preset {
 }
 
 const col = (hex: number) => new THREE.Color(hex);
+const smoothK = (k: number) => k * k * (3 - 2 * k);
+
+/** 5C: the winter pano (set by the mountain's world builder once the photo has loaded) */
+/** 5C: Hanagiri's winter light (golden dusk, blue-hour night, changing snowfall); off on the Proving Grounds */
+export const snowLook = { mountain: false };
+export const winterPano: { tex: THREE.Texture | null; ready: boolean; onReady?: () => void } = { tex: null, ready: false };
+/** 5C: light shafts in the forest (the Snow weather's low sun): 0 off .. 1 full */
+export const shaftUniforms = { uAmount: { value: 0 } };
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
 export class Environment {
@@ -373,6 +418,10 @@ export class Environment {
     this.envSky.scale.setScalar(9000);
     this.rain = new Rain(scene);
     this.snow = new Snow(scene);
+    // 5C: when the winter pano arrives, the Snow weather's reflections switch to it
+    winterPano.onReady = () => {
+      if (this.p && this.p.snow > 0) this.scene.environment = this.envMap(this.p);
+    };
   }
   /** 5A: the snow weather's flakes */
   readonly snow: Snow;
@@ -406,6 +455,31 @@ export class Environment {
   roadDecals(): THREE.Object3D[] {
     return [this.pools, this.floodPools, this.streaks].filter(Boolean) as THREE.Object3D[];
   }
+
+  // ── 5C: Snow intensity: flurries come and go over a race (the same curve as the rain) ──
+  snowK = 0.55;
+  /** Light snow lets the low sun through (gold, long shadows); heavy snow closes it in (flat white). */
+  setSnowIntensity(k: number): void {
+    k = Math.max(0, Math.min(1, k));
+    if (this.conditions.weather !== 'snow' || !this.p || !snowLook.mountain) return;
+    this.snowK = k;
+    const p = this.p;
+    const v = this.v;
+    const night = this.conditions.time === 'night';
+    // flakes: from a light fall to a heavy one
+    this.snow.configure(p.snow * (0.35 + 0.65 * k), night ? 0.4 : this.conditions.time === 'dynamic' ? 1 - 0.6 * this.dynT : 1, this.quality);
+    if (!night) {
+      const dim = 1 - 0.72 * smoothK(k);
+      v.sun.intensity = p.sunI * dim;
+      v.sun.color.setHex(p.sunColor).lerp(this.whiteSun, smoothK(k) * 0.8);
+      v.hemi.intensity = p.hemiI * (1 + 0.28 * smoothK(k));
+      (this.scene.fog as THREE.FogExp2).color.setHex(p.fog).lerp(this.whiteFog, smoothK(k) * 0.85);
+    }
+    (this.scene.fog as THREE.FogExp2).density = p.fogD * (0.8 + 0.6 * k);
+    shaftUniforms.uAmount.value = night ? 0 : 1 - smoothK(k);
+  }
+  private whiteSun = new THREE.Color(0xe3e8ee);
+  private whiteFog = new THREE.Color(0xbac1c9);
 
   // ── Rain intensity (4B.2): 0..1 on top of the "rain" weather ──
   /** how hard it is raining now (0..1); only matters in the rain weather */
@@ -442,6 +516,10 @@ export class Environment {
     // 5A: snow falls and lies on the mountain; the cherry petals stop
     const p = this.p;
     this.snow.configure(p.snow, this.conditions.time === 'night' ? 0.4 : this.conditions.time === 'dynamic' ? 1 - 0.6 * this.dynT : 1, q);
+    // 5C: spindrift up on the pass (only the mountain has high ground)
+    this.snow.gust = this.world.field ? 1 : 0;
+    snowLook.mountain = !!this.world.field;
+    shaftUniforms.uAmount.value = p.snow > 0 && this.conditions.time !== 'night' ? 1 - smoothK(this.snowK) : 0;
     mountainUniforms.uSnowCover.value = p.snow;
     setRoadSnow(p.snow);
     mountainUniforms.uPetals.value = 1 - p.snow;
@@ -449,6 +527,7 @@ export class Environment {
   }
 
   private applyLook(): void {
+    snowLook.mountain = !!this.world.field;
     const c = this.conditions;
     const p = (this.p = presetFor(c, this.dynT));
     this.rainBase.rain = p.rain;
@@ -576,7 +655,7 @@ export class Environment {
 
   /** Reflection map for a preset: its sky, a dark ground and (at night) lamp glows round the horizon. */
   private envMap(p: Preset): THREE.Texture {
-    const key = `${p.sky}|${p.top}|${p.horizon}|${p.envGround}|${p.envLamps}|${p.sunElev}|${p.cover}|${p.cloudLit}|${p.stars}`;
+    const key = `${p.sky}|${p.top}|${p.horizon}|${p.envGround}|${p.envLamps}|${p.sunElev}|${p.cover}|${p.cloudLit}|${p.stars}|${p.snow > 0 && winterPano.ready && snowLook.mountain ? 'pano' : ''}`;
     const hit = this.envCache.get(key);
     if (hit) return hit;
     const envScene = new THREE.Scene();
@@ -587,6 +666,11 @@ export class Environment {
         this.envSky.material.uniforms[k].value = src instanceof THREE.Vector3 ? src.clone() : src;
       }
       envScene.add(this.envSky);
+    } else if (p.snow > 0 && winterPano.tex && winterPano.ready && snowLook.mountain) {
+      // 5C: in the Snow weather the cars and the road reflect a real winter sky and forest
+      // (the "Sky Pano – Winter Forest" photo, CC-BY-NC-SA-4.0: see Credits), tinted to the light
+      const tint = new THREE.Color(p.hemiSky).multiplyScalar(p.sunI > 0.6 ? 0.95 : 0.22);
+      envScene.add(new THREE.Mesh(new THREE.SphereGeometry(5000, 48, 24), new THREE.MeshBasicMaterial({ map: winterPano.tex, color: tint, side: THREE.BackSide, depthWrite: false })));
     } else {
       envScene.add(new THREE.Mesh(this.sky.mesh.geometry, this.sky.mat));
     }

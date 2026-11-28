@@ -147,18 +147,22 @@ export function buildMountainRoadside(scene: THREE.Scene, world: WorldData, bake
         }
       } else {
         // a cut face: from the shoulder up to the land behind, rough and slightly overhanging at the foot
-        const back = 14;
+        // (5C: a cliff face runs further back to meet the mountain; the forest cuttings 14 m)
+        const back = p.b ?? 14;
         const topY = Math.max(y + 3.2, F.at(p.x + nx * back, p.z + nz * back) + 0.4);
         const midY = y + 3.2 + (topY - y - 3.2) * 0.3;
         const r = Math.sin(dist * 0.37) * 0.35 + Math.sin(dist * 1.13) * 0.2;
         v3(rockV, p.x - nx * 0.1, y - 0.3, p.z - nz * 0.1);
         v3(rockV, p.x + nx * (0.6 + r), y + 1.6, p.z + nz * (0.6 + r));
         v3(rockV, p.x + nx * (2.2 + r * 0.5), midY, p.z + nz * (2.2 + r * 0.5));
+        // (5C: a tall cliff stands near-vertical most of the way before it lays back)
+        const high = y + (topY - y) * (back > 20 ? 0.78 : 0.5) + r * 1.5;
+        v3(rockV, p.x + nx * (back > 20 ? 6 + r * 2 : 6), Math.max(midY, high), p.z + nz * (back > 20 ? 6 + r * 2 : 6));
         v3(rockV, p.x + nx * back, topY - 0.6, p.z + nz * back);
-        rockUV.push(dist / 6, 0, dist / 6, 0.28, dist / 6, 0.6, dist / 6, 1.6);
+        rockUV.push(dist / 6, 0, dist / 6, 0.28, dist / 6, 0.6, dist / 6, (Math.max(midY, high) - y) / 6, dist / 6, 1.6 + (topY - y) / 8);
         if (i < pts.length - 1) {
-          const n0 = i * 4;
-          for (let k = 0; k < 3; k++) rockI.push(n0 + k, n0 + k + 1, n0 + k + 4, n0 + k + 1, n0 + k + 5, n0 + k + 4);
+          const n0 = i * 5;
+          for (let k = 0; k < 4; k++) rockI.push(n0 + k, n0 + k + 1, n0 + k + 5, n0 + k + 1, n0 + k + 6, n0 + k + 5);
         }
       }
     }
@@ -225,11 +229,16 @@ function v3(a: number[], x: number, y: number, z: number): void {
 }
 
 /** Far ranges round the valley: two ridgelines with snow on the peaks, fading into the haze. */
-export function buildFarRanges(scene: THREE.Scene, world: WorldData, sunDir: THREE.Vector3, horizon: THREE.Color, ridges: THREE.MeshBasicMaterial[]): void {
+export function buildFarRanges(scene: THREE.Scene, world: WorldData, sunDir: THREE.Vector3, horizon: THREE.Color, ridges: THREE.MeshBasicMaterial[], from = 0): void {
   const r = rng(808);
   const cx = world.bounds.x;
   const cz = world.bounds.z;
   for (let layer = 0; layer < 2; layer++) {
+    if (layer < from) {
+      // keep the random sequence the same for the layers that are drawn
+      for (let i = 0; i < 220 * 2; i++) r();
+      continue;
+    }
     const R = 3600 + layer * 1500;
     const K = 220;
     const heights: number[] = [];

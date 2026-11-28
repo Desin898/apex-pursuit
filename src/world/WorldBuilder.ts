@@ -16,6 +16,7 @@ import { WorldData } from './WorldData';
 import { buildMountainTerrain } from './hanagiri/MountainTerrain';
 import { buildRoadSnowMesh } from './RoadSnow';
 import { buildFarRanges, buildMountainRoadside } from './hanagiri/MountainBuild';
+import { buildPeaks } from './hanagiri/Peaks';
 
 export interface WorldVisuals {
   sunDir: THREE.Vector3;
@@ -571,7 +572,11 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, wo
   mats.trees = veg.treeMat;
 
   // ── Perimeter fence ──────────────────────────────────────────────────────
-  if (mountain) buildFarRanges(scene, world, sunDir, horizon, mats.ridges);
+  if (mountain) {
+    // 5C: real peaks 2-3 km out and the giant face over the valley; one far ridge stays as the horizon
+    buildPeaks(scene, world);
+    buildFarRanges(scene, world, sunDir, horizon, mats.ridges, 1);
+  }
   else {
     const ft = tex.fenceTexture();
     ft.repeat.set((Math.PI * 2 * WORLD.boundsRadius) / 3, 1);

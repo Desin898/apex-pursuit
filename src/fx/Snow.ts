@@ -8,7 +8,7 @@ import { mainOnly } from '../core/layers';
 
 export class Snow {
   readonly points: THREE.Points;
-  private u = { uTime: { value: 0 }, uCam: { value: new THREE.Vector3() }, uR: { value: 34 }, uH: { value: 26 }, uAmt: { value: 0 }, uLight: { value: new THREE.Color(1, 1, 1) }, uScale: { value: 600 } };
+  private u = { uTime: { value: 0 }, uCam: { value: new THREE.Vector3() }, uR: { value: 34 }, uH: { value: 26 }, uAmt: { value: 0 }, uLight: { value: new THREE.Color(1, 1, 1) }, uScale: { value: 600 }, uGust: { value: 0 } };
   private max: number;
 
   constructor(scene: THREE.Scene, max = 9000) {
@@ -32,15 +32,16 @@ export class Snow {
       depthWrite: false,
       vertexShader: /* glsl */ `
         attribute float aPh;
-        uniform float uTime, uR, uH, uScale;
+        uniform float uTime, uR, uH, uScale, uGust;
         uniform vec3 uCam;
         varying float vA;
         void main() {
           vec3 p = position;
           float t = uTime + aPh;
           float fall = 1.1 + fract(aPh * 7.13) * 0.9;
-          p.y -= t * fall;
-          p.x += t * 0.9 + sin(t * 0.8 + aPh) * 0.9;
+          // 5C: up on the pass the wind drives the snow sideways (spindrift), low over the ground
+          p.y -= t * fall * (1.0 - 0.55 * uGust);
+          p.x += t * (0.9 + 11.0 * uGust) + sin(t * 0.8 + aPh) * 0.9;
           p.z += sin(t * 0.6 + aPh * 1.7) * 0.9;
           p.xz = mod(p.xz - uCam.xz + uR, 2.0 * uR) - uR + uCam.xz;
           p.y = mod(p.y - uCam.y + 8.0, uH) - 8.0 + uCam.y;
@@ -79,12 +80,17 @@ export class Snow {
     this.points.visible = n > 0;
   }
 
+  /** 5C: how windy it is on the high ground (0 off: the Proving Grounds, which has no pass) */
+  gust = 0;
+
   setViewport(heightPx: number, fovDeg: number): void {
     this.u.uScale.value = heightPx / (2 * Math.tan((fovDeg * Math.PI) / 360));
   }
 
   update(time: number, cam: THREE.Vector3): void {
     if (!this.points.visible) return;
+    // 5C: gusts above ~110 m (the high pass)
+    this.u.uGust.value = Math.min(1, Math.max(0, (cam.y - 105) / 35)) * this.gust;
     this.u.uTime.value = time;
     this.u.uCam.value.copy(cam);
   }

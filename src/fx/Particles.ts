@@ -338,6 +338,22 @@ export class Particles {
     const c = 0.42 + this.rnd() * 0.2;
     this.grit.emit(x + r() * 0.3, y + 0.05, z + r() * 0.3, vx * 0.45 + r() * 4, 1.5 + this.rnd() * 4.5 * amount, vz * 0.45 + r() * 4, 0.5 + this.rnd() * 0.5, 0.05 + this.rnd() * 0.05, 0, c, c * 0.95, c * 0.85, 1);
   }
+  /** 5C: snow knocked off a tree: a soft cloud that drifts down */
+  treeSnow(x: number, y: number, z: number, n: number): void {
+    const r = () => this.rnd() - 0.5;
+    for (let i = 0; i < n; i++) this.mist.emit(x + r() * 4, y + r() * 3, z + r() * 4, r() * 1.5, -0.3 - this.rnd() * 0.8, r() * 1.5, 1.6 + this.rnd() * 1.6, 0.35 + this.rnd() * 0.4, 1.4 + this.rnd(), 0.95, 0.97, 1, 0.75);
+  }
+  /** 5C: blossom shaken off a cherry tree: small pink flakes fluttering down */
+  petalBurst(x: number, y: number, z: number, n: number): void {
+    const r = () => this.rnd() - 0.5;
+    for (let i = 0; i < n; i++) this.mist.emit(x + r() * 6, y + r() * 2, z + r() * 6, r() * 2.4, -0.2 - this.rnd() * 0.5, r() * 2.4, 2 + this.rnd() * 2, 0.07 + this.rnd() * 0.05, 0, 1.0, 0.68, 0.78, 0.95);
+  }
+  /** 5C: powder snow thrown up behind a car in the Snow weather */
+  powder(x: number, y: number, z: number, vx: number, vz: number, amount: number): void {
+    const r = () => this.rnd() - 0.5;
+    const carry = 0.45 + this.rnd() * 0.25;
+    this.mist.emit(x + r() * 0.4, y + 0.1, z + r() * 0.4, vx * carry + r() * 3, (1 + this.rnd() * 3) * (0.5 + 0.5 * amount), vz * carry + r() * 3, 1.2 + this.rnd() * 1.4, 0.45 + this.rnd() * 0.4, 2.8 + this.rnd() * 3.5 * amount, 0.94, 0.96, 1.0, 0.8);
+  }
   /** 5C: clods of earth and grass torn up by a tyre off the road */
   clods(x: number, y: number, z: number, vx: number, vz: number, amount: number): void {
     const r = () => this.rnd() - 0.5;

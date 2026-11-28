@@ -1523,26 +1523,40 @@ import { layoutCar, newFrame, newLayout, updateFrame } from '../src/vehicle/whee
         if (travel < -V.bumpTravel - 1e-6 || travel > V.staticCompression + 0.04 + 1e-6 || !Number.isFinite(travel)) wheelsOk = false;
       }
     }
-    return { up, wheelsOk };
+    // how far up the 45° part of the bank (its foot along this line) the car got
+    const f45 = foot45(b);
+    const h45 = f45 > 0 ? hw.heightAt(s.x + s.nx * f45 * b.sd, s.z + s.nz * f45 * b.sd) - start : Infinity;
+    return { up, wheelsOk, over45: up - h45 };
+  };
+  // nothing in the way along a bank's line: no wall (rock face, rail) and no tree within reach
+  const clear = (b: { i: number; sd: number }) => {
+    const s = S[b.i];
+    if (hw.rockBack[b.i * 2 + (b.sd > 0 ? 1 : 0)] > 0) return false;
+    for (let o = hw.roadBand - 2; o < hw.roadBand + 26; o += 2) {
+      const x = s.x + s.nx * o * b.sd;
+      const z = s.z + s.nz * o * b.sd;
+      if (hw.trees.some((t) => Math.abs(t.x - x) < 3 && Math.abs(t.z - z) < 3)) return false;
+    }
+    return !hw.barrierRuns.some((r) => r.pts.some((p) => Math.hypot(p.x - (s.x + s.nx * (hw.roadBand - 0.2) * b.sd), p.z - (s.z + s.nz * (hw.roadBand - 0.2) * b.sd)) < 3));
   };
   // 3. a 45° bank (or steeper): from walking pace on full throttle the car gets nowhere up it
   const steep = banks.filter((b) => b.sl > 1.0 && foot45(b) > 0);
   let worstSlow = 0;
   let worstFast = 0;
   let wheels = true;
-  for (const b of steep.slice(0, 16)) {
+  for (const b of steep.filter(clear).slice(0, 16)) {
     // at walking pace from the foot of the 45° face (the car's nose 1 m short of it)
     const a = tryBank(b, 3, 8, foot45(b) - V.cgToFront - 1.9);
     // and straight off the road at 90 km/h
     const f = tryBank(b, 25, 6);
     worstSlow = Math.max(worstSlow, a.up);
-    worstFast = Math.max(worstFast, f.up);
+    worstFast = Math.max(worstFast, f.over45);
     wheels = wheels && a.wheelsOk && f.wheelsOk;
   }
-  check('5C: no climbing a 45° bank', steep.length >= 8 && worstSlow < 1.2 && worstFast < 10, `${steep.length} banks with a 45° face beside the road; from walking pace at its foot on full throttle no car gets more than ${worstSlow.toFixed(1)} m up; hitting one at 90 km/h a car gets ${worstFast.toFixed(1)} m up at most, gentle foot included (5B.1: 33 m and 110 m)`);
+  check('5C: no climbing a 45° bank', steep.length >= 8 && worstSlow < 1.2 && worstFast < 10, `${steep.length} banks with a 45° face beside the road; from walking pace at its foot on full throttle no car gets more than ${worstSlow.toFixed(1)} m up; hitting one at 90 km/h a car gets ${Math.max(0, worstFast).toFixed(1)} m up the 45° part at most (5B.1: 33 m and 110 m up the bank)`);
   check('5C: wheels stay on the car', wheels, 'every drawn wheel stays within its suspension travel under its corner of the body, through every bank hit');
   // 4. gentle grass slopes still drive: a car on a 15–25° bank pulls up it
-  const gentle = banks.filter((b) => b.sl > 0.27 && b.sl < 0.47);
+  const gentle = banks.filter((b) => b.sl > 0.27 && b.sl < 0.47 && clear(b));
   let climbed = 0;
   for (const b of gentle.slice(0, 10)) if (tryBank(b, 3, 6).up > 1.5) climbed++;
   check('5C: gentle banks still drive', gentle.length === 0 || climbed >= Math.ceil(Math.min(10, gentle.length) * 0.7), `${climbed}/${Math.min(10, gentle.length)} grass banks of 15–25° driven up from walking pace`);

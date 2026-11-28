@@ -14,6 +14,8 @@ import { rng } from '../../core/math';
 import { mainOnly } from '../../core/layers';
 import type { CarDot, Dressing, DressingContext } from '../dressing';
 import { mountainUniforms } from './MountainTerrain';
+import { buildLandmarks } from './landmarks';
+import { buildWinterLight } from './winter';
 
 type Quality = 'low' | 'medium' | 'high' | 'ultra';
 
@@ -138,117 +140,17 @@ export function buildHanagiriDressing(ctx: DressingContext): Dressing {
   ctx.floods.push(lanternMat);
   const lanternGlow = new Bucket();
 
-  // ── The village houses ──────────────────────────────────────────────────────
-  const plaster = [0xe8e1d2, 0xddd4c1, 0xe9e4da, 0xcfc4ae];
-  const timber = [0x3a2a1e, 0x4a3523, 0x2e231b];
-  const tiles = [0x3b4048, 0x2f343b, 0x4a4f57, 0x5b4a3f];
-  const shrine = world.decor.find((d) => d.kind === 'shrine');
-  for (const b of world.buildings) {
-    if (b.kind !== 'hut') continue;
-    if (shrine && Math.hypot(shrine.x - b.x, shrine.z - b.z) < 4) continue;
-    const y0 = Math.min(gy(b.x - b.w / 2, b.z - b.d / 2), gy(b.x + b.w / 2, b.z - b.d / 2), gy(b.x - b.w / 2, b.z + b.d / 2), gy(b.x + b.w / 2, b.z + b.d / 2), gy(b.x, b.z));
-    const yTop = Math.max(gy(b.x - b.w / 2, b.z - b.d / 2), gy(b.x + b.w / 2, b.z + b.d / 2), gy(b.x, b.z));
-    const found = yTop - y0 + 0.5;
-    const wallH = b.h > 7.5 ? 5.6 : 3.2;
-    const wood = timber[Math.floor(rand() * timber.length)];
-    const wall = plaster[Math.floor(rand() * plaster.length)];
-    const tile = tiles[Math.floor(rand() * tiles.length)];
-    const { x, z, yaw, w, d } = b;
-    const base = y0 - 0.3;
-    solid.add(box, 0x6f6b64, at(x, base + found / 2, z, yaw, 0, 0, 0, w + 0.4, found, d + 0.4)); // stone footing
-    const fy = base + found;
-    solid.add(box, wood, at(x, fy + 0.6, z, yaw, 0, 0, 0, w + 0.06, 1.2, d + 0.06)); // dark lower boarding
-    solid.add(box, wall, at(x, fy + wallH / 2, z, yaw, 0, 0, 0, w, wallH, d)); // plaster
-    // corner posts and a beam at the eaves
-    for (const [cx, cz] of [
-      [-1, -1],
-      [1, -1],
-      [1, 1],
-      [-1, 1],
-    ])
-      solid.add(box, wood, at(x, fy + wallH / 2, z, yaw, (cx * w) / 2, 0, (cz * d) / 2, 0.28, wallH, 0.28));
-    solid.add(box, wood, at(x, fy + wallH - 0.15, z, yaw, 0, 0, 0, w + 0.1, 0.3, d + 0.1));
-    if (wallH > 4) {
-      // two storeys: a little pent roof round the house between the floors
-      solid.add(hipRoof(w + 1.6, d + 1.6, 0.9), tile, at(x, fy + 2.7, z, yaw));
-    }
-    // the main roof, overhanging deeply
-    solid.add(hipRoof(w + 2.2, d + 2.2, Math.min(w, d) * 0.42), tile, at(x, fy + wallH, z, yaw));
-    solid.add(box, tile, at(x, fy + wallH + Math.min(w, d) * 0.42, z, yaw, 0, 0, 0, w >= d ? Math.abs(w - d) + 0.6 : 0.5, 0.35, w >= d ? 0.5 : Math.abs(w - d) + 0.6)); // ridge
-    // paper windows (they glow at night)
-    for (const side of [-1, 1]) {
-      const nwin = Math.max(1, Math.floor(w / 3.2));
-      for (let k = 0; k < nwin; k++) {
-        if (rand() < 0.25) continue;
-        const lx = (k - (nwin - 1) / 2) * 3.0;
-        glow.add(box, 0xd9cfb8, at(x, fy + 1.9, z, yaw, lx, 0, (side * d) / 2, 1.6, 1.2, 0.08));
-        if (wallH > 4 && rand() < 0.7) glow.add(box, 0xd9cfb8, at(x, fy + 4.2, z, yaw, lx, 0, (side * d) / 2, 1.4, 0.9, 0.08));
-      }
-    }
-    for (const side of [-1, 1]) if (rand() < 0.6) glow.add(box, 0xd9cfb8, at(x, fy + 1.9, z, yaw, (side * w) / 2, 0, 0, 0.08, 1.2, 1.5));
-  }
-
-  // ── The shrine at the summit ────────────────────────────────────────────────
-  const verm = 0xc4381f;
-  if (shrine) {
-    const { x, z, yaw } = shrine;
-    const y0 = Math.min(gy(x - 9, z - 7), gy(x + 9, z - 7), gy(x - 9, z + 7), gy(x + 9, z + 7)) - 0.3;
-    const top = Math.max(gy(x - 9, z - 7), gy(x + 9, z + 7), gy(x, z)) + 1.0;
-    solid.add(box, 0x77736b, at(x, (y0 + top) / 2, z, yaw, 0, 0, 0, 19, top - y0, 15)); // stone platform
-    for (let k = 0; k < 3; k++) solid.add(box, 0x77736b, at(x, top - 0.35 - k * 0.35, z, yaw, 0, 0, 8 + k * 0.6, 5, 0.35, 0.8)); // steps
-    const fy = top;
-    solid.add(box, 0x4a3524, at(x, fy + 0.4, z, yaw, 0, 0, 0, 16.5, 0.8, 12.5)); // raised floor
-    for (let ix = -2; ix <= 2; ix++) for (const iz of [-1, 1]) solid.add(cyl, verm, at(x, fy + 3.2, z, yaw, ix * 3.8, 0, iz * 5.6, 0.32, 5.6, 0.32));
-    solid.add(box, 0xece4d4, at(x, fy + 3.2, z, yaw, 0, 0, -0.4, 14.6, 5.0, 10)); // walls (set back behind the posts)
-    solid.add(box, verm, at(x, fy + 5.8, z, yaw, 0, 0, 0, 16.2, 0.5, 12)); // beams
-    solid.add(hipRoof(22, 17.5, 5.5), 0x2f3d37, at(x, fy + 6.0, z, yaw)); // copper-green roof
-    solid.add(box, 0x2f3d37, at(x, fy + 11.5, z, yaw, 0, 0, 0, 5.2, 0.6, 0.8));
-    for (const e of [-2.4, 2.4]) solid.add(box, 0xb08a3a, at(x, fy + 12.2, z, yaw, e, 0, 0, 0.18, 1.4, 0.9, 0, e > 0 ? 0.5 : -0.5)); // gilded ridge ornaments
-    solid.add(box, 0x5a3d26, at(x, fy + 1.2, z, yaw, 0, 0, 6.6, 2.2, 1.0, 1.0)); // offering box
-    // a rope with paper streamers across the front
-    solid.add(cyl, 0xd8c59a, at(x, fy + 5.0, z, yaw, 0, 0, 6.3, 0.16, 7.6, 0.16, 0, Math.PI / 2));
-    for (let k = -3; k <= 3; k += 2) solid.add(box, 0xf5f2ea, at(x, fy + 4.55, z, yaw, k, 0, 6.32, 0.25, 0.6, 0.02));
-  }
-
-  // ── Torii over the road ─────────────────────────────────────────────────────
-  const edge = world.roadBand - 0.6;
-  for (const d of world.decor) {
-    if (d.kind !== 'torii') continue;
-    const sc = d.s ?? 1;
-    const half = edge + 0.8;
-    const hit = world.nearestTrack(d.x, d.z);
-    const ry = hit ? world.samples[hit.index].y : gy(d.x, d.z);
-    // posts across the road: local x
-    const H = 9.0 * sc;
-    for (const e of [-half, half]) {
-      const c = Math.cos(d.yaw);
-      const s = Math.sin(d.yaw);
-      const px = d.x + e * c;
-      const pz = d.z - e * s;
-      const g0 = Math.min(gy(px, pz), ry) - 0.3;
-      solid.add(cyl, verm, at(px, (g0 + ry + H) / 2, pz, d.yaw, 0, 0, 0, 0.55, ry + H - g0, 0.55));
-      solid.add(cyl, 0x1d1a18, at(px, g0 + (ry - g0 + 1.2) / 2, pz, d.yaw, 0, 0, 0, 0.66, ry - g0 + 1.2, 0.66)); // black foot
-    }
-    solid.add(box, verm, at(d.x, ry + H - 2.2, d.z, d.yaw, 0, 0, 0, half * 2 + 2.6, 0.7, 0.5)); // nuki
-    solid.add(box, verm, at(d.x, ry + H - 0.1, d.z, d.yaw, 0, 0, 0, half * 2 + 3.6, 0.6, 0.8)); // shimaki
-    solid.add(box, 0x1d1a18, at(d.x, ry + H + 0.45, d.z, d.yaw, 0, 0, 0, half * 2 + 4.8, 0.55, 1.15)); // kasagi
-    for (const e of [-1, 1]) solid.add(box, 0x1d1a18, at(d.x, ry + H + 0.62, d.z, d.yaw, e * (half + 2.9), 0, 0, 1.6, 0.5, 1.15, 0, -e * 0.16)); // upturned ends
-    solid.add(box, verm, at(d.x, ry + H - 1.15, d.z, d.yaw, 0, 0, 0, 0.5, 1.4, 0.45)); // centre strut
-    glow.add(box, 0x1d1a18, at(d.x, ry + H - 1.15, d.z, d.yaw, 0, 0, 0, 1.6, 1.5, 0.6)); // plaque (dark, it doesn't glow much)
-  }
-
-  // ── Stone lanterns ──────────────────────────────────────────────────────────
-  const stone = 0x8e8b83;
-  for (const d of world.decor) {
-    if (d.kind !== 'lantern') continue;
-    const y = gy(d.x, d.z);
-    solid.add(box, stone, at(d.x, y + 0.12, d.z, d.yaw, 0, 0, 0, 0.8, 0.5, 0.8));
-    solid.add(cyl, stone, at(d.x, y + 0.75, d.z, d.yaw, 0, 0, 0, 0.15, 0.9, 0.15));
-    solid.add(box, stone, at(d.x, y + 1.26, d.z, d.yaw, 0, 0, 0, 0.66, 0.14, 0.66));
-    lanternGlow.add(box, 0xe8d8b8, at(d.x, y + 1.55, d.z, d.yaw, 0, 0, 0, 0.42, 0.44, 0.42));
-    solid.add(new THREE.ConeGeometry(0.62, 0.42, 4), stone, at(d.x, y + 1.98, d.z, d.yaw + Math.PI / 4));
-    solid.add(new THREE.SphereGeometry(0.11, 8, 6), stone, at(d.x, y + 2.27, d.z, d.yaw));
-  }
+  // ── 5C: the houses, the shrine, the torii, the lanterns and the new landmarks ──
+  const marks = buildLandmarks(ctx);
+  updaters.push((dt, time, _cars, night) => marks.update(dt, time, night));
+  // 5C: the Snow weather's pano and the low sun in the forest
+  const winter = buildWinterLight(scene, world);
+  updaters.push((_dt, time) => winter.update(time));
+  void box;
+  void cyl;
+  void glow;
+  void lanternGlow;
+  void hipRoof;
 
   // ── Chevron boards and snow poles ───────────────────────────────────────────
   {

@@ -86,7 +86,8 @@ export interface Billboard {
   hue: number;
 }
 export interface BarrierRun {
-  pts: { x: number; z: number }[];
+  /** (5C: `b` = how far back a rock face runs before it meets the land; 14 m if not given) */
+  pts: { x: number; z: number; b?: number }[];
   /** 5A: concrete (default), a steel guard rail, or a rock / retaining wall on a cut slope */
   kind?: 'rail' | 'rock';
 }
@@ -142,7 +143,20 @@ export class WorldData {
   /** k (5A): species — 0 pine, 1 broadleaf, 2 cypress, 3 cherry blossom (default: mixed by position) */
   readonly trees: { x: number; z: number; s: number; k?: number }[] = [];
   /** 5A: a mountain venue's set dressing: torii gates, lanterns, the shrine, chevrons, snow poles, crowds */
-  readonly decor: { kind: 'torii' | 'lantern' | 'chevron' | 'snowpole' | 'shrine' | 'crowd'; x: number; z: number; yaw: number; s?: number }[] = [];
+  readonly decor: {
+    kind: 'torii' | 'lantern' | 'chevron' | 'snowpole' | 'shrine' | 'crowd' | 'hut' | 'passsign' | 'plough' | 'fence' | 'avpole' | 'pullout' | 'stonetorii' | 'prayer';
+    x: number;
+    z: number;
+    yaw: number;
+    s?: number;
+  }[] = [];
+  /** 5C: long features that follow the road: (lap index from, to; side) — gallery, rock shelter, bridge */
+  readonly spans: { kind: 'gallery' | 'shelter' | 'bridge'; i0: number; i1: number; side: 1 | -1 }[] = [];
+  /** 5C: the village stream (a line over the land) and the frozen waterfall on the cliff (foot, top) */
+  readonly streams: { pts: { x: number; z: number }[] }[] = [];
+  readonly falls: { x: number; z: number; yaw: number; w: number; top: number }[] = [];
+  /** 5C: per lap sample and side (index * 2 + (side > 0 ? 1 : 0)): how far back a rock face runs (0: none) */
+  rockBack: Float32Array = new Float32Array(0);
   /** 5B: point-to-point routes for sprints and touge battles (the venue adds them; none on a circuit) */
   readonly routes: RaceRoute[] = [];
   /** 5A: hiding spots the venue adds for the pursuit (on top of the car park, pits and stands) */

@@ -1,7 +1,12 @@
 # Apex Pursuit
 
 Open-world arcade street racer, built in stages from the Phantom X1 concept sketch. **This is
-Phase 5B.1:** 1-, 2- or 3-lap races on Hanagiri Pass with the police joining halfway round lap 1 (or at
+Phase 5C, Hanagiri Winter:** the 10 km mountain lap becomes a journey through six places (a village,
+a spruce forest, open avalanche slopes, an isolated high pass, a cliff road and a valley under a giant
+mountain face), with real tree models, real 3D peaks and new landmarks in every weather, and a full
+winter transformation in the Snow weather. The race now starts dead still on the grid, cars can no
+longer drive up walls, and the wheels are realistic and stay on the car. Before that, **Phase 5B.1:**
+1-, 2- or 3-lap races on Hanagiri Pass with the police joining halfway round lap 1 (or at
 the start of lap 2), tested online with friends. Before that, **Phase 5B:** sprints and one-on-one touge battles on Hanagiri Pass, snow that lies on the road and
 changes the grip, better wet handling, and a fixed ride on the mountain (no more bumps or pulling).
 Before that, **Phase 5A, Hanagiri Pass:** a second venue, a 10 km mountain lap with snow, cherry blossom, torii
@@ -124,6 +129,155 @@ last touched. Menus work with D-pad or stick, ✕ to select, ○ to go back.
   hosts block Gamepad access inside frames.
 - A native PS4/PS5 release is a different project (a Unity or Unreal port). This build is for a
   DualShock 4 on PC, Mac, Steam Deck or any browser with the Gamepad API.
+
+## New in Phase 5C: Hanagiri Winter
+
+### Fixed first: the start and the wheels
+- **No more bumpy start.** On Hanagiri the grid is on a slope. Each car was put down level at the
+  centre's height, and each wheel's "last ground height" was the centre's too, so on the first step
+  the ground under every wheel seemed to jump by several centimetres in 1/120 s and the dampers
+  kicked (up to 4 m/s). A car is now set down on the plane through its four wheels, on its springs.
+  The engines revving on the lights no longer rock the bodies either. Every car's body moves less
+  than 1 mm through the countdown, on both maps, and after a restart, a recovery and for friends online.
+- **No more driving up walls.** Before, a car could drive 33 m up a near-vertical bank from
+  walking pace and 110 m at 90 km/h: the suspension only ever pushed the car straight up, never back.
+  Now:
+  - the bump stops push along the ground's slope, taking the speed into it away;
+  - steep ground that reaches the bodywork is a wall;
+  - grip fades from about 32° and is nearly gone by 45°;
+  - the slope push uses the real spring load.
+
+  From walking pace a car gets under 1 m up a 45° face and slides back. At 90 km/h, momentum still
+  carries it up to about 9 m before it slides back (physically fair, and the test allows 10 m).
+  Gentle grass banks (15–25°) still drive.
+- **Wheels that stay on the car.** The whole car is now drawn in a frame tilted with the ground under
+  its four wheels (`src/vehicle/wheelPose.ts`). Before, the body leant over by up to 46° on a bank
+  while the wheels stood upright outside it. Now the wheels only move within their suspension travel
+  under the body. Friends' cars online sit on the slope too.
+- **Tyres.**
+  - Grip is load-sensitive: piling weight onto one axle gains it less grip than the other loses.
+  - Tyres warm up with speed and sliding, and cool in rain and snow (cold tyres hold up to 3.5% less).
+  - Off the road the tyres sink in a little and the ground is lumpy, so the body moves more, and they
+    tear up clods of earth and grass.
+  - Rain and snow grip from 5B are unchanged.
+- **Realistic wheels** on the built-in car (every rival without an imported model):
+  - a rounded tyre with a tread band, raised sidewall lettering ("APEX TRACTION", our own brand) and
+    a bulge where it meets the road;
+  - deep rims with split spokes, five lug bolts and a centre-lock nut;
+  - slotted discs on a hat, with curved calipers behind the axle;
+  - discs that glow orange after hard braking and cool down over a few seconds;
+  - spokes that blur at speed instead of strobing;
+  - tyres that look wet and glossy in the rain, muddy after the grass and crusted in the Snow weather.
+
+### Hanagiri, place by place (in every weather)
+| | Lap km | What's there |
+|---|---|---|
+| Village | 0–1.2, 9.4–10.1 | Timber-and-plaster houses on stone footings, deep tiled roofs on rafters, paper windows, chimneys with smoke, a stream under a stone bridge, a cherry avenue up to the torii |
+| Forest climb | 1.2–3.3 | The only enclosed stretch: a dense spruce corridor (~21 trees per 100 m each side) |
+| Switchbacks | 3.3–5.2 | Open slopes, scattered trees, snow fences, avalanche marker poles, an avalanche gallery over a hairpin exit |
+| High pass | 5.2–6.6 | Above the tree line, no spectators; a lay-by with a log hut, the pass sign ("Hanagiri Pass 1,163 m", our design) and a parked snow plough; the shrine reworked (dark timber, verdigris copper roof, stone steps, sacred rope) with a half-buried stone torii and prayer stones |
+| Cliff descent | 6.6–8.2 | The road cut along a dark rock face up to 60 m high, a rock shelter, a waterfall (half frozen; solid ice in snow) |
+| Valley sweepers | 8.2–9.4 | Open valley, isolated spruces, a few lamps, and a giant mountain face straight ahead |
+
+- **Trees:** real models from two packs (see Credits):
+  - spruces in two sizes, young spruces, bare birches and cherry trees, mixed at random by zone;
+  - each one varied in size, lean, colour and snow load;
+  - they sway in the wind (harder on the pass), and they shake and drop snow or blossom when a car
+    brushes past;
+  - trunks within 40 m of the road are solid;
+  - near the camera they are 3D; further out they are cards baked from the same models.
+- **Mountains:**
+  - the flat painted ring is gone: eleven real 3D peaks (600–1,050 m) stand 2–3 km out, with a
+    1,480 m giant face over the valley;
+  - each peak has rock strata, snow by slope and aspect (more on the north faces, scoured off the
+    steep ridges), aerial haze and cloud caps.
+- **Terrain:**
+  - steep faces shed their snow and show rock;
+  - snow lies more on the north faces;
+  - grass looks frozen in the snow;
+  - fresh snow glints;
+  - the grass no longer tiles in the distance.
+- **Landmarks** all have real proportions and textures (our own canvas art): tiles, cedar boards,
+  lime plaster, dressed stone, copper, board-marked concrete. Torii have tapered posts and a curved
+  lintel. Stone lanterns are proper tōrō.
+- **Street lamps by zone:**
+  - the village is lit, with some lamps in the forest and on the cliff and few in the valley;
+  - on the open slopes they stand only at the hairpins;
+  - on the pass there are none.
+- **New pursuit hiding spots:** a forest track, inside the avalanche gallery, and under the rock shelter.
+
+### The Snow weather is the winter (Rain stays exactly as it was)
+Clear, Cloudy and Rain keep Hanagiri's look: cherry blossom low down, snow only on the high ground.
+The Rain effects themselves are untouched: the streaks, the glowing drops, the lens drops, spray,
+puddles, reflections, lightning and changing showers. In the Snow weather:
+- Snow lies everywhere: snow-laden spruces, frosted birches, bare cherry trees with snow along their
+  limbs, snow on every roof, icicles on the eaves, plough banks along the road (higher in the
+  forest and at the pass), drifts half-burying the snow fences, cornices on the ridges, the stream
+  frozen, the waterfall solid ice.
+- On the road, the 5B snow map gets tongues of snow blown across the lanes (most on the exposed
+  high ground) and glossy black-ice patches where it has worn thin (these are visual only).
+  Every tyre leaves a track in the snow, and cars throw up powder.
+- **Light:**
+  - dusk is a low golden sun under the cloud deck, with light shafts through the forest;
+  - as the snowfall thickens (it comes and goes over a race, like the rain, and syncs online) it
+    turns into a flat white overcast;
+  - night is a blue hour with the village glowing warm;
+  - spindrift blows across the high pass.
+- Cars and the road reflect a real winter sky (the sky pano), and the forest climb sees a distant
+  tree line.
+- Switching weather between races switches the whole look, with nothing left over.
+- The Proving Grounds keeps its 5B Snow look and is otherwise unchanged.
+
+### Performance
+F4 on Hanagiri now tours every zone, in heavy night rain and then in snow. For each zone it gives
+the frame rate, 1% low, GPU time, triangles and draw calls; the result goes to the clipboard and
+the F3 overlay. (Before, the F4 camera flew at a fixed 6 m, which was inside the mountain.)
+Measured in headless Chrome (software GPU, so only the counts are meaningful):
+
+| Zone | Triangles (rain / snow) | Draw calls (rain / snow) |
+|---|---|---|
+| Village | 2.29M / 2.34M | 329 / 257 |
+| Forest climb | 1.06M / 1.46M | 186 / 192 |
+| Switchbacks | 2.26M / 2.65M | 292 / 297 |
+| High pass | 1.76M / 2.22M | 220 / 228 |
+| Cliff descent | 1.27M / 1.66M | 178 / 184 |
+| Valley sweepers | 1.79M / 2.33M | 635 / 672 |
+
+These counts include the shadow and reflection passes. The cherry trees are the heaviest models
+(7,000 triangles each), so they are drawn in 3D only within about 125 m of the camera, and their
+blossom casts no shadow. **The frame rate on an RTX 3050 still has to be measured there:** press F4 in
+a Hanagiri race.
+
+### Before and after (`docs/5c/`)
+![Village, clear](docs/5c/1-village-clear.jpg)
+![Forest, snow](docs/5c/2-forest-snow.jpg)
+![Switchbacks, snow](docs/5c/3-switchbacks-snow.jpg)
+![High pass, snow](docs/5c/4-high-pass-snow.jpg)
+![Cliff, snow](docs/5c/5-cliff-snow.jpg)
+![Valley, clear](docs/5c/6-valley-clear.jpg)
+![Village, rain at night](docs/5c/1-village-rain-night.jpg)
+![Wheel close-up](docs/5c/7-wheel-close-up.jpg)
+![Into a steep bank](docs/5c/8-car-against-a-bank.jpg)
+
+Every zone in Clear, Rain at night and Snow is in `docs/5c/` (made with `tools/compare5c.py`).
+
+## Credits
+Third-party art in the game, word for word from each pack's licence (also in Settings → About):
+- Hanagiri spruces and bare birches: This work is based on "Snow Pine Tree and Bush Pack LOWPOLY"
+  (https://sketchfab.com/3d-models/snow-pine-tree-and-bush-pack-lowpoly-7afc4ca23dd84adea90dc0ba8506c500)
+  by EFX (https://sketchfab.com/evan4129) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+- Hanagiri cherry trees: This work is based on "Sakura Tree 01 - Low Poly Model"
+  (https://sketchfab.com/3d-models/sakura-tree-01-low-poly-model-147ae7d0d332456a99ec6195e9b0cd4f)
+  by Jogoss (https://sketchfab.com/thejogoss9) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+- Snow-weather reflections and tree line: This work is based on "Sky Pano - Winter Forest"
+  (https://sketchfab.com/3d-models/sky-pano-winter-forest-b42c27358ab04e8885ffb2ecf69c352c)
+  by MozillaHubs (https://sketchfab.com/mozillareality) licensed under CC-BY-NC-SA-4.0
+  (http://creativecommons.org/licenses/by-nc-sa/4.0/)
+
+The sky pano is non-commercial (and share-alike for edited versions). While it is in the game,
+Apex Pursuit must stay non-commercial. Each pack is in its own folder under `assets/` with its
+`license.txt`. `tools/pack-assets.py` turns the original zips into what the game bundles: the
+textures are shrunk to WebP, and the 38 MB trunk normal map becomes 512².
 
 ## New in Phase 5B.1: race length on Hanagiri, and online play there
 
@@ -1318,7 +1472,8 @@ nitrous), 200–0 km/h in 98 m. The circuit layout is the `CONTROL` point list a
      the pursuit, Air One and online play on the mountain (done)
    - 5B. Sprints and touge battles on Hanagiri, snow on the road with its own grip, wet
      handling, the ride and bump-stop fix (done)
-   - **5B.1. 1–3 laps on Hanagiri, police from halfway round lap 1, online tested there (this build)**
-   - 5C. Hanagiri, winter edition: an isolated alpine look with distinct areas along the lap,
-     realistic snow-laden pines and bushes, natural road snow, realistic landmarks (next)
+   - 5B.1. 1–3 laps on Hanagiri, police from halfway round lap 1, online tested there (done)
+   - **5C. Hanagiri Winter: six zones along the lap, real tree models, real 3D peaks, realistic
+     landmarks, the Snow weather as the winter; a still grid start, no wall climbing, realistic
+     wheels and tyres (this build)**
    - 4D. Proving Grounds background dressing; venue system ready for Phase 5 (a mountain pass)

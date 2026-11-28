@@ -97,12 +97,19 @@ export function buildMountainTerrain(world: WorldData, grass: BakedSet, rock: Ba
         '#include <map_fragment>',
         `{
           vec3 n = normalize(vTN);
-          vec3 gr = texture2D(tGrass, vec2(vTW.x, -vTW.z) / 40.0).rgb;
+          // 5C: a second, larger scale mixed in with distance so the grass doesn't tile
+          float camD = length(cameraPosition - vTW);
+          vec3 gr = mix(texture2D(tGrass, vec2(vTW.x, -vTW.z) / 40.0).rgb, texture2D(tGrass, vec2(vTW.x, -vTW.z) / 173.0 + 0.37).rgb, smoothstep(60.0, 380.0, camD) * 0.75);
           vec3 bw = pow(abs(n), vec3(4.0));
           bw /= bw.x + bw.y + bw.z;
           vec3 rk = texture2D(tRock, vTW.zy / 22.0).rgb * bw.x + texture2D(tRock, vTW.xz / 22.0).rgb * bw.y + texture2D(tRock, vTW.xy / 22.0).rgb * bw.z;
           rk *= vec3(0.86, 0.88, 0.92);
+          // 5C: rock strata: bands of darker and paler stone along the height, tilted a little
+          float strata = sin((vTW.y + vTW.x * 0.08 - vTW.z * 0.05) * 0.55 + mvn(vTW.xz * 0.02) * 5.0);
+          rk *= 0.82 + 0.22 * smoothstep(-0.4, 0.9, strata);
           float macro = mvn(vTW.xz * 0.011) * 0.6 + mvn(vTW.xz * 0.043) * 0.4;
+          // 5C: the Snow weather freezes the grass where the snow lies thin: straw and grey
+          gr = mix(gr, vec3(dot(gr, vec3(0.33))) * vec3(1.15, 1.08, 0.9), uSnowCover * 0.55);
           float fine = mvn(vTW.xz * 0.31);
           float slope = 1.0 - n.y;
           float rockW = smoothstep(0.34, 0.55, slope + (macro - 0.5) * 0.3 + smoothstep(330.0, 520.0, vTW.y) * 0.3);
@@ -118,15 +125,28 @@ export function buildMountainTerrain(world: WorldData, grass: BakedSet, rock: Ba
           alb = mix(alb, rk, rockW);
           alb *= 0.84 + 0.32 * macro;
           // snow: above the line (ragged), on the flatter ground, and over everything in the snow weather
-          float line = smoothstep(uSnowLine - 35.0, uSnowLine + 35.0, vTW.y + (macro - 0.5) * 110.0 + (fine - 0.5) * 18.0);
-          float hold = 1.0 - smoothstep(0.42 + 0.2 * line, 0.72, slope + (fine - 0.5) * 0.12);
+          // 5C: more snow on the faces turned away from the sun (north), less on the sunny ones
+          float aspect = dot(normalize(n.xz + vec2(1e-4)), normalize(vec2(-0.35, -0.94))) * smoothstep(0.05, 0.3, slope);
+          float line = smoothstep(uSnowLine - 35.0, uSnowLine + 35.0, vTW.y + (macro - 0.5) * 110.0 + (fine - 0.5) * 18.0 + aspect * 30.0);
+          // steep faces shed their snow: rock shows through on the cuttings and the crags
+          float hold = 1.0 - smoothstep(0.24 + 0.12 * line + 0.06 * aspect, 0.46 + 0.2 * line, slope + (fine - 0.5) * 0.14);
           mSnow = clamp(max(line, uSnowCover * smoothstep(0.25, 0.6, macro * 0.6 + fine * 0.4 + uSnowCover * 0.35)) * hold, 0.0, 1.0);
           vec3 snow = vec3(0.9, 0.93, 0.98) * (0.93 + 0.07 * fine);
           alb = mix(alb, snow, mSnow);
           diffuseColor.rgb *= alb;
         }`,
       )
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.62, mSnow);')
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.62, mSnow);
+        // 5C: fresh snow glints: a few crystals turned to the light, changing as you move
+        {
+          vec2 gc = floor(vTW.xz * 9.0) + floor(cameraPosition.xz * 0.35);
+          float gl = fract(sin(dot(gc, vec2(127.1, 311.7))) * 43758.5453);
+          if (mSnow > 0.6 && gl > 0.985) roughnessFactor = 0.04;
+        }`,
+      )
       .replace('#include <fog_fragment>', HILL_FOG);
   };
   mat.customProgramCacheKey = () => 'mountain-terrain-5a';

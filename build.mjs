@@ -19,7 +19,9 @@ const args = process.argv.slice(2);
 // minified code is full of `$` sequences that String.replace would otherwise expand.)
 const inline = (js) => js.replace(/<\/script/gi, '<\\/script');
 
-const common = { entryPoints: ['src/main.ts'], bundle: true, minify: true, target: 'es2020', legalComments: 'none', write: false };
+// 5C: the bundled packs (assets/): geometry as bytes, textures as data URLs
+const loader = { '.bin': 'binary', '.webp': 'dataurl' };
+const common = { entryPoints: ['src/main.ts'], bundle: true, minify: true, target: 'es2020', legalComments: 'none', write: false, loader };
 
 async function buildBundled() {
   const r = await build({ ...common, format: 'iife' });
@@ -47,7 +49,7 @@ if (args.includes('--serve')) {
   mkdirSync('dist/dev/art', { recursive: true });
   for (const f of ART) copyFileSync(`art/${f}`, `dist/dev/art/${f}`);
   writeFileSync('dist/dev/index.html', template.replace('<!--APP-->', '<script src="app.js"></script>'));
-  const ctx = await context({ entryPoints: ['src/main.ts'], bundle: true, sourcemap: true, target: 'es2020', format: 'iife', outfile: 'dist/dev/app.js' });
+  const ctx = await context({ entryPoints: ['src/main.ts'], bundle: true, sourcemap: true, target: 'es2020', format: 'iife', outfile: 'dist/dev/app.js', loader });
   await ctx.watch();
   const { port } = await ctx.serve({ servedir: 'dist/dev', port: 5173 });
   console.log(`Apex Pursuit dev server: http://localhost:${port}`);

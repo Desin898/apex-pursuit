@@ -80,8 +80,8 @@ export function buildRoadSnowMesh(scene: THREE.Scene, world: WorldData): THREE.M
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, roadSnowUniforms, { tRoadSnow: { value: tex } });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 uv1;\nvarying vec2 vRS;\nvarying vec2 vRW;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvRS = uv;\nvRW = uv1;');
+      .replace('#include <common>', '#include <common>\nattribute vec2 uv1;\nvarying vec2 vRS;\nvarying vec2 vRW;\nvarying float vRY;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvRS = uv;\nvRW = uv1;\nvRY = position.y;');
     sh.fragmentShader = sh.fragmentShader
       .replace(
         '#include <common>',
@@ -90,6 +90,8 @@ export function buildRoadSnowMesh(scene: THREE.Scene, world: WorldData): THREE.M
         uniform float uRoadSnow;
         varying vec2 vRS;
         varying vec2 vRW;
+        varying float vRY;
+        float rsIce;
         float rsn(vec2 p) {
           vec2 i = floor(p), f = fract(p);
           f = f * f * (3.0 - 2.0 * f);
@@ -107,15 +109,25 @@ export function buildRoadSnowMesh(scene: THREE.Scene, world: WorldData): THREE.M
           float r = (vRS.x < 0.0 || vRS.x > 1.0) ? 0.94 : texture2D(tRoadSnow, vRS).r;
           float grain = rsn(vRW * 4.0) * 0.55 + rsn(vRW * 13.0) * 0.3 + rsn(vRW * 0.7) * 0.15;
           // ragged edges where the snow thins out; compacted, greyer snow where it is thin
+          // 5C: tongues of snow blown across the road, most on the exposed high ground
+          vec2 wp = vRW * 3.2;
+          vec2 wd = normalize(vec2(0.82, 0.57));
+          vec2 q = vec2(dot(wp, wd) * 0.07, dot(wp, vec2(-wd.y, wd.x)) * 0.55);
+          float tongue = smoothstep(0.6, 0.82, rsn(q) * 0.7 + rsn(q * 2.3 + 4.1) * 0.3);
+          float exposed = ${world.field ? '0.3 + 0.7 * smoothstep(95.0, 140.0, vRY)' : '0.0'};
+          r = max(r, tongue * exposed * 0.85);
           rsCover = smoothstep(0.22, 0.62, r + (grain - 0.5) * 0.35) * uRoadSnow;
           float packed = smoothstep(0.3, 0.85, r);
           diffuseColor.rgb *= mix(vec3(0.66, 0.7, 0.76), vec3(1.0), packed) * (0.92 + 0.08 * grain);
-          diffuseColor.a *= rsCover;
+          // 5C: glossy black ice where the snow has worn thin (in patches, not everywhere)
+          rsIce = ${world.field ? 'smoothstep(0.66, 0.8, rsn(wp * 0.045) * 0.75 + rsn(wp * 0.21) * 0.25) * (1.0 - smoothstep(0.25, 0.55, r)) * uRoadSnow' : '0.0'};
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.17, 0.2, 0.25), rsIce);
+          diffuseColor.a *= max(rsCover, rsIce * 0.6);
         }`,
       )
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(0.45, 0.82, rsCover);');
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(mix(0.45, 0.82, rsCover), 0.06, rsIce);');
   };
-  mat.customProgramCacheKey = () => 'road-snow-5b';
+  mat.customProgramCacheKey = () => (world.field ? 'road-snow-5c-m' : 'road-snow-5b');
   const m = new THREE.Mesh(g, mat);
   m.name = 'road-snow';
   m.receiveShadow = true;

@@ -25,6 +25,9 @@ import { artUrl } from './ui/art';
 import { Screens } from './ui/Screens';
 import { defaultLoadout, DriverAids, EDITIONS, lookFromPaint, lookOf, modelOf, tunedVehicle } from './vehicle/Cars';
 import { PhantomX1 } from './vehicle/PhantomX1';
+import { treeEvents } from './world/hanagiri/Trees5C';
+import { creditsHtml } from './ui/credits';
+import { indexAtKm, ZONES } from './world/hanagiri/zones';
 import { loadImportedCars, makeCarVisual, registerImportedCars } from './vehicle/ImportedCars';
 import { Cockpit } from './vehicle/Cockpit';
 import { VehicleInput, VehiclePhysics, VehicleState, WHEEL_X, WHEEL_Z } from './vehicle/VehiclePhysics';
@@ -964,7 +967,18 @@ class Game {
 
   /** fixed camera for screenshots: [x, y, z, lookX, lookY, lookZ, fov?] */
   shotCam: number[] | null = null;
-  private bench: { t: number; ms: number[]; cpu: number[]; gpu: number[]; prev: Conditions; prevRain: number; dist: number; start: number } | null = null;
+  private bench: {
+    t: number;
+    ms: number[];
+    cpu: number[];
+    gpu: number[];
+    prev: Conditions;
+    prevRain: number;
+    dist: number;
+    start: number;
+    /** 5C (Hanagiri): a tour of the zones, in heavy night rain and then in the Snow weather */
+    tour?: { segs: { zone: string; weather: 'rain' | 'snow'; from: number; to: number; ms: number[]; gpu: number[]; tris: number[]; calls: number[] }[]; seg: number; segT: number };
+  } | null = null;
   private lastBench = '';
   private startBenchmark(): void {
     if (this.bench) return;
@@ -978,6 +992,16 @@ class Game {
       p.heat = 5.4;
     }
     this.bench = { t: 0, ms: [], cpu: [], gpu: [], prev, prevRain, dist: 0, start: this.race.player.trackIndex };
+    // 5C: on Hanagiri the run tours the zones: each one in heavy night rain, then each in snow
+    if (this.world.field) {
+      const segs: NonNullable<NonNullable<typeof this.bench>['tour']>['segs'] = [];
+      for (const weather of ['rain', 'snow'] as const)
+        for (const z of ZONES.slice(0, 6)) segs.push({ zone: z.name, weather, from: indexAtKm(this.world, z.from + 0.15), to: indexAtKm(this.world, z.to), ms: [], gpu: [], tris: [], calls: [] });
+      this.bench.tour = { segs, seg: 0, segT: 0 };
+      this.bench.start = segs[0].from;
+      this.hud.toast('Benchmark: every zone, in night rain, then in snow (about 70 s)');
+      return;
+    }
     this.hud.toast('Benchmark: 30 s fly-round, night, heavy rain');
   }
   /** the benchmark camera: flies the racing line 6 m up, looking ahead */
@@ -991,9 +1015,10 @@ class Game {
     const i = (b.start + Math.floor(b.dist / step)) % N;
     const j = (i + Math.round(40 / step)) % N;
     const cam = this.rig.camera;
-    cam.position.set(S[i].x, 6, S[i].z);
+    // (5C: above the road's own height: on the mountain a fixed 6 m was inside the hill)
+    cam.position.set(S[i].x, S[i].y + 6, S[i].z);
     cam.up.set(0, 1, 0);
-    cam.lookAt(S[j].x, 1.5, S[j].z);
+    cam.lookAt(S[j].x, S[j].y + 1.5, S[j].z);
     cam.fov = 62;
     cam.updateProjectionMatrix();
   }
@@ -1001,6 +1026,10 @@ class Game {
     const b = this.bench;
     if (!b) return;
     b.t += dt;
+    if (b.tour) {
+      this.benchTour(dt);
+      return;
+    }
     // 4C.1: the first 1.5 s compile shaders for the forced night rain: not part of the result
     if (b.t < 1.5) return;
     b.ms.push(dt * 1000);
@@ -1024,6 +1053,68 @@ class Game {
     try {
       void navigator.clipboard?.writeText(text).then(
         () => this.hud.toast('Benchmark result copied to the clipboard'),
+        () => this.hud.toast('Benchmark done: the result is in the F3 overlay'),
+      );
+    } catch {
+      this.hud.toast('Benchmark done: the result is in the F3 overlay');
+    }
+  }
+
+  /** 5C: the zone tour: 5 s per zone (the first second settling), rain then snow. */
+  private benchTour(dt: number): void {
+    const b = this.bench!;
+    const tour = b.tour!;
+    const seg = tour.segs[tour.seg];
+    tour.segT += dt;
+    const SEG = 5;
+    // a new weather compiles shaders: give the first zone of each weather longer to settle
+    const settle = tour.seg === 0 || tour.segs[tour.seg - 1].weather !== seg.weather ? 2.5 : 1;
+    if (tour.segT > settle) {
+      seg.ms.push(dt * 1000);
+      if (this.gpu.supported && this.gpu.ms >= 0) seg.gpu.push(this.gpu.ms);
+      seg.tris.push(this.renderer.info.render.triangles);
+      seg.calls.push(this.renderer.info.render.calls);
+    }
+    if (tour.segT < SEG + settle - 1 && this.state === 'playing') return;
+    // next zone (and the next weather)
+    tour.seg++;
+    tour.segT = 0;
+    const next = tour.segs[tour.seg];
+    if (next && this.state === 'playing') {
+      b.start = next.from;
+      b.dist = 0;
+      if (next.weather !== seg.weather) {
+        this.applyConditions({ weather: 'snow', time: 'dusk' });
+        this.setRainIntensity(0.55, true);
+        this.hud.toast('Benchmark: now in the Snow weather');
+      }
+      return;
+    }
+    this.bench = null;
+    const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : -1);
+    const rows = tour.segs.map((z) => {
+      const n = z.ms.length;
+      const sorted = z.ms.slice().sort((x, y) => x - y);
+      const fps = n ? 1000 / avg(z.ms) : 0;
+      const low = n ? 1000 / sorted[Math.min(n - 1, Math.floor(n * 0.99))] : 0;
+      return { z, fps, low, gpu: avg(z.gpu), tris: avg(z.tris), calls: avg(z.calls) };
+    });
+    const all = rows.map((r) => r.fps).filter((f) => f > 0);
+    const worst = Math.min(...all);
+    const text =
+      `Apex Pursuit benchmark · ${this.world.venue.name} · zones · ${this.settings.quality.toUpperCase()} · ${this.renderer.domElement.width}×${this.renderer.domElement.height} · ${this.gpuName}\n` +
+      `slowest zone ${worst.toFixed(1)} fps · average ${(all.reduce((x, y) => x + y, 0) / Math.max(1, all.length)).toFixed(1)} fps\n` +
+      rows
+        .map((r) => `${r.z.weather === 'rain' ? 'Rain, night' : 'Snow, dusk '} · ${r.z.zone.padEnd(15)} ${r.fps.toFixed(1).padStart(5)} fps · 1% low ${r.low.toFixed(1).padStart(5)} · GPU ${r.gpu >= 0 ? r.gpu.toFixed(1) + ' ms' : 'n/a'} · ${(r.tris / 1000).toFixed(0)}k triangles · ${r.calls.toFixed(0)} draw calls`)
+        .join('\n');
+    this.lastBench = text;
+    this.applyConditions(b.prev);
+    this.setRainIntensity(b.prevRain, true);
+    this.hud.pop(`${worst.toFixed(0)} FPS`, 'slowest zone (F3 for every zone)', true, 6);
+    console.log(text);
+    try {
+      void navigator.clipboard?.writeText(text).then(
+        () => this.hud.toast('Benchmark result (every zone) copied to the clipboard'),
         () => this.hud.toast('Benchmark done: the result is in the F3 overlay'),
       );
     } catch {
@@ -1828,7 +1919,18 @@ class Game {
         { label: 'Speed units', value: () => (s.mph ? 'mph' : 'km/h'), adjust: () => ((s.mph = !s.mph), done()) },
         { label: 'HUD size', value: () => pct(s.hudScale), adjust: (d) => ((s.hudScale = step(s.hudScale, d, 0.8, 1.25, 0.05)), done()) },
         { label: 'Colour-blind-safe colours', value: () => (s.colourSafe ? 'On' : 'Off'), adjust: () => ((s.colourSafe = !s.colourSafe), done()) },
+        { label: 'About (credits)', accept: () => this.menu.push(this.aboutPage()) },
       ],
+    };
+  }
+
+  /** 5C: About: who made what (the credits each pack's licence asks for). */
+  private aboutPage(): MenuPage {
+    return {
+      title: 'About',
+      eyebrow: 'Credits',
+      items: [{ label: 'Back', accept: () => this.menu.goBack() }],
+      extra: () => creditsHtml(),
     };
   }
 
@@ -2124,6 +2226,15 @@ class Game {
       cars.length = 0;
       for (const c of this.race.cars) if (!c.gone) cars.push({ x: c.s.x, z: c.s.z, speed: c.s.speed });
       this.visuals.dressing.update(dt, this.time, cars, this.env.p.carLights, this.env.p.rain > 0 ? this.env.rainK : 0);
+      // 5C: the mountain's trees shake as cars brush past and drop their snow or blossom
+      const mt = this.visuals.veg.mountain;
+      if (mt) {
+        mt.update(cars, dt);
+        for (const e of treeEvents.splice(0)) {
+          if (e.snow) this.particles.treeSnow(e.x, e.y, e.z, e.n);
+          else this.particles.petalBurst(e.x, e.y, e.z, e.n);
+        }
+      }
     }
     const a = this.input.poll(dt);
     const s = this.physics.s;
@@ -2740,6 +2851,12 @@ class Game {
     if (!guest) r.rainK = want;
     this.rainNow += (want - this.rainNow) * Math.min(1, dt * (live ? 0.2 : 2));
     this.rainTick -= dt;
+    // 5C: in the Snow weather the same curve drives the snowfall (light flurries to heavy snow)
+    if (this.rainTick <= 0 && this.env.conditions.weather === 'snow') {
+      this.rainTick = 0.2;
+      this.env.setSnowIntensity(this.rainNow);
+      return;
+    }
     if (this.rainTick > 0 || this.env.conditions.weather !== 'rain') return;
     this.rainTick = 0.2;
     this.env.setRainIntensity(this.rainNow);
@@ -2845,7 +2962,9 @@ class Game {
       const k = index * 4 + i;
       const wet = this.env.p.wet;
       // skid marks only on hard surfaces (fainter on a wet road)
-      this.skids.add(k, wx, wy, wz, cs, -sn, i < 2 ? 0.12 : 0.15, onGround && !grass && !gravel ? smoothstep(0.25, 0.8, slip) * (1 - wet * 0.6) : 0);
+      // (5C: in the Snow weather every tyre leaves a track in the snow, sliding or not)
+      const snowTrack = this.env.p.snow * 0.32 * smoothstep(2, 8, s.speed);
+      this.skids.add(k, wx, wy, wz, cs, -sn, i < 2 ? 0.12 : 0.15, onGround && !grass && !gravel ? Math.max(smoothstep(0.25, 0.8, slip) * (1 - wet * 0.6), snowTrack) : 0);
       // 4E: gravel: stones flung up and a dust trail
       if (gravel && onGround && s.speed > 2) {
         const gk = index * 4 + i + 128;
@@ -2870,8 +2989,18 @@ class Game {
       if (s.puncture > 0 && onGround && s.speed > 8 && i >= 2 && Math.random() < dt * 22 * smoothstep(8, 50, s.speed)) {
         this.particles.sparks(wx, wy + 0.1, wz, -sn * 0.3, -cs * 0.3, s.vx, s.vz, 2);
       }
+      // 5C: in the Snow weather the tyres throw up powder: a trail, and a cloud when they slide
+      const snowy = this.env.p.snow;
+      if (snowy > 0 && onGround && s.speed > 4) {
+        const pk = index * 4 + i + 224;
+        this.smokeAcc[pk] = (this.smokeAcc[pk] || 0) + snowy * (smoothstep(4, 40, s.speed) * (i < 2 ? 5 : 14) + slip * 40) * (index > 0 ? 0.6 : 1) * this.particles.sprayScale * dt;
+        while (this.smokeAcc[pk] >= 1) {
+          this.smokeAcc[pk] -= 1;
+          this.particles.powder(wx, wy, wz, s.vx, s.vz, clamp01(slip + s.speed / 60));
+        }
+      }
       // spray in the wet: rooster tails off the rear tyres, a thinner mist off the fronts
-      if (wet > 0 && onGround && s.speed > 5) {
+      if (wet > 0 && onGround && s.speed > 5 && snowy < 0.5) {
         const sk = index * 4 + i + 64;
         const front = i < 2;
         this.smokeAcc[sk] = (this.smokeAcc[sk] || 0) + wet * smoothstep(5, 45, s.speed) * (index > 0 ? 26 : 34) * (front ? 0.35 : 1) * this.particles.sprayScale * dt;
@@ -2954,7 +3083,7 @@ class Game {
             `env ${f(A.env)}  hud ${f(A.hud)}  scene ${f(A.scene)}  other ${f(A.other)}\n` +
             `draw: main ${f(A.main)} ms/${C.main.toFixed(0)}  road ${f(A.reflect)}/${C.reflect.toFixed(0)}  probe ${f(A.probe)}/${C.probe.toFixed(0)}  mirrors ${f(A.mirrors)}/${(C.mirrors + C.hudMirror).toFixed(0)}\n` +
             `draw calls ${info.calls}   tris ${(info.triangles / 1000).toFixed(0)}k\n` +
-            (this.lastBench ? `F4 ${this.lastBench.split('\n')[1]}\n` : 'F4: 30 s benchmark\n') +
+            (this.lastBench ? `F4 ${this.lastBench.split('\n').slice(1).join('\n')}\n` : 'F4: benchmark (on Hanagiri: every zone)\n') +
             `reflections ${this.env.p.wet > 0 && QUALITY[this.settings.quality].reflect > 0 ? 'mirror ' + Math.round(QUALITY[this.settings.quality].reflect * 100) + '%' : 'off'}  AO ${QUALITY[this.settings.quality].ao ? 'on' : 'off'}  blur ${QUALITY[this.settings.quality].motionBlur ? 'on' : 'off'}\n` +
             `physics ${this.stepsLast} step/frame @ ${Math.round(1 / PHYSICS_DT)} Hz\n` +
             `rpm ${s.rpm.toFixed(0)}  slip ${((s.sideSlip * 180) / Math.PI).toFixed(0)}°  ${s.airborne ? 'AIR' : s.onGrass > 0.5 ? 'grass' : 'tarmac'}\n` +

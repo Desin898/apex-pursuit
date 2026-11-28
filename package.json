@@ -7,7 +7,7 @@
     "build": "node build.mjs",
     "build:cdn": "node build.mjs --cdn",
     "typecheck": "tsc --noEmit -p .",
-    "test:physics": "esbuild tools/physics-test.ts --bundle --platform=node --outfile=dist/physics-test.cjs --log-level=warning && node dist/physics-test.cjs",
+    "test:physics": "esbuild tools/physics-test.ts --bundle --platform=node --outfile=dist/physics-test.cjs --log-level=warning --loader:.bin=binary --loader:.webp=dataurl && node dist/physics-test.cjs",
     "serve": "node server/relay.mjs",
     "play:online": "node build.mjs && node server/relay.mjs",
     "build:play": "node build.mjs --play"
